@@ -83,7 +83,7 @@ class Agent:
             )
             msg = response.choices[0].message
             if not msg.tool_calls:
-                reply = msg.content or ""
+                reply = (msg.content or "").strip()
                 history.append({"role": "assistant", "content": reply})
                 return reply
             history.append(
