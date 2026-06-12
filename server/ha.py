@@ -33,7 +33,7 @@ class HomeAssistant:
         for line in resp.text.strip().splitlines():
             entity_id, _, area = line.partition("|")
             if area:
-                self._areas[entity_id] = area
+                self._areas[entity_id.strip()] = area
 
     async def get_entities(
         self, domain: str | None = None, area: str | None = None

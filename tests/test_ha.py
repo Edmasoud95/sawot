@@ -56,6 +56,7 @@ async def test_get_entities_all():
         "state": "on",
         "area": "Kitchen",
     }
+    assert entities[2]["area"] is None
 
 
 async def test_get_entities_filters_domain_and_area():
@@ -101,3 +102,14 @@ async def test_http_error_raises():
     ha = make_ha(handler)
     with pytest.raises(httpx.HTTPStatusError):
         await ha.get_entities()
+
+
+async def test_call_service_http_error_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/api/services/"):
+            return httpx.Response(400)
+        return default_handler(request)
+
+    ha = make_ha(handler)
+    with pytest.raises(httpx.HTTPStatusError):
+        await ha.call_service("light", "turn_on", "light.unknown")
