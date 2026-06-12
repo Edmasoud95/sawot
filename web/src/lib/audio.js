@@ -27,15 +27,27 @@ export function meterFrom(node) {
   node.connect(analyser);
 }
 
+let activePlayback = null;
+
 export async function playWav(arrayBuffer, onEnded) {
   const context = audioContext();
   await context.resume();
   const buffer = await context.decodeAudioData(arrayBuffer.slice(0));
+  if (activePlayback) {
+    activePlayback.onended = null;
+    try {
+      activePlayback.stop();
+    } catch {
+      /* already stopped */
+    }
+  }
   const source = context.createBufferSource();
+  activePlayback = source;
   source.buffer = buffer;
   meterFrom(source);
   source.connect(context.destination);
   source.onended = () => {
+    if (activePlayback === source) activePlayback = null;
     levelBus.value = 0;
     onEnded();
   };

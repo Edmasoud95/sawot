@@ -27,7 +27,9 @@ export function useVoice() {
       },
       onAudio: (buf) => {
         useVoiceStore.getState().setStatus("speaking");
-        playWav(buf, () => useVoiceStore.getState().setStatus("idle"));
+        playWav(buf, () => useVoiceStore.getState().setStatus("idle")).catch(() =>
+          useVoiceStore.getState().setStatus("idle")
+        );
       },
     });
     socketRef.current = socket;
@@ -45,8 +47,17 @@ export function useVoice() {
       if (!socketRef.current?.ready || s.status === "speaking") return;
       s.clearCaptions();
       s.setStatus("recording");
-      await recorder.start();
+      try {
+        await recorder.start();
+      } catch {
+        s.setAssistantCaption("Microphone unavailable — check permissions.");
+        s.setStatus("idle");
+      }
     },
-    stopTalking: () => recorder.stop(),
+    stopTalking: () => {
+      recorder.stop();
+      const s = useVoiceStore.getState();
+      if (s.status === "recording") s.setStatus("idle");
+    },
   };
 }
