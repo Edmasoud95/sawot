@@ -8,6 +8,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/azeret-mono": "^5.2.11",
+    "@fontsource/instrument-serif": "^5.2.8",
     "@react-three/fiber": "^9.0.0",
     "gsap": "^3.12.5",
     "react": "^19.0.0",
