@@ -113,3 +113,24 @@ async def test_call_service_http_error_raises():
     ha = make_ha(handler)
     with pytest.raises(httpx.HTTPStatusError):
         await ha.call_service("light", "turn_on", "light.unknown")
+
+
+async def test_entity_summary_excludes_noncontrollable_domains():
+    states = STATES + [
+        {"entity_id": "sensor.cpu_temp", "state": "61",
+         "attributes": {"friendly_name": "CPU Temp"}},
+        {"entity_id": "update.core", "state": "off",
+         "attributes": {"friendly_name": "Core Update"}},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/states":
+            return httpx.Response(200, json=states)
+        return default_handler(request)
+
+    ha = make_ha(handler)
+    await ha.load_areas()
+    summary = await ha.entity_summary()
+    assert "sensor.cpu_temp" not in summary
+    assert "update.core" not in summary
+    assert len(summary.splitlines()) == 3  # the light/switch fixtures remain

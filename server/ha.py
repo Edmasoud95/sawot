@@ -70,12 +70,24 @@ class HomeAssistant:
         resp.raise_for_status()
         return {"ok": True}
 
+    # Domains worth listing in the system prompt. A full registry can run to
+    # thousands of sensor/diagnostic entities and overflow the LLM context;
+    # anything outside this set stays reachable via the get_entities tool.
+    SUMMARY_DOMAINS = frozenset(
+        {
+            "light", "switch", "climate", "cover", "fan", "media_player",
+            "lock", "scene", "script", "vacuum", "humidifier",
+            "alarm_control_panel",
+        }
+    )
+
     async def entity_summary(self) -> str:
-        """Compact one-line-per-entity summary for the system prompt."""
+        """Compact one-line-per-entity summary of controllable devices."""
         entities = await self.get_entities()
         return "\n".join(
             f"{e['entity_id']} | {e['name']} | {e['area'] or '?'} | {e['state']}"
             for e in entities
+            if e["entity_id"].partition(".")[0] in self.SUMMARY_DOMAINS
         )
 
     async def aclose(self) -> None:
