@@ -51,6 +51,12 @@ export default function HistoryDrawer() {
   const panel = useRef(null);
   const scrim = useRef(null);
 
+  // Park the panel off-screen via GSAP itself — a Tailwind translate class
+  // would be read as a pixel `x` offset that xPercent then adds to.
+  useLayoutEffect(() => {
+    gsap.set(panel.current, { xPercent: 100 });
+  }, []);
+
   useLayoutEffect(() => {
     gsap.to(panel.current, {
       xPercent: drawerOpen ? 0 : 100,
@@ -86,7 +92,7 @@ export default function HistoryDrawer() {
       />
       <aside
         ref={panel}
-        className="absolute inset-y-0 right-0 z-30 w-[min(85vw,380px)] translate-x-full overflow-y-auto border-l border-white/10 bg-ink-900/90 p-7 pt-[calc(72px+env(safe-area-inset-top))] backdrop-blur-2xl"
+        className="absolute inset-y-0 right-0 z-30 w-[min(85vw,380px)] overflow-y-auto border-l border-white/10 bg-ink-900/90 p-7 pt-[calc(72px+env(safe-area-inset-top))] backdrop-blur-2xl"
       >
         <div className="mb-6 flex items-center justify-between">
           <h2 className="font-mono text-[0.65rem] font-light uppercase tracking-[0.3em] text-zinc-500">
