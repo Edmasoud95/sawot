@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+httpx
+openai
+pyyaml
+python-dotenv
+faster-whisper
+kokoro>=0.9
+soundfile
+numpy
