@@ -28,8 +28,13 @@ Find the Windows host IP from WSL2: `ip route show | grep default`.
 ## Run
 
 ```bash
-.venv/bin/python -m server.main
+./run.sh
 ```
+
+(The script sets `LD_LIBRARY_PATH` to the venv's CUDA 12 cuBLAS/cuDNN before
+starting `server.main` — faster-whisper's CTranslate2 needs them, and the
+copies torch ships are CUDA 13. They're installed with
+`pip install nvidia-cublas-cu12 "nvidia-cudnn-cu12>=9,<10"`.)
 
 Open http://localhost:8765 (or http://<machine-ip>:8765 from your phone —
 note the mic requires HTTPS off-localhost; for phone testing use
