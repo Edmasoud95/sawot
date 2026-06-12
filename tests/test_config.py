@@ -2,6 +2,7 @@ import textwrap
 
 import pytest
 
+import server.config as config_mod
 from server.config import load_config
 
 
@@ -51,7 +52,9 @@ def test_load_config_missing_token_raises(tmp_path, monkeypatch):
           voice: "af_heart"
         server: {}
     """))
-    monkeypatch.chdir(tmp_path)
+    # load_dotenv() resolves the repo's real .env regardless of cwd, so stub
+    # it out — this test verifies the guard, not dotenv discovery.
+    monkeypatch.setattr(config_mod, "load_dotenv", lambda: None)
     monkeypatch.delenv("HA_TOKEN", raising=False)
     with pytest.raises(RuntimeError, match="HA_TOKEN"):
         load_config(str(cfg_file))
