@@ -122,3 +122,39 @@ def test_build_system_prompt_includes_summary():
     prompt = build_system_prompt("light.kitchen | Kitchen Light | Kitchen | off")
     assert "light.kitchen | Kitchen Light | Kitchen | off" in prompt
     assert "voice assistant" in prompt.lower()
+
+
+async def test_malformed_tool_arguments_survive():
+    tc = FakeToolCall("call_1", "call_service", "{not valid json")
+    llm = FakeLLM([
+        make_response(tool_calls=[tc]),
+        make_response(content="Something went wrong with that."),
+    ])
+    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    history = []
+    reply = await agent.run(history, "turn on the light")
+    assert reply == "Something went wrong with that."
+    tool_msg = llm.calls[1]["messages"][-1]
+    assert tool_msg["role"] == "tool"
+    assert "invalid tool arguments" in tool_msg["content"]
+
+
+async def test_unknown_tool_returns_error_result():
+    tc = FakeToolCall("call_1", "reboot_house", "{}")
+    llm = FakeLLM([
+        make_response(tool_calls=[tc]),
+        make_response(content="I can't do that."),
+    ])
+    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    reply = await agent.run([], "reboot the house")
+    assert reply == "I can't do that."
+    assert "unknown tool" in llm.calls[1]["messages"][-1]["content"]
+
+
+async def test_bailout_reply_is_stored_in_history():
+    llm = FakeLLM([make_response(tool_calls=[FakeToolCall(f"c{i}", "get_entities", "{}")])
+                   for i in range(5)])
+    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    history = []
+    reply = await agent.run(history, "loop forever")
+    assert history[-1] == {"role": "assistant", "content": reply}

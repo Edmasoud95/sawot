@@ -94,9 +94,12 @@ class Agent:
                 }
             )
             for tc in msg.tool_calls:
-                result = await self._execute(
-                    tc.function.name, json.loads(tc.function.arguments or "{}")
-                )
+                try:
+                    args = json.loads(tc.function.arguments or "{}")
+                except json.JSONDecodeError as exc:
+                    result = {"error": f"invalid tool arguments: {exc}"}
+                else:
+                    result = await self._execute(tc.function.name, args)
                 history.append(
                     {
                         "role": "tool",
@@ -104,7 +107,9 @@ class Agent:
                         "content": json.dumps(result),
                     }
                 )
-        return "Sorry, I couldn't complete that."
+        reply = "Sorry, I couldn't complete that."
+        history.append({"role": "assistant", "content": reply})
+        return reply
 
     async def _execute(self, name: str, args: dict):
         try:
