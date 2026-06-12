@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-mono: "Azeret Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  /* Aurora-over-obsidian palette */
+  --color-ink-950: #050609;
+  --color-ink-900: #0a0d14;
+  --color-ink-800: #11151f;
+  --color-aurora-teal: #3ee6c4;
+  --color-aurora-ember: #ff9d6b;
+  --color-aurora-violet: #b69cff;
+  --color-aurora-ice: #9ad4ff;
+
+  --animate-pulse-dot: pulse-dot 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-rise-in: rise-in 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.7); }
+  }
+  @keyframes rise-in {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(110% 75% at 50% 0%, rgba(46, 84, 92, 0.20) 0%, rgba(46, 84, 92, 0) 55%),
+    radial-gradient(90% 60% at 50% 110%, rgba(36, 38, 66, 0.45) 0%, rgba(36, 38, 66, 0) 60%),
+    radial-gradient(130% 130% at 50% 30%, #0b0e16 0%, #050609 65%);
+  background-color: #050609;
+}
+
+/* Film grain: inline SVG turbulence, blended over everything */
+.grain::after {
+  content: "";
+  position: fixed;
+  inset: -50%;
+  pointer-events: none;
+  z-index: 50;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Soft vignette so the orb reads as suspended in depth */
+.vignette::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+  background: radial-gradient(85% 85% at 50% 42%, transparent 55%, rgba(3, 4, 7, 0.7) 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

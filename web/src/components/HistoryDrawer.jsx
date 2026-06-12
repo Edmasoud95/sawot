@@ -1,0 +1,82 @@
+import { useLayoutEffect, useRef } from "react";
+import gsap from "gsap";
+import { useVoiceStore } from "../store";
+
+export default function HistoryDrawer() {
+  const history = useVoiceStore((s) => s.history);
+  const drawerOpen = useVoiceStore((s) => s.drawerOpen);
+  const toggleDrawer = useVoiceStore((s) => s.toggleDrawer);
+  const panel = useRef(null);
+  const scrim = useRef(null);
+
+  useLayoutEffect(() => {
+    gsap.to(panel.current, {
+      xPercent: drawerOpen ? 0 : 100,
+      duration: 0.55,
+      ease: "power4.out",
+    });
+    gsap.to(scrim.current, {
+      autoAlpha: drawerOpen ? 1 : 0,
+      duration: 0.4,
+      ease: "power2.out",
+    });
+  }, [drawerOpen]);
+
+  return (
+    <>
+      <button
+        onClick={toggleDrawer}
+        aria-label="Toggle conversation history"
+        aria-expanded={drawerOpen}
+        className="absolute right-5 top-[calc(16px+env(safe-area-inset-top))] z-30 grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/[0.04] text-zinc-400 backdrop-blur-md transition-colors duration-300 hover:border-white/25 hover:text-zinc-200"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+          <circle cx="5" cy="12" r="1.6" />
+          <circle cx="12" cy="12" r="1.6" />
+          <circle cx="19" cy="12" r="1.6" />
+        </svg>
+      </button>
+      <div
+        ref={scrim}
+        onClick={toggleDrawer}
+        aria-hidden="true"
+        className="invisible absolute inset-0 z-20 bg-black/40 opacity-0 backdrop-blur-[2px]"
+      />
+      <aside
+        ref={panel}
+        className="absolute inset-y-0 right-0 z-30 w-[min(85vw,380px)] translate-x-full overflow-y-auto border-l border-white/10 bg-ink-900/90 p-7 pt-[calc(72px+env(safe-area-inset-top))] backdrop-blur-2xl"
+      >
+        <h2 className="mb-6 font-mono text-[0.65rem] font-light uppercase tracking-[0.3em] text-zinc-500">
+          Conversation
+        </h2>
+        {history.length === 0 && (
+          <p className="font-serif text-lg italic text-zinc-600">
+            Nothing yet — hold the button and speak.
+          </p>
+        )}
+        <ul className="flex flex-col gap-5">
+          {history.map((turn, i) => (
+            <li key={i} className="animate-rise-in">
+              <span
+                className={`mb-1 block font-mono text-[0.62rem] uppercase tracking-[0.22em] ${
+                  turn.role === "user" ? "text-aurora-teal/60" : "text-aurora-ice/60"
+                }`}
+              >
+                {turn.role === "user" ? "you" : "assistant"}
+              </span>
+              <p
+                className={`leading-snug ${
+                  turn.role === "user"
+                    ? "font-mono text-[0.82rem] font-light text-zinc-400"
+                    : "font-serif text-[1.05rem] text-zinc-100"
+                }`}
+              >
+                {turn.text}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </aside>
+    </>
+  );
+}
