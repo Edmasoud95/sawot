@@ -1,8 +1,8 @@
 home_assistant:
-  url: "http://homeassistant.local:8123"
+  url: "http://192.168.1.10:8123"
 lm_studio:
-  url: "http://localhost:1234/v1"   # if LM Studio is on the Windows host, use its LAN IP
-  model: "qwen3-8b"
+  url: "http://192.168.1.11:1234/v1"   # if LM Studio is on the Windows host, use its LAN IP
+  model: "qwen3.5-9b-instruct-pure"
 stt:
   model: "distil-small.en"
   device: "cuda"
@@ -11,3 +11,6 @@ tts:
 server:
   host: "0.0.0.0"
   port: 8765
+tls:
+  certfile: "certs/voice.crt"
+  keyfile: "certs/voice.key"

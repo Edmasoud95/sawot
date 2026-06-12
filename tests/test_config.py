@@ -58,3 +58,46 @@ def test_load_config_missing_token_raises(tmp_path, monkeypatch):
     monkeypatch.delenv("HA_TOKEN", raising=False)
     with pytest.raises(RuntimeError, match="HA_TOKEN"):
         load_config(str(cfg_file))
+
+
+def test_load_config_parses_optional_tls(tmp_path, monkeypatch):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(textwrap.dedent("""
+        home_assistant:
+          url: "http://ha.local:8123"
+        lm_studio:
+          url: "http://localhost:1234/v1"
+          model: "m"
+        stt:
+          model: "distil-small.en"
+        tts:
+          voice: "af_heart"
+        server: {}
+        tls:
+          certfile: "certs/voice.crt"
+          keyfile: "certs/voice.key"
+    """))
+    monkeypatch.setenv("HA_TOKEN", "t")
+    cfg = load_config(str(cfg_file))
+    assert cfg.ssl_certfile == "certs/voice.crt"
+    assert cfg.ssl_keyfile == "certs/voice.key"
+
+
+def test_load_config_tls_defaults_to_none(tmp_path, monkeypatch):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(textwrap.dedent("""
+        home_assistant:
+          url: "http://ha.local:8123"
+        lm_studio:
+          url: "http://localhost:1234/v1"
+          model: "m"
+        stt:
+          model: "distil-small.en"
+        tts:
+          voice: "af_heart"
+        server: {}
+    """))
+    monkeypatch.setenv("HA_TOKEN", "t")
+    cfg = load_config(str(cfg_file))
+    assert cfg.ssl_certfile is None
+    assert cfg.ssl_keyfile is None

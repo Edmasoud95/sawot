@@ -16,6 +16,8 @@ class Config:
     tts_voice: str
     host: str
     port: int
+    ssl_certfile: str | None = None
+    ssl_keyfile: str | None = None
 
 
 def load_config(path: str = "config.yaml") -> Config:
@@ -35,4 +37,6 @@ def load_config(path: str = "config.yaml") -> Config:
         tts_voice=raw["tts"]["voice"],
         host=raw["server"].get("host", "0.0.0.0"),
         port=int(raw["server"].get("port", 8765)),
+        ssl_certfile=(raw.get("tls") or {}).get("certfile"),
+        ssl_keyfile=(raw.get("tls") or {}).get("keyfile"),
     )

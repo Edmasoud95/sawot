@@ -79,7 +79,15 @@ async def _main() -> None:
     tts = KokoroTTS(voice=config.tts_voice)
 
     app = create_app(stt, agent, tts)
-    server = uvicorn.Server(uvicorn.Config(app, host=config.host, port=config.port))
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host=config.host,
+            port=config.port,
+            ssl_certfile=config.ssl_certfile,
+            ssl_keyfile=config.ssl_keyfile,
+        )
+    )
     await server.serve()
 
 
