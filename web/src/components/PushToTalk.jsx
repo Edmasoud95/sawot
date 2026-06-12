@@ -21,7 +21,7 @@ export default function PushToTalk({ onStart, onStop }) {
   const recording = status === "recording";
   const busy = status === "thinking" || status === "speaking";
   return (
-    <div className="row-start-3 flex flex-col items-center gap-4 pt-4">
+    <div className="flex flex-col items-center gap-4 pt-4">
       <button
         aria-label="Hold to talk"
         onPointerDown={(e) => {

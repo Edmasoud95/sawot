@@ -1,4 +1,4 @@
-// Ashima/Gustavson 3D simplex noise (public domain), used by the vertex shader.
+// Ashima/Gustavson 3D simplex noise (public domain), shared by both shaders.
 const NOISE = /* glsl */ `
 vec3 mod289(vec3 x){return x - floor(x * (1.0/289.0)) * 289.0;}
 vec4 mod289(vec4 x){return x - floor(x * (1.0/289.0)) * 289.0;}
@@ -48,27 +48,24 @@ float snoise(vec3 v){
 }
 `;
 
-// Two octaves of domain-warped simplex noise: the first octave carves the
-// broad swell, the second (warped by the first) adds fine shimmer that the
-// live mic/playback level pushes harder, so loud moments read as "boiling".
+// The silhouette stays a clean circle: displacement is a whisper (uAmp ≤ ~0.03)
+// plus a slow breathing pulse. All the visible motion lives in the fragment
+// shader as flowing colour, not in the geometry.
 export const ORB_VERTEX = /* glsl */ `
 uniform float uTime;
 uniform float uAmp;
-uniform float uFreq;
 uniform float uSpeed;
 uniform float uLevel;
 varying vec3 vNormal;
 varying vec3 vView;
-varying float vDisp;
+varying vec3 vPos;
 ${NOISE}
 void main() {
   float t = uTime * uSpeed;
-  float n1 = snoise(normal * uFreq + t);
-  float n2 = snoise(normal * uFreq * 2.6 - t * 1.7 + n1 * 0.65);
-  float n = n1 * 0.72 + n2 * (0.28 + uLevel * 0.35);
-  float disp = n * (uAmp + uLevel * 0.4);
-  vDisp = n;
-  vec3 pos = position + normal * disp;
+  float n = snoise(normal * 2.0 + t * 0.6);
+  float breathe = 1.0 + 0.012 * sin(uTime * 0.9);
+  vec3 pos = position * breathe + normal * n * (uAmp + uLevel * 0.04);
+  vPos = normalize(position);
   vec4 mv = modelViewMatrix * vec4(pos, 1.0);
   vNormal = normalize(normalMatrix * normal);
   vView = normalize(-mv.xyz);
@@ -76,39 +73,50 @@ void main() {
 }
 `;
 
-// Three-stop palette swept by displacement, a view-dependent fresnel rim
-// tinted toward the third color (cheap iridescence), and a level-driven
-// inner glow so the surface brightens with the audio it is visualising.
+// Internal currents: two counter-drifting noise fields blend a bright two-stop
+// palette over very wide smoothstep ranges (no hard bands, no dark patches).
+// A pale luminous core, soft top light, and a fresnel rim keep it dimensional.
 export const ORB_FRAGMENT = /* glsl */ `
+uniform float uTime;
+uniform float uFreq;
+uniform float uSpeed;
+uniform float uLevel;
 uniform vec3 uColorA;
 uniform vec3 uColorB;
 uniform vec3 uColorC;
-uniform float uLevel;
 varying vec3 vNormal;
 varying vec3 vView;
-varying float vDisp;
+varying vec3 vPos;
+${NOISE}
 void main() {
   vec3 n = normalize(vNormal);
   vec3 v = normalize(vView);
   float facing = clamp(dot(n, v), 0.0, 1.0);
-  float fresnel = pow(1.0 - facing, 2.4);
+  float fresnel = pow(1.0 - facing, 2.5);
 
-  float band = smoothstep(-0.9, 0.9, vDisp);
-  vec3 color = mix(uColorA, uColorB, band);
-  color = mix(color, uColorC, fresnel * 0.85);
-  color += uColorC * fresnel * 0.5;
-  color += color * uLevel * 0.45;
+  float t = uTime * uSpeed;
+  float f1 = snoise(vPos * uFreq + vec3(0.0, t * 0.5, t * 0.3));
+  float f2 = snoise(vPos * uFreq * 1.9 + vec3(-t * 0.4, 0.0, t * 0.25) + f1 * 0.5);
+  float flow = f1 * 0.65 + f2 * (0.35 + uLevel * 0.3);
+  float blend = smoothstep(-1.1, 1.1, flow);
 
-  // faint core shadow keeps the centre from flattening out
-  color *= 0.82 + 0.18 * pow(facing, 0.5);
+  vec3 color = mix(uColorA, uColorB, blend);
+  color = mix(color, uColorC, pow(facing, 2.2) * 0.45);
 
-  float alpha = 0.9 + fresnel * 0.1;
+  float topLight = 0.5 + 0.5 * clamp(n.y * 0.6 + 0.55, 0.0, 1.0);
+  color *= 0.78 + 0.3 * topLight;
+
+  color += uColorC * fresnel * 0.55;
+  color += color * uLevel * 0.4;
+
+  float alpha = 0.96 + fresnel * 0.04;
   gl_FragColor = vec4(color, alpha);
 }
 `;
 
-// Halo: an enlarged back-face shell with an additive fresnel falloff —
-// a fake bloom that costs one extra draw call instead of a post pass.
+// Halo: enlarged back-face shell with an additive fresnel falloff — fake bloom
+// for one extra draw call. Kept small enough (≤1.12×) to fade out well inside
+// the camera frustum, so it never clips into a visible rectangle.
 export const HALO_VERTEX = /* glsl */ `
 varying vec3 vNormal;
 varying vec3 vView;
@@ -126,7 +134,7 @@ uniform float uIntensity;
 varying vec3 vNormal;
 varying vec3 vView;
 void main() {
-  float rim = pow(1.0 - abs(dot(normalize(vNormal), normalize(vView))), 3.0);
+  float rim = pow(1.0 - abs(dot(normalize(vNormal), normalize(vView))), 4.0);
   gl_FragColor = vec4(uColor, rim * uIntensity);
 }
 `;

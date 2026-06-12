@@ -10,20 +10,20 @@ import {
   HALO_FRAGMENT,
 } from "../shaders/orb";
 
-// Each state owns a palette and a "temperament" (amplitude / busyness / speed).
-// idle: calm teal aurora. recording: warm ember — the mic is live.
-// thinking: fast violet shimmer. speaking: glacial blue, measured.
+// Each state owns a bright two-stop palette + pale accent (no dark stops —
+// dark colours read as blotches inside the sphere) and a temperament:
+// uAmp (silhouette wobble, kept tiny), uFreq (current scale), uSpeed (drift).
 const STATE_PARAMS = {
-  connecting: { uAmp: 0.03, uFreq: 1.2, uSpeed: 0.15, glow: 0.30,
-                colorA: "#1c2230", colorB: "#39415c", colorC: "#566180" },
-  idle:       { uAmp: 0.07, uFreq: 1.6, uSpeed: 0.25, glow: 0.55,
-                colorA: "#0c4f63", colorB: "#2ec4a9", colorC: "#9ff0dc" },
-  recording:  { uAmp: 0.17, uFreq: 2.4, uSpeed: 0.70, glow: 0.85,
-                colorA: "#8a3a24", colorB: "#ff9d6b", colorC: "#ffd9a8" },
-  thinking:   { uAmp: 0.23, uFreq: 4.4, uSpeed: 1.45, glow: 0.75,
-                colorA: "#3b2a7a", colorB: "#a06bff", colorC: "#f2b8ff" },
-  speaking:   { uAmp: 0.15, uFreq: 2.1, uSpeed: 0.55, glow: 0.80,
-                colorA: "#1d4a8f", colorB: "#6aa8ff", colorC: "#d3ecff" },
+  connecting: { uAmp: 0.004, uFreq: 1.2, uSpeed: 0.20, glow: 0.25,
+                colorA: "#353b54", colorB: "#4c547a", colorC: "#9aa3c9" },
+  idle:       { uAmp: 0.008, uFreq: 1.4, uSpeed: 0.30, glow: 0.45,
+                colorA: "#0ea5b7", colorB: "#4f7df9", colorC: "#d8fff6" },
+  recording:  { uAmp: 0.020, uFreq: 2.0, uSpeed: 0.85, glow: 0.70,
+                colorA: "#ff8a5c", colorB: "#ffb84d", colorC: "#ffe9d1" },
+  thinking:   { uAmp: 0.025, uFreq: 3.0, uSpeed: 1.60, glow: 0.60,
+                colorA: "#7c5bf2", colorB: "#e879d9", colorC: "#f4e3ff" },
+  speaking:   { uAmp: 0.015, uFreq: 1.8, uSpeed: 0.65, glow: 0.65,
+                colorA: "#3f8cff", colorB: "#2dd4e8", colorC: "#e3f5ff" },
 };
 
 const REDUCED_MOTION =
@@ -81,7 +81,7 @@ function OrbMesh() {
   return (
     <group>
       <mesh>
-        <icosahedronGeometry args={[1, 96]} />
+        <icosahedronGeometry args={[1, 64]} />
         <shaderMaterial
           vertexShader={ORB_VERTEX}
           fragmentShader={ORB_FRAGMENT}
@@ -89,8 +89,8 @@ function OrbMesh() {
           transparent
         />
       </mesh>
-      <mesh scale={1.45}>
-        <icosahedronGeometry args={[1, 24]} />
+      <mesh scale={1.12}>
+        <icosahedronGeometry args={[1, 16]} />
         <shaderMaterial
           vertexShader={HALO_VERTEX}
           fragmentShader={HALO_FRAGMENT}
@@ -108,7 +108,7 @@ function OrbMesh() {
 export default function Orb() {
   return (
     <Canvas
-      camera={{ position: [0, 0, 2.6], fov: 45 }}
+      camera={{ position: [0, 0, 3.4], fov: 40 }}
       gl={{ antialias: true, alpha: true }}
       dpr={[1, 2]}
     >

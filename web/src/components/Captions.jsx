@@ -33,7 +33,7 @@ export default function Captions() {
   const userCaption = useVoiceStore((s) => s.userCaption);
   const assistantCaption = useVoiceStore((s) => s.assistantCaption);
   return (
-    <div className="row-start-2 flex min-h-[6.5em] max-w-[min(85vw,580px)] flex-col gap-3 px-4 text-center">
+    <div className="flex min-h-[5.5em] max-w-[min(85vw,580px)] flex-col gap-3 px-4 pt-2 text-center">
       {/* What the machine heard: light mono, quoted, deliberately technical */}
       <Caption
         text={userCaption ? `“${userCaption}”` : ""}
