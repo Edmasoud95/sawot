@@ -1,0 +1,50 @@
+# HomeAssistantVoice
+
+Fully local voice assistant for Home Assistant: push-to-talk in the browser,
+faster-whisper STT, LM Studio LLM with tool calling, Kokoro TTS.
+
+## Prerequisites
+
+- NVIDIA GPU visible in WSL2 (`nvidia-smi`)
+- `sudo apt install espeak-ng ffmpeg`
+- Node.js 20+ and npm (frontend build)
+- LM Studio running on the Windows host with a tool-calling model loaded
+  (recommended: Qwen3-8B Q4) and the local server enabled
+- Home Assistant long-lived access token
+  (HA → Profile → Security → Long-lived access tokens)
+
+## Setup
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env        # paste your HA token
+# edit config.yaml: HA URL, LM Studio URL (Windows host IP), model name
+(cd web && npm install && npm run build)   # build the UI into web/dist
+```
+
+Find the Windows host IP from WSL2: `ip route show | grep default`.
+
+## Run
+
+```bash
+.venv/bin/python -m server.main
+```
+
+Open http://localhost:8765 (or http://<machine-ip>:8765 from your phone —
+note the mic requires HTTPS off-localhost; for phone testing use
+`chrome://flags/#unsafely-treat-insecure-origin-as-secure` or an HTTPS proxy).
+
+Hold the button, speak, release.
+
+## Tests
+
+```bash
+.venv/bin/pytest
+```
+
+End-to-end with real models: `.venv/bin/python scripts/smoke.py sample.wav`
+
+## Development
+
+Frontend hot reload: `cd web && npm run dev` (proxies /ws to the server on 8765).
