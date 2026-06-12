@@ -1,0 +1,82 @@
+import httpx
+
+# Renders "entity_id|area" lines; area_name() returns None -> empty string.
+_AREA_TEMPLATE = (
+    "{% for s in states %}"
+    "{{ s.entity_id }}|{{ area_name(s.entity_id) or '' }}\n"
+    "{% endfor %}"
+)
+
+
+class HomeAssistant:
+    """Async client for the Home Assistant REST API."""
+
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10.0,
+            transport=transport,
+        )
+        self._areas: dict[str, str] = {}
+
+    async def load_areas(self) -> None:
+        """Cache entity_id -> area name via the template API. Call once at startup."""
+        resp = await self._client.post("/api/template", json={"template": _AREA_TEMPLATE})
+        resp.raise_for_status()
+        self._areas = {}
+        for line in resp.text.strip().splitlines():
+            entity_id, _, area = line.partition("|")
+            if area:
+                self._areas[entity_id] = area
+
+    async def get_entities(
+        self, domain: str | None = None, area: str | None = None
+    ) -> list[dict]:
+        resp = await self._client.get("/api/states")
+        resp.raise_for_status()
+        entities = []
+        for s in resp.json():
+            entity_id = s["entity_id"]
+            if domain and not entity_id.startswith(domain + "."):
+                continue
+            entity_area = self._areas.get(entity_id)
+            if area and (entity_area or "").lower() != area.lower():
+                continue
+            entities.append(
+                {
+                    "entity_id": entity_id,
+                    "name": s["attributes"].get("friendly_name", entity_id),
+                    "state": s["state"],
+                    "area": entity_area,
+                }
+            )
+        return entities
+
+    async def call_service(
+        self,
+        domain: str,
+        service: str,
+        entity_id: str,
+        data: dict | None = None,
+    ) -> dict:
+        payload = {"entity_id": entity_id, **(data or {})}
+        resp = await self._client.post(f"/api/services/{domain}/{service}", json=payload)
+        resp.raise_for_status()
+        return {"ok": True}
+
+    async def entity_summary(self) -> str:
+        """Compact one-line-per-entity summary for the system prompt."""
+        entities = await self.get_entities()
+        return "\n".join(
+            f"{e['entity_id']} | {e['name']} | {e['area'] or '?'} | {e['state']}"
+            for e in entities
+        )
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
