@@ -15,8 +15,10 @@ class FakeAgent:
     def __init__(self, reply="Done, light is on."):
         self.reply = reply
         self.seen = []
+        self.entry_history_lens = []
 
     async def run(self, history, user_text):
+        self.entry_history_lens.append(len(history))
         self.seen.append(user_text)
         history.append({"role": "user", "content": user_text})
         history.append({"role": "assistant", "content": self.reply})
@@ -74,3 +76,32 @@ def test_history_persists_across_turns_in_one_session():
             ws.send_bytes(b"fake-audio")
             ws.receive_json(); ws.receive_json(); ws.receive_bytes()
     assert len(agent.seen) == 2
+    assert agent.entry_history_lens == [0, 2]
+
+
+def test_agent_failure_rolls_back_history():
+    class FlakyAgent(FakeAgent):
+        def __init__(self):
+            super().__init__()
+            self.fail_next = True
+
+        async def run(self, history, user_text):
+            self.entry_history_lens.append(len(history))
+            if self.fail_next:
+                self.fail_next = False
+                history.append({"role": "user", "content": user_text})
+                raise ConnectionError("boom")
+            self.seen.append(user_text)
+            history.append({"role": "user", "content": user_text})
+            history.append({"role": "assistant", "content": self.reply})
+            return self.reply
+
+    agent = FlakyAgent()
+    client = make_client(agent=agent)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_bytes(b"fake-audio")
+        ws.receive_json()  # transcript
+        assert ws.receive_json()["type"] == "error"
+        ws.send_bytes(b"fake-audio")
+        ws.receive_json(); ws.receive_json(); ws.receive_bytes()
+    assert agent.entry_history_lens == [0, 0]  # failed turn left nothing behind

@@ -27,10 +27,12 @@ def create_app(stt, agent, tts) -> FastAPI:
                     )
                     continue
                 await websocket.send_json({"type": "transcript", "text": text})
+                checkpoint = len(history)
                 try:
                     reply = await agent.run(history, text)
                 except Exception:
                     logger.exception("agent failure")
+                    del history[checkpoint:]
                     await websocket.send_json(
                         {"type": "error", "message": "LLM backend offline"}
                     )
@@ -50,6 +52,10 @@ def create_app(stt, agent, tts) -> FastAPI:
 def main() -> None:
     import asyncio
 
+    asyncio.run(_main())
+
+
+async def _main() -> None:
     import uvicorn
     from openai import AsyncOpenAI
 
@@ -63,7 +69,7 @@ def main() -> None:
     config = load_config()
 
     ha = HomeAssistant(config.ha_url, config.ha_token)
-    summary = asyncio.run(_startup_summary(ha))
+    summary = await _startup_summary(ha)
     llm_client = AsyncOpenAI(base_url=config.lmstudio_url, api_key="lm-studio")
     agent = Agent(llm_client, config.lmstudio_model, ha, build_system_prompt(summary))
 
@@ -73,7 +79,8 @@ def main() -> None:
     tts = KokoroTTS(voice=config.tts_voice)
 
     app = create_app(stt, agent, tts)
-    uvicorn.run(app, host=config.host, port=config.port)
+    server = uvicorn.Server(uvicorn.Config(app, host=config.host, port=config.port))
+    await server.serve()
 
 
 async def _startup_summary(ha) -> str:
