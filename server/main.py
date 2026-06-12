@@ -1,4 +1,5 @@
 import logging
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -17,10 +18,19 @@ def create_app(stt, agent, tts) -> FastAPI:
     async def ws_endpoint(websocket: WebSocket):
         await websocket.accept()
         history: list[dict] = []
+
+        async def debug(event: str, data: dict) -> None:
+            await websocket.send_json({"type": "debug", "event": event, "data": data})
+
         try:
             while True:
                 audio = await websocket.receive_bytes()
+                t0 = time.perf_counter()
                 text = await run_in_threadpool(stt.transcribe, audio)
+                await debug(
+                    "stt",
+                    {"text": text, "latency_ms": round((time.perf_counter() - t0) * 1000)},
+                )
                 if not text:
                     await websocket.send_json(
                         {"type": "error", "message": "I didn't catch that"}
@@ -29,7 +39,7 @@ def create_app(stt, agent, tts) -> FastAPI:
                 await websocket.send_json({"type": "transcript", "text": text})
                 checkpoint = len(history)
                 try:
-                    reply = await agent.run(history, text)
+                    reply = await agent.run(history, text, on_event=debug)
                 except Exception:
                     logger.exception("agent failure")
                     del history[checkpoint:]
@@ -38,7 +48,15 @@ def create_app(stt, agent, tts) -> FastAPI:
                     )
                     continue
                 await websocket.send_json({"type": "assistant_text", "text": reply})
+                t1 = time.perf_counter()
                 wav = await run_in_threadpool(tts.synthesize, reply)
+                await debug(
+                    "tts",
+                    {
+                        "latency_ms": round((time.perf_counter() - t1) * 1000),
+                        "bytes": len(wav),
+                    },
+                )
                 await websocket.send_bytes(wav)
         except WebSocketDisconnect:
             pass

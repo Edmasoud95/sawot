@@ -1,4 +1,8 @@
 import json
+import logging
+import time
+
+logger = logging.getLogger("voice.llm")
 
 TOOLS = [
     {
@@ -51,8 +55,11 @@ one or two sentences, no markdown, no lists, no emojis.
 
 You control Home Assistant devices with the provided tools. Use the device \
 list below to pick entity_ids directly; only call get_entities if the list \
-is insufficient. After acting, confirm briefly what you did. If something \
-fails, say so plainly. You may also answer general questions conversationally.
+is insufficient. The list contains only controllable devices — readings such \
+as temperature, humidity or power are NOT listed; fetch those with \
+get_entities(domain='sensor', area=...), and pick the matching sensor from \
+the result. After acting, confirm briefly what you did. If something fails, \
+say so plainly. You may also answer general questions conversationally.
 
 Devices:
 {summary}"""
@@ -60,6 +67,25 @@ Devices:
 
 def build_system_prompt(entity_summary: str) -> str:
     return _SYSTEM_TEMPLATE.format(summary=entity_summary)
+
+
+def _truncate(s: str, limit: int = 600) -> str:
+    """Cap tool results in debug events so traces stay small."""
+    return s if len(s) <= limit else s[:limit] + "…"
+
+
+def _safe_emitter(on_event):
+    """Wrap an optional debug callback so observer failures never break a turn."""
+
+    async def emit(event: str, data: dict) -> None:
+        if on_event is None:
+            return
+        try:
+            await on_event(event, data)
+        except Exception:
+            logger.debug("debug event emission failed", exc_info=True)
+
+    return emit
 
 
 class Agent:
@@ -73,15 +99,29 @@ class Agent:
         self._ha = ha
         self._system = system_prompt
 
-    async def run(self, history: list[dict], user_text: str) -> str:
+    async def run(self, history: list[dict], user_text: str, on_event=None) -> str:
+        emit = _safe_emitter(on_event)
         history.append({"role": "user", "content": user_text})
-        for _ in range(self.MAX_ROUNDS):
+        for round_no in range(1, self.MAX_ROUNDS + 1):
+            t0 = time.perf_counter()
             response = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[{"role": "system", "content": self._system}, *history],
                 tools=TOOLS,
             )
             msg = response.choices[0].message
+            await emit(
+                "llm_round",
+                {
+                    "round": round_no,
+                    "latency_ms": round((time.perf_counter() - t0) * 1000),
+                    "tool_calls": (
+                        [tc.function.name for tc in msg.tool_calls]
+                        if msg.tool_calls
+                        else None
+                    ),
+                },
+            )
             if not msg.tool_calls:
                 reply = (msg.content or "").strip()
                 history.append({"role": "assistant", "content": reply})
@@ -94,27 +134,56 @@ class Agent:
                 }
             )
             for tc in msg.tool_calls:
+                t1 = time.perf_counter()
                 try:
                     args = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError as exc:
+                    await emit(
+                        "tool_call",
+                        {"name": tc.function.name, "args": tc.function.arguments},
+                    )
                     result = {"error": f"invalid tool arguments: {exc}"}
                 else:
+                    await emit("tool_call", {"name": tc.function.name, "args": args})
                     result = await self._execute(tc.function.name, args)
+                content = json.dumps(result)
+                await emit(
+                    "tool_result",
+                    {
+                        "name": tc.function.name,
+                        "latency_ms": round((time.perf_counter() - t1) * 1000),
+                        "size_chars": len(content),
+                        "result": _truncate(content),
+                    },
+                )
                 history.append(
                     {
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "content": json.dumps(result),
+                        "content": content,
                     }
                 )
         reply = "Sorry, I couldn't complete that."
         history.append({"role": "assistant", "content": reply})
         return reply
 
+    MAX_TOOL_ENTITIES = 60
+
     async def _execute(self, name: str, args: dict):
         try:
             if name == "get_entities":
-                return await self._ha.get_entities(args.get("domain"), args.get("area"))
+                entities = await self._ha.get_entities(
+                    args.get("domain"), args.get("area")
+                )
+                if len(entities) > self.MAX_TOOL_ENTITIES:
+                    return {
+                        "entities": entities[: self.MAX_TOOL_ENTITIES],
+                        "note": (
+                            f"{len(entities) - self.MAX_TOOL_ENTITIES} more omitted — "
+                            "narrow the query with domain and/or area"
+                        ),
+                    }
+                return entities
             if name == "call_service":
                 return await self._ha.call_service(
                     args["domain"], args["service"], args["entity_id"], args.get("data")

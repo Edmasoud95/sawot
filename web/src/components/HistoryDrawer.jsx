@@ -2,10 +2,52 @@ import { useLayoutEffect, useRef } from "react";
 import gsap from "gsap";
 import { useVoiceStore } from "../store";
 
+// One line per pipeline event, dense and scannable.
+function traceLine({ event, data }) {
+  switch (event) {
+    case "stt":
+      return `stt      ${data.latency_ms}ms · "${data.text || "(empty)"}"`;
+    case "llm_round":
+      return `llm #${data.round}   ${data.latency_ms}ms → ${
+        data.tool_calls ? `tools: ${data.tool_calls.join(", ")}` : "answer"
+      }`;
+    case "tool_call":
+      return `  → ${data.name}(${JSON.stringify(data.args)})`;
+    case "tool_result":
+      return `  ← ${data.latency_ms}ms · ${data.size_chars} chars · ${data.result}`;
+    case "tts":
+      return `tts      ${data.latency_ms}ms · ${(data.bytes / 1024).toFixed(0)}kB`;
+    default:
+      return `${event} ${JSON.stringify(data)}`;
+  }
+}
+
+function Trace({ trace }) {
+  return (
+    <ol className="mt-2 flex flex-col gap-1 border-l border-white/10 pl-3">
+      {trace.events.map((e, i) => (
+        <li
+          key={i}
+          className={`whitespace-pre-wrap break-all font-mono text-[0.66rem] leading-relaxed ${
+            e.event === "tool_result" && e.data.result?.includes('"error"')
+              ? "text-red-400/90"
+              : "text-zinc-500"
+          }`}
+        >
+          {traceLine(e)}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 export default function HistoryDrawer() {
   const history = useVoiceStore((s) => s.history);
   const drawerOpen = useVoiceStore((s) => s.drawerOpen);
   const toggleDrawer = useVoiceStore((s) => s.toggleDrawer);
+  const debugEnabled = useVoiceStore((s) => s.debugEnabled);
+  const toggleDebug = useVoiceStore((s) => s.toggleDebug);
+  const traces = useVoiceStore((s) => s.traces);
   const panel = useRef(null);
   const scrim = useRef(null);
 
@@ -46,9 +88,22 @@ export default function HistoryDrawer() {
         ref={panel}
         className="absolute inset-y-0 right-0 z-30 w-[min(85vw,380px)] translate-x-full overflow-y-auto border-l border-white/10 bg-ink-900/90 p-7 pt-[calc(72px+env(safe-area-inset-top))] backdrop-blur-2xl"
       >
-        <h2 className="mb-6 font-mono text-[0.65rem] font-light uppercase tracking-[0.3em] text-zinc-500">
-          Conversation
-        </h2>
+        <div className="mb-6 flex items-center justify-between">
+          <h2 className="font-mono text-[0.65rem] font-light uppercase tracking-[0.3em] text-zinc-500">
+            Conversation
+          </h2>
+          <button
+            onClick={toggleDebug}
+            aria-pressed={debugEnabled}
+            className={`rounded-full border px-3 py-1 font-mono text-[0.6rem] uppercase tracking-[0.2em] transition-colors duration-300 ${
+              debugEnabled
+                ? "border-aurora-teal/50 bg-aurora-teal/10 text-aurora-teal"
+                : "border-white/10 text-zinc-600 hover:border-white/25 hover:text-zinc-400"
+            }`}
+          >
+            debug
+          </button>
+        </div>
         {history.length === 0 && (
           <p className="font-serif text-lg italic text-zinc-600">
             Nothing yet — hold the button and speak.
@@ -73,6 +128,13 @@ export default function HistoryDrawer() {
               >
                 {turn.text}
               </p>
+              {debugEnabled &&
+                turn.role === "user" &&
+                turn.traceId != null &&
+                (() => {
+                  const trace = traces.find((t) => t.id === turn.traceId);
+                  return trace ? <Trace trace={trace} /> : null;
+                })()}
             </li>
           ))}
         </ul>

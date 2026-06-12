@@ -9,14 +9,45 @@ export const useVoiceStore = create((set) => ({
   status: "connecting", // connecting | idle | recording | thinking | speaking
   userCaption: "",
   assistantCaption: "",
-  history: [], // [{ role: "user" | "assistant", text }]
+  history: [], // [{ role: "user" | "assistant", text, traceId? }]
   drawerOpen: false,
+  debugEnabled: localStorage.getItem("voice-debug") === "1",
+  traces: [], // [{ id, events: [{event, data}] }], capped at MAX_TRACES
+  nextTraceId: 1,
 
   setStatus: (status) => set({ status }),
   setUserCaption: (text) => set({ userCaption: text }),
   setAssistantCaption: (text) => set({ assistantCaption: text }),
   clearCaptions: () => set({ userCaption: "", assistantCaption: "" }),
-  addTurn: (role, text) =>
-    set((s) => ({ history: [...s.history, { role, text }] })),
+  addTurn: (role, text, traceId = null) =>
+    set((s) => ({ history: [...s.history, { role, text, traceId }] })),
   toggleDrawer: () => set((s) => ({ drawerOpen: !s.drawerOpen })),
+  toggleDebug: () =>
+    set((s) => {
+      const debugEnabled = !s.debugEnabled;
+      localStorage.setItem("voice-debug", debugEnabled ? "1" : "0");
+      return { debugEnabled };
+    }),
+  // An "stt" event opens a new trace; everything else appends to the current
+  // one. User turns store the trace id (ids survive the cap trimming).
+  addDebugEvent: ({ event, data }) =>
+    set((s) => {
+      if (event === "stt") {
+        const trace = { id: s.nextTraceId, events: [{ event, data }] };
+        return {
+          nextTraceId: s.nextTraceId + 1,
+          traces: [...s.traces.slice(-(MAX_TRACES - 1)), trace],
+        };
+      }
+      if (s.traces.length === 0) return {};
+      const current = s.traces[s.traces.length - 1];
+      return {
+        traces: [
+          ...s.traces.slice(0, -1),
+          { ...current, events: [...current.events, { event, data }] },
+        ],
+      };
+    }),
 }));
+
+const MAX_TRACES = 20;

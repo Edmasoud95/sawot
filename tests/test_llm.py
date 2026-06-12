@@ -158,3 +158,87 @@ async def test_bailout_reply_is_stored_in_history():
     history = []
     reply = await agent.run(history, "loop forever")
     assert history[-1] == {"role": "assistant", "content": reply}
+
+
+class RecordingEvents:
+    def __init__(self):
+        self.events = []
+
+    async def __call__(self, event, data):
+        self.events.append((event, data))
+
+
+async def test_debug_events_plain_answer():
+    llm = FakeLLM([make_response(content="Hello!")])
+    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    rec = RecordingEvents()
+    await agent.run([], "hi", on_event=rec)
+    assert len(rec.events) == 1
+    event, data = rec.events[0]
+    assert event == "llm_round"
+    assert data["round"] == 1
+    assert data["tool_calls"] is None
+    assert data["latency_ms"] >= 0
+
+
+async def test_debug_events_tool_round_trip():
+    tc = FakeToolCall(
+        "call_1", "call_service",
+        json.dumps({"domain": "light", "service": "turn_on",
+                    "entity_id": "light.kitchen"}),
+    )
+    llm = FakeLLM([
+        make_response(tool_calls=[tc]),
+        make_response(content="Done."),
+    ])
+    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    rec = RecordingEvents()
+    await agent.run([], "turn on the kitchen light", on_event=rec)
+    names = [e for e, _ in rec.events]
+    assert names == ["llm_round", "tool_call", "tool_result", "llm_round"]
+    assert rec.events[0][1]["tool_calls"] == ["call_service"]
+    assert rec.events[1][1] == {
+        "name": "call_service",
+        "args": {"domain": "light", "service": "turn_on",
+                 "entity_id": "light.kitchen"},
+    }
+    result = rec.events[2][1]
+    assert result["name"] == "call_service"
+    assert json.loads(result["result"]) == {"ok": True}
+    assert result["size_chars"] == len(json.dumps({"ok": True}))
+
+
+async def test_debug_event_failure_does_not_break_turn():
+    async def broken(event, data):
+        raise RuntimeError("observer exploded")
+
+    llm = FakeLLM([make_response(content="Still fine.")])
+    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    reply = await agent.run([], "hi", on_event=broken)
+    assert reply == "Still fine."
+
+
+def test_truncate_long_results():
+    from server.llm import _truncate
+    assert _truncate("short") == "short"
+    long = "x" * 700
+    out = _truncate(long)
+    assert len(out) == 601 and out.endswith("…")
+
+
+async def test_get_entities_tool_result_is_capped():
+    class HugeHA(FakeHA):
+        async def get_entities(self, domain=None, area=None):
+            return [{"entity_id": f"sensor.s{i}", "name": f"S{i}",
+                     "state": "1", "area": None} for i in range(200)]
+
+    tc = FakeToolCall("call_1", "get_entities", json.dumps({"domain": "sensor"}))
+    llm = FakeLLM([
+        make_response(tool_calls=[tc]),
+        make_response(content="There are many sensors."),
+    ])
+    agent = Agent(llm, "test-model", HugeHA(), system_prompt="sys")
+    await agent.run([], "list all sensors")
+    tool_msg = json.loads(llm.calls[1]["messages"][-1]["content"])
+    assert len(tool_msg["entities"]) == 60
+    assert "140 more omitted" in tool_msg["note"]

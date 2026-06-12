@@ -13,9 +13,12 @@ export function useVoice() {
       onClose: () => useVoiceStore.getState().setStatus("connecting"),
       onEvent: (msg) => {
         const s = useVoiceStore.getState();
-        if (msg.type === "transcript") {
+        if (msg.type === "debug") {
+          s.addDebugEvent(msg);
+        } else if (msg.type === "transcript") {
           s.setUserCaption(msg.text);
-          s.addTurn("user", msg.text);
+          const { traces } = useVoiceStore.getState();
+          s.addTurn("user", msg.text, traces.length ? traces[traces.length - 1].id : null);
           s.setStatus("thinking");
         } else if (msg.type === "assistant_text") {
           s.setAssistantCaption(msg.text);
