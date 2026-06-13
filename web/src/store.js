@@ -11,7 +11,7 @@ export const useVoiceStore = create((set) => ({
   assistantCaption: "",
   history: [], // [{ role: "user" | "assistant", text, traceId? }]
   drawerOpen: false,
-  mode: localStorage.getItem("voice-mode") || "orb", // "orb" | "cards"
+  mode: localStorage.getItem("voice-mode") || "orb", // "orb" | "cards" | "chat"
   cards: [], // entity dicts from the latest `entities` event
   debugEnabled: localStorage.getItem("voice-debug") === "1",
   traces: [], // [{ id, events: [{event, data}] }], capped at MAX_TRACES
@@ -24,9 +24,8 @@ export const useVoiceStore = create((set) => ({
   addTurn: (role, text, traceId = null) =>
     set((s) => ({ history: [...s.history, { role, text, traceId }] })),
   toggleDrawer: () => set((s) => ({ drawerOpen: !s.drawerOpen })),
-  toggleMode: () =>
-    set((s) => {
-      const mode = s.mode === "orb" ? "cards" : "orb";
+  setMode: (mode) =>
+    set(() => {
       localStorage.setItem("voice-mode", mode);
       return { mode };
     }),
