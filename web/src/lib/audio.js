@@ -13,7 +13,7 @@ export function audioContext() {
       analyser.getByteTimeDomainData(data);
       let sum = 0;
       for (const v of data) sum += (v - 128) ** 2;
-      levelBus.value = Math.min(1, Math.sqrt(sum / data.length) / 40);
+      levelBus.value = Math.min(1, Math.sqrt(sum / data.length) / 28);
       requestAnimationFrame(pump);
     })();
   }

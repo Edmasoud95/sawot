@@ -64,7 +64,7 @@ void main() {
   float t = uTime * uSpeed;
   float n = snoise(normal * 2.0 + t * 0.6);
   float breathe = 1.0 + 0.012 * sin(uTime * 0.9);
-  vec3 pos = position * breathe + normal * n * (uAmp + uLevel * 0.04);
+  vec3 pos = position * breathe + normal * n * (uAmp + uLevel * 0.09);
   vPos = normalize(position);
   vec4 mv = modelViewMatrix * vec4(pos, 1.0);
   vNormal = normalize(normalMatrix * normal);
@@ -107,7 +107,7 @@ void main() {
   color *= 0.78 + 0.3 * topLight;
 
   color += uColorC * fresnel * 0.55;
-  color += color * uLevel * 0.4;
+  color += color * uLevel * 0.7;
 
   float alpha = 0.96 + fresnel * 0.04;
   gl_FragColor = vec4(color, alpha);

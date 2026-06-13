@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import gsap from "gsap";
@@ -31,6 +31,7 @@ const REDUCED_MOTION =
   matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function OrbMesh() {
+  const group = useRef();
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
@@ -75,11 +76,14 @@ function OrbMesh() {
 
   useFrame((_, delta) => {
     uniforms.uTime.value += delta;
-    uniforms.uLevel.value += (levelBus.value - uniforms.uLevel.value) * 0.18;
+    uniforms.uLevel.value += (levelBus.value - uniforms.uLevel.value) * 0.35;
+    if (group.current) {
+      group.current.scale.setScalar(1 + uniforms.uLevel.value * 0.06);
+    }
   });
 
   return (
-    <group>
+    <group ref={group}>
       <mesh>
         <icosahedronGeometry args={[1, 64]} />
         <shaderMaterial
