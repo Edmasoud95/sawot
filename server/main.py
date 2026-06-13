@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from pathlib import Path
@@ -5,6 +6,41 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
+
+ALLOWED_CONTROLS = {
+    "light": {"turn_on", "turn_off"},
+    "switch": {"turn_on", "turn_off"},
+    "media_player": {"turn_on", "turn_off"},
+    "climate": {"set_temperature"},
+}
+
+
+async def _handle_control(websocket, ha, raw: str) -> None:
+    try:
+        msg = json.loads(raw)
+    except json.JSONDecodeError:
+        await websocket.send_json({"type": "error", "message": "malformed message"})
+        return
+    if msg.get("type") != "control":
+        await websocket.send_json({"type": "error", "message": "unknown message type"})
+        return
+    domain = msg.get("domain")
+    service = msg.get("service")
+    entity_id = msg.get("entity_id")
+    if (
+        ha is None
+        or not entity_id
+        or service not in ALLOWED_CONTROLS.get(domain, set())
+    ):
+        await websocket.send_json({"type": "error", "message": "control not allowed"})
+        return
+    try:
+        await ha.call_service(domain, service, entity_id, msg.get("data"))
+        cards = await ha.get_cards([entity_id])
+        await websocket.send_json({"type": "entities", "entities": cards})
+    except Exception:
+        logger.exception("control failed")
+        await websocket.send_json({"type": "error", "message": "control failed"})
 
 logger = logging.getLogger("voice")
 
@@ -24,7 +60,15 @@ def create_app(stt, agent, tts, settings_ctx=None, ha=None) -> FastAPI:
 
         try:
             while True:
-                audio = await websocket.receive_bytes()
+                message = await websocket.receive()
+                if message["type"] == "websocket.disconnect":
+                    break
+                if message.get("text") is not None:
+                    await _handle_control(websocket, ha, message["text"])
+                    continue
+                audio = message.get("bytes")
+                if audio is None:
+                    continue
                 t0 = time.perf_counter()
                 text = await run_in_threadpool(stt.transcribe, audio)
                 await debug(

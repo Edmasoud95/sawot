@@ -186,6 +186,50 @@ def test_touched_event_not_forwarded_as_debug():
         assert "touched" not in events     # touched is intercepted
 
 
+import json as _json
+
+
+def test_control_message_executes_and_refreshes():
+    ha = FakeHA()
+    app = create_app(FakeSTT(), FakeAgent(), FakeTTS(), ha=ha)
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(_json.dumps({
+            "type": "control", "domain": "light", "service": "turn_on",
+            "entity_id": "light.kitchen", "data": {"brightness_pct": 40},
+        }))
+        msg = ws.receive_json()
+        assert msg["type"] == "entities"
+        assert msg["entities"][0]["entity_id"] == "light.kitchen"
+    assert ha.service_calls == [
+        ("light", "turn_on", "light.kitchen", {"brightness_pct": 40})
+    ]
+
+
+def test_control_whitelist_rejected():
+    ha = FakeHA()
+    app = create_app(FakeSTT(), FakeAgent(), FakeTTS(), ha=ha)
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(_json.dumps({
+            "type": "control", "domain": "lock", "service": "unlock",
+            "entity_id": "lock.front",
+        }))
+        msg = ws.receive_json()
+        assert msg["type"] == "error"
+    assert ha.service_calls == []
+
+
+def test_malformed_text_does_not_kill_connection():
+    app = create_app(FakeSTT(), FakeAgent(), FakeTTS(), ha=FakeHA())
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text("{not json")
+        assert ws.receive_json()["type"] == "error"
+        # connection still alive: a normal audio turn works
+        assert run_turn(ws) == b"RIFF-fake-wav"
+
+
 class DebuggingAgent(FakeAgent):
     """Emits one debug event through the callback, like the real Agent."""
 
