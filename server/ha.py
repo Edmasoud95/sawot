@@ -95,6 +95,11 @@ class HomeAssistant:
         "temperature",
         "current_temperature",
         "unit_of_measurement",
+        "rgb_color",
+        "color_temp_kelvin",
+        "min_color_temp_kelvin",
+        "max_color_temp_kelvin",
+        "supported_color_modes",
     )
 
     async def get_cards(self, entity_ids: list[str]) -> list[dict]:

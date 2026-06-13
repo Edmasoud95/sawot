@@ -70,3 +70,24 @@ body {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* Color-temperature slider: gradient track is inline, thumb needs explicit styling
+   because the input is appearance-none. */
+.temp-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: #fff;
+  border: 2px solid rgba(10, 13, 20, 0.6);
+  cursor: pointer;
+}
+.temp-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: #fff;
+  border: 2px solid rgba(10, 13, 20, 0.6);
+  cursor: pointer;
+}

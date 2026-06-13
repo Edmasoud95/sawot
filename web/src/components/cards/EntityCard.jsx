@@ -82,6 +82,99 @@ function Brightness({ card, accent, sendControl }) {
   );
 }
 
+// Curated palette: warm domestic tones first, saturated accents after.
+const SWATCHES = [
+  [255, 180, 107], // candle
+  [255, 214, 170], // warm white
+  [255, 244, 229], // soft white
+  [255, 92, 64],   // ember red
+  [255, 170, 36],  // amber
+  [64, 200, 120],  // sage green
+  [80, 140, 255],  // azure
+  [168, 110, 255], // violet
+];
+
+const COLOR_MODES = ["hs", "rgb", "rgbw", "rgbww", "xy"];
+
+function nearestSwatch(rgb) {
+  if (!rgb) return -1;
+  let best = -1;
+  let bestDist = Infinity;
+  SWATCHES.forEach(([r, g, b], i) => {
+    const d = (r - rgb[0]) ** 2 + (g - rgb[1]) ** 2 + (b - rgb[2]) ** 2;
+    if (d < bestDist) {
+      bestDist = d;
+      best = i;
+    }
+  });
+  return bestDist < 60 ** 2 ? best : -1;
+}
+
+function ColorControls({ card, sendControl }) {
+  const modes = card.attrs.supported_color_modes || [];
+  const hasTemp = modes.includes("color_temp");
+  const hasColor = modes.some((m) => COLOR_MODES.includes(m));
+  if (!hasTemp && !hasColor) return null;
+
+  const minK = card.attrs.min_color_temp_kelvin ?? 2000;
+  const maxK = card.attrs.max_color_temp_kelvin ?? 6500;
+  const activeSwatch = nearestSwatch(card.attrs.rgb_color);
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      {hasTemp && (
+        <input
+          type="range"
+          min={minK}
+          max={maxK}
+          step="50"
+          defaultValue={card.attrs.color_temp_kelvin ?? (minK + maxK) / 2}
+          aria-label={`${card.name} color temperature`}
+          onPointerUp={(e) =>
+            sendControl({
+              type: "control",
+              domain: "light",
+              service: "turn_on",
+              entity_id: card.entity_id,
+              data: { color_temp_kelvin: Number(e.target.value) },
+            })
+          }
+          className="temp-slider h-1.5 w-full cursor-pointer appearance-none rounded-full"
+          style={{
+            background:
+              "linear-gradient(to right, #ffb46b, #fff4e5 45%, #cfe4ff)",
+          }}
+        />
+      )}
+      {hasColor && (
+        <div className="flex items-center gap-2">
+          {SWATCHES.map(([r, g, b], i) => (
+            <button
+              key={i}
+              aria-label={`Set ${card.name} color to rgb(${r}, ${g}, ${b})`}
+              onClick={() =>
+                sendControl({
+                  type: "control",
+                  domain: "light",
+                  service: "turn_on",
+                  entity_id: card.entity_id,
+                  data: { rgb_color: [r, g, b] },
+                })
+              }
+              className={`h-5 w-5 shrink-0 rounded-full transition-transform duration-200 hover:scale-110 ${
+                activeSwatch === i
+                  ? "ring-2 ring-white/70 ring-offset-2 ring-offset-ink-900"
+                  : "ring-1 ring-white/15"
+              }`}
+              style={{ backgroundColor: `rgb(${r}, ${g}, ${b})` }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClimateControl({ card, sendControl }) {
   const target = card.attrs.temperature;
   const step = (delta) =>
@@ -147,7 +240,10 @@ export default function EntityCard({ card, sendControl }) {
         )}
       </div>
       {card.domain === "light" && card.state === "on" && (
-        <Brightness card={card} accent={accent} sendControl={sendControl} />
+        <>
+          <Brightness card={card} accent={accent} sendControl={sendControl} />
+          <ColorControls card={card} sendControl={sendControl} />
+        </>
       )}
       {card.domain === "climate" && (
         <ClimateControl card={card} sendControl={sendControl} />

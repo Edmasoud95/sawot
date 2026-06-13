@@ -154,3 +154,30 @@ async def test_entity_summary_excludes_noncontrollable_domains():
     assert "sensor.cpu_temp" not in summary
     assert "update.core" not in summary
     assert len(summary.splitlines()) == 3  # the light/switch fixtures remain
+
+
+async def test_get_cards_includes_color_attrs():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/states":
+            return httpx.Response(200, json=[
+                {"entity_id": "light.strip", "state": "on",
+                 "attributes": {"friendly_name": "Strip",
+                                "brightness": 128,
+                                "rgb_color": [255, 120, 50],
+                                "color_temp_kelvin": 3000,
+                                "min_color_temp_kelvin": 2200,
+                                "max_color_temp_kelvin": 6500,
+                                "supported_color_modes": ["color_temp", "hs"]}},
+            ])
+        return default_handler(request)
+
+    ha = make_ha(handler)
+    cards = await ha.get_cards(["light.strip"])
+    assert cards[0]["attrs"] == {
+        "brightness": 128,
+        "rgb_color": [255, 120, 50],
+        "color_temp_kelvin": 3000,
+        "min_color_temp_kelvin": 2200,
+        "max_color_temp_kelvin": 6500,
+        "supported_color_modes": ["color_temp", "hs"],
+    }
