@@ -239,7 +239,19 @@ async def _main() -> None:
         lmstudio_url=config.lmstudio_url,
         http=httpx.AsyncClient(timeout=10.0),
     )
-    app = create_app(stt, agent, tts, settings_ctx=settings_ctx, ha=ha)
+
+    from server.chat import ChatStore
+    from server.chat_routes import ChatContext
+
+    chat_ctx = ChatContext(
+        store=ChatStore(),
+        client=llm_client,
+        ha=ha,
+        system_prompt=build_system_prompt(summary),
+        default_model=lambda: agent.model,
+        upload_dir=Path(__file__).resolve().parent.parent / "data" / "uploads",
+    )
+    app = create_app(stt, agent, tts, settings_ctx=settings_ctx, ha=ha, chat_ctx=chat_ctx)
     server = uvicorn.Server(
         uvicorn.Config(
             app,
