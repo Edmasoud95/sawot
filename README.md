@@ -54,6 +54,12 @@ access (accept the certificate warning once per device).
 - **History drawer** (dots, top-right): conversation log; the **debug**
   toggle shows a per-turn pipeline trace (STT/LLM/tool/TTS timings and
   arguments) for diagnosing wrong answers.
+- **Chat** (third position on the mode switch): ChatGPT-style text chat —
+  multiple server-stored conversations (`data/conversations/`), streaming
+  responses with collapsible thinking for reasoning models, per-conversation
+  model picker, image upload (vision models) and text-file upload, the same
+  Home Assistant tools as voice, and interactive device cards inline in the
+  conversation.
 
 ## Tests
 
