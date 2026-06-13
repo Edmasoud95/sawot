@@ -3,6 +3,7 @@ import { VoiceSocket } from "../lib/socket";
 import { playWav } from "../lib/audio";
 import { useRecorder } from "./useRecorder";
 import { useVoiceStore } from "../store";
+import { useChatStore } from "../chatStore";
 
 export function useVoice() {
   const socketRef = useRef(null);
@@ -25,6 +26,8 @@ export function useVoice() {
           s.addTurn("assistant", msg.text);
         } else if (msg.type === "entities") {
           s.setCards(msg.entities);
+          // Keep inline chat cards in sync with control refreshes.
+          useChatStore.getState().patchCards(msg.entities);
         } else if (msg.type === "error") {
           s.setAssistantCaption(msg.message);
           s.setStatus("idle");

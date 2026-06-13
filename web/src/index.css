@@ -1,6 +1,7 @@
 @import "@fontsource/instrument-serif/400.css";
 @import "@fontsource/azeret-mono/300.css";
 @import "@fontsource/azeret-mono/400.css";
+@import "highlight.js/styles/github-dark-dimmed.css";
 @import "tailwindcss";
 
 @theme {
@@ -69,6 +70,99 @@ body {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
+}
+
+/* ---- Chat message rendering ---------------------------------------- */
+
+/* Shimmering label while the model reasons: light sweeps across the text. */
+@keyframes thinking-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+.thinking-shimmer {
+  background: linear-gradient(90deg, #52525b 35%, #e4e4e7 50%, #52525b 65%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: thinking-shimmer 2.4s linear infinite;
+}
+
+/* Top fade so the live thinking transcript reads as scrolling past. */
+.thinking-fade {
+  mask-image: linear-gradient(to bottom, transparent 0, black 1.5rem);
+}
+
+/* Markdown body — scoped so chat styles never leak into the rest of the UI. */
+.chat-md > :first-child { margin-top: 0; }
+.chat-md > :last-child { margin-bottom: 0; }
+.chat-md p { margin: 0.65em 0; }
+.chat-md ul, .chat-md ol { margin: 0.65em 0; padding-left: 1.4em; }
+.chat-md ul { list-style: disc; }
+.chat-md ol { list-style: decimal; }
+.chat-md li { margin: 0.25em 0; }
+.chat-md li::marker { color: rgba(62, 230, 196, 0.5); }
+.chat-md h1, .chat-md h2, .chat-md h3, .chat-md h4 {
+  margin: 1.1em 0 0.45em;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  color: #f4f4f5;
+}
+.chat-md h1 { font-size: 1.45em; }
+.chat-md h2 { font-size: 1.25em; }
+.chat-md h3 { font-size: 1.1em; }
+.chat-md a {
+  color: var(--color-aurora-teal);
+  text-decoration: underline;
+  text-decoration-color: rgba(62, 230, 196, 0.35);
+  text-underline-offset: 3px;
+}
+.chat-md strong { font-weight: 400; color: #fafafa; }
+.chat-md blockquote {
+  margin: 0.8em 0;
+  border-left: 2px solid rgba(182, 156, 255, 0.4);
+  padding-left: 0.9em;
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: #a1a1aa;
+}
+.chat-md hr {
+  margin: 1.2em 0;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.chat-md table {
+  margin: 0.8em 0;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88em;
+}
+.chat-md th, .chat-md td {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+.chat-md th {
+  background: rgba(255, 255, 255, 0.04);
+  font-family: var(--font-mono);
+  font-size: 0.72em;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: #a1a1aa;
+}
+/* Inline code: subtle chip. Fenced blocks are handled by the CodeBlock
+   component; its <code> must stay transparent so the ink-900 surface shows. */
+.chat-md :not(pre) > code {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 0.3em;
+  padding: 0.1em 0.4em;
+  font-family: var(--font-mono);
+  font-size: 0.84em;
+  color: #e4e4e7;
+}
+.chat-md pre code {
+  background: transparent;
+  padding: 0;
 }
 
 /* Color-temperature slider: gradient track is inline, thumb needs explicit styling
