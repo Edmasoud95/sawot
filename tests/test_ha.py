@@ -115,6 +115,26 @@ async def test_call_service_http_error_raises():
         await ha.call_service("light", "turn_on", "light.unknown")
 
 
+async def test_get_cards_returns_rich_dicts_in_request_order():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/states":
+            return httpx.Response(200, json=STATES + [
+                {"entity_id": "climate.ac", "state": "cool",
+                 "attributes": {"friendly_name": "AC", "temperature": 22.0,
+                                 "current_temperature": 24.5}},
+            ])
+        return default_handler(request)
+
+    ha = make_ha(handler)
+    await ha.load_areas()
+    cards = await ha.get_cards(["climate.ac", "light.kitchen", "light.missing"])
+    assert [c["entity_id"] for c in cards] == ["climate.ac", "light.kitchen"]
+    assert cards[0]["domain"] == "climate"
+    assert cards[0]["attrs"] == {"temperature": 22.0, "current_temperature": 24.5}
+    assert cards[1]["name"] == "Kitchen Light"
+    assert cards[1]["area"] == "Kitchen"
+
+
 async def test_entity_summary_excludes_noncontrollable_domains():
     states = STATES + [
         {"entity_id": "sensor.cpu_temp", "state": "61",

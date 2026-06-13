@@ -195,7 +195,7 @@ async def test_debug_events_tool_round_trip():
     rec = RecordingEvents()
     await agent.run([], "turn on the kitchen light", on_event=rec)
     names = [e for e, _ in rec.events]
-    assert names == ["llm_round", "tool_call", "tool_result", "llm_round"]
+    assert names == ["llm_round", "tool_call", "tool_result", "touched", "llm_round"]
     assert rec.events[0][1]["tool_calls"] == ["call_service"]
     assert rec.events[1][1] == {
         "name": "call_service",
@@ -224,6 +224,27 @@ def test_truncate_long_results():
     long = "x" * 700
     out = _truncate(long)
     assert len(out) == 601 and out.endswith("…")
+
+
+async def test_touched_events_for_tools():
+    tc1 = FakeToolCall("c1", "get_entities", json.dumps({"domain": "light"}))
+    tc2 = FakeToolCall(
+        "c2", "call_service",
+        json.dumps({"domain": "light", "service": "turn_on",
+                    "entity_id": "light.kitchen"}),
+    )
+    llm = FakeLLM([
+        make_response(tool_calls=[tc1, tc2]),
+        make_response(content="Done."),
+    ])
+    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    rec = RecordingEvents()
+    await agent.run([], "do things", on_event=rec)
+    touched = [d for e, d in rec.events if e == "touched"]
+    assert touched == [
+        {"entity_ids": ["light.kitchen"]},  # from get_entities result (FakeHA)
+        {"entity_ids": ["light.kitchen"]},  # from call_service target
+    ]
 
 
 async def test_get_entities_tool_result_is_capped():

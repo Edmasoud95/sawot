@@ -69,6 +69,21 @@ def build_system_prompt(entity_summary: str) -> str:
     return _SYSTEM_TEMPLATE.format(summary=entity_summary)
 
 
+def _touched_ids(name: str, args: dict, result) -> list[str]:
+    if name == "call_service":
+        eid = args.get("entity_id")
+        return [eid] if eid else []
+    if name == "get_entities":
+        items = result.get("entities") if isinstance(result, dict) else result
+        if isinstance(items, list):
+            return [
+                e["entity_id"]
+                for e in items
+                if isinstance(e, dict) and "entity_id" in e
+            ]
+    return []
+
+
 def _truncate(s: str, limit: int = 600) -> str:
     """Cap tool results in debug events so traces stay small."""
     return s if len(s) <= limit else s[:limit] + "…"
@@ -142,6 +157,7 @@ class Agent:
             )
             for tc in msg.tool_calls:
                 t1 = time.perf_counter()
+                args: dict = {}
                 try:
                     args = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError as exc:
@@ -163,6 +179,9 @@ class Agent:
                         "result": _truncate(content),
                     },
                 )
+                ids = _touched_ids(tc.function.name, args, result)
+                if ids:
+                    await emit("touched", {"entity_ids": ids})
                 history.append(
                     {
                         "role": "tool",

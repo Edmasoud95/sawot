@@ -90,5 +90,36 @@ class HomeAssistant:
             if e["entity_id"].partition(".")[0] in self.SUMMARY_DOMAINS
         )
 
+    CARD_ATTRS = (
+        "brightness",
+        "temperature",
+        "current_temperature",
+        "unit_of_measurement",
+    )
+
+    async def get_cards(self, entity_ids: list[str]) -> list[dict]:
+        """Rich state dicts for the given ids, in the given order."""
+        wanted = set(entity_ids)
+        resp = await self._client.get("/api/states")
+        resp.raise_for_status()
+        by_id = {}
+        for s in resp.json():
+            eid = s["entity_id"]
+            if eid not in wanted:
+                continue
+            by_id[eid] = {
+                "entity_id": eid,
+                "domain": eid.partition(".")[0],
+                "name": s["attributes"].get("friendly_name", eid),
+                "area": self._areas.get(eid),
+                "state": s["state"],
+                "attrs": {
+                    k: s["attributes"][k]
+                    for k in self.CARD_ATTRS
+                    if k in s["attributes"]
+                },
+            }
+        return [by_id[e] for e in entity_ids if e in by_id]
+
     async def aclose(self) -> None:
         await self._client.aclose()

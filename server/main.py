@@ -11,7 +11,7 @@ logger = logging.getLogger("voice")
 WEB_DIR = Path(__file__).resolve().parent.parent / "web" / "dist"
 
 
-def create_app(stt, agent, tts, settings_ctx=None) -> FastAPI:
+def create_app(stt, agent, tts, settings_ctx=None, ha=None) -> FastAPI:
     app = FastAPI()
 
     @app.websocket("/ws")
@@ -37,9 +37,19 @@ def create_app(stt, agent, tts, settings_ctx=None) -> FastAPI:
                     )
                     continue
                 await websocket.send_json({"type": "transcript", "text": text})
+                touched: list[str] = []
+
+                async def on_agent_event(event: str, data: dict) -> None:
+                    if event == "touched":
+                        for eid in data.get("entity_ids", []):
+                            if eid not in touched:
+                                touched.append(eid)
+                        return
+                    await debug(event, data)
+
                 checkpoint = len(history)
                 try:
-                    reply = await agent.run(history, text, on_event=debug)
+                    reply = await agent.run(history, text, on_event=on_agent_event)
                 except Exception:
                     logger.exception("agent failure")
                     del history[checkpoint:]
@@ -48,6 +58,14 @@ def create_app(stt, agent, tts, settings_ctx=None) -> FastAPI:
                     )
                     continue
                 await websocket.send_json({"type": "assistant_text", "text": reply})
+                if ha is not None and touched:
+                    try:
+                        cards = await ha.get_cards(touched[:8])
+                        await websocket.send_json(
+                            {"type": "entities", "entities": cards}
+                        )
+                    except Exception:
+                        logger.exception("entities refresh failed")
                 t1 = time.perf_counter()
                 wav = await run_in_threadpool(tts.synthesize, reply)
                 await debug(
@@ -171,7 +189,7 @@ async def _main() -> None:
         lmstudio_url=config.lmstudio_url,
         http=httpx.AsyncClient(timeout=10.0),
     )
-    app = create_app(stt, agent, tts, settings_ctx=settings_ctx)
+    app = create_app(stt, agent, tts, settings_ctx=settings_ctx, ha=ha)
     server = uvicorn.Server(
         uvicorn.Config(
             app,

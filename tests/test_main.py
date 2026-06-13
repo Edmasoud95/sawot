@@ -136,6 +136,53 @@ def test_agent_failure_rolls_back_history():
     assert agent.entry_history_lens == [0, 0]  # failed turn left nothing behind
 
 
+class FakeHA:
+    def __init__(self):
+        self.service_calls = []
+
+    async def get_cards(self, entity_ids):
+        return [
+            {"entity_id": e, "domain": e.split(".")[0], "name": e,
+             "area": None, "state": "on", "attrs": {}}
+            for e in entity_ids
+        ]
+
+    async def call_service(self, domain, service, entity_id, data=None):
+        self.service_calls.append((domain, service, entity_id, data))
+        return {"ok": True}
+
+
+class TouchingAgent(FakeAgent):
+    async def run(self, history, user_text, on_event=None):
+        if on_event:
+            await on_event("touched", {"entity_ids": ["light.kitchen"]})
+        return await super().run(history, user_text)
+
+
+def test_entities_event_after_tool_using_turn():
+    ha = FakeHA()
+    app = create_app(FakeSTT(), TouchingAgent(), FakeTTS(), ha=ha)
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_bytes(b"fake-audio")
+        recv_json_until(ws, "transcript")
+        recv_json_until(ws, "assistant_text")
+        entities, _ = recv_json_until(ws, "entities")
+        assert entities["entities"][0]["entity_id"] == "light.kitchen"
+        assert recv_bytes_skipping_debug(ws) == b"RIFF-fake-wav"
+
+
+def test_touched_event_not_forwarded_as_debug():
+    ha = FakeHA()
+    app = create_app(FakeSTT(), TouchingAgent(), FakeTTS(), ha=ha)
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_bytes(b"fake-audio")
+        _, before = recv_json_until(ws, "transcript")
+        reply, mid = recv_json_until(ws, "assistant_text")
+        assert all(d["event"] != "touched" for d in before + mid)
+
+
 class DebuggingAgent(FakeAgent):
     """Emits one debug event through the callback, like the real Agent."""
 
