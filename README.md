@@ -40,7 +40,20 @@ Open http://localhost:8765 (or http://<machine-ip>:8765 from your phone —
 note the mic requires HTTPS off-localhost; for phone testing use
 `chrome://flags/#unsafely-treat-insecure-origin-as-secure` or an HTTPS proxy).
 
-Hold the button, speak, release.
+Hold the button, speak, release. With TLS configured (`tls:` in config.yaml,
+self-signed cert in `certs/`), use https:// — required for phone microphone
+access (accept the certificate warning once per device).
+
+## UI features
+
+- **Settings** (gear, top-left): switch the LLM model (live list from
+  LM Studio) and Kokoro voice; applies instantly, persists to `settings.json`.
+- **Advanced mode** (grid icon, top-right): replaces the orb with control
+  cards for the devices each answer touched — toggle lights/switches, set
+  brightness and target temperature directly.
+- **History drawer** (dots, top-right): conversation log; the **debug**
+  toggle shows a per-turn pipeline trace (STT/LLM/tool/TTS timings and
+  arguments) for diagnosing wrong answers.
 
 ## Tests
 
@@ -49,6 +62,9 @@ Hold the button, speak, release.
 ```
 
 End-to-end with real models: `.venv/bin/python scripts/smoke.py sample.wav`
+
+Prompt/tool-choice eval (live LM Studio, dry-run HA — never touches devices):
+`.venv/bin/python scripts/eval.py`
 
 ## Development
 

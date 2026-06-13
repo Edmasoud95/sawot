@@ -2,7 +2,7 @@ home_assistant:
   url: "http://192.168.1.10:8123"
 lm_studio:
   url: "http://192.168.1.11:1234/v1"   # if LM Studio is on the Windows host, use its LAN IP
-  model: "qwen3.5-9b-instruct-pure"
+  model: "google/gemma-4-e4b"
 stt:
   model: "distil-small.en"
   device: "cuda"
