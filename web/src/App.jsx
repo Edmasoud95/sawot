@@ -2,6 +2,7 @@ import Orb from "./components/Orb";
 import Captions from "./components/Captions";
 import PushToTalk from "./components/PushToTalk";
 import HistoryDrawer from "./components/HistoryDrawer";
+import SettingsPanel from "./components/SettingsPanel";
 import { useVoice } from "./hooks/useVoice";
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
       </div>
       <PushToTalk onStart={startTalking} onStop={stopTalking} />
       <HistoryDrawer />
+      <SettingsPanel />
     </main>
   );
 }
