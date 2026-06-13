@@ -198,12 +198,12 @@ def test_to_openai_messages_attachments(tmp_path):
 
     upload_dir = tmp_path / "uploads"
     upload_dir.mkdir()
-    (upload_dir / "abc.txt").write_text("file body")
-    (upload_dir / "img1.png").write_bytes(b"\x89PNG fake")
+    (upload_dir / "abcdef012345.txt").write_text("file body")
+    (upload_dir / "1234567890ab.png").write_bytes(b"\x89PNG fake")
     messages = [
         {"role": "user", "content": "see attached",
-         "attachments": [{"id": "abc", "name": "notes.txt", "kind": "text"},
-                          {"id": "img1", "name": "p.png", "kind": "image"}]},
+         "attachments": [{"id": "abcdef012345", "name": "notes.txt", "kind": "text"},
+                          {"id": "1234567890ab", "name": "p.png", "kind": "image"}]},
         {"role": "assistant", "content": "ok", "thinking": "secret"},
     ]
     out = to_openai_messages(messages, upload_dir)
@@ -215,3 +215,18 @@ def test_to_openai_messages_attachments(tmp_path):
     assert image_part["image_url"]["url"].startswith("data:image/png;base64,")
     # assistant thinking is never sent back to the model
     assert out[1] == {"role": "assistant", "content": "ok"}
+
+
+def test_to_openai_messages_rejects_traversal_ids(tmp_path):
+    from server.chat import to_openai_messages
+
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("TOP SECRET")
+    messages = [{
+        "role": "user", "content": "hi",
+        "attachments": [{"id": "../secret", "name": "x.txt", "kind": "text"}],
+    }]
+    out = to_openai_messages(messages, upload_dir)
+    assert "TOP SECRET" not in str(out)

@@ -147,3 +147,19 @@ async def test_round_cap():
     final = [d for e, d in events if e == "final"][0]
     assert final["content"] == "Sorry, I couldn't complete that."
     assert len(llm.calls) == 5
+
+
+async def test_content_before_tool_round_is_kept():
+    args = json.dumps({"domain": "light", "service": "turn_on",
+                       "entity_id": "light.kitchen"})
+    round1 = [
+        chunk(content="Let me do that. "),
+        chunk(tool_calls=[tc_delta(0, id="c1", name="call_service",
+                                   arguments=args)]),
+    ]
+    round2 = [chunk(content="Done.")]
+    llm = FakeLLM([round1, round2])
+    events = await collect(run_chat(llm, "m", FakeHA(), "sys",
+                                    [{"role": "user", "content": "x"}]))
+    final = [d for e, d in events if e == "final"][0]
+    assert final["content"] == "Let me do that. Done."

@@ -1,8 +1,11 @@
 import base64
 import json
+import re
 import time
 import uuid
 from pathlib import Path
+
+_SAFE_ID = re.compile(r"^[0-9a-f]{12}$")
 
 from server.llm import TOOLS, _touched_ids, execute_tool
 
@@ -25,6 +28,8 @@ def to_openai_messages(messages: list[dict], upload_dir) -> list[dict]:
         text = m.get("content", "")
         images = []
         for a in m.get("attachments", []):
+            if not _SAFE_ID.fullmatch(str(a.get("id", ""))):
+                continue
             path = next(upload_dir.glob(f"{a['id']}.*"), None)
             if a["kind"] == "text":
                 body = (path.read_text(errors="replace")[:50_000]
@@ -146,6 +151,8 @@ async def run_chat(client, model, ha, system_prompt, messages):
     convo = [{"role": "system", "content": system_prompt}, *messages]
     touched: list[str] = []
     finished = False
+    full_content: list[str] = []
+    full_thinking: list[str] = []
     for _ in range(MAX_ROUNDS):
         parser = ThinkTagParser()
         content_parts: list[str] = []
@@ -161,13 +168,16 @@ async def run_chat(client, model, ha, system_prompt, messages):
             reasoning = getattr(delta, "reasoning_content", None)
             if reasoning:
                 thinking_parts.append(reasoning)
+                full_thinking.append(reasoning)
                 yield ("thinking", reasoning)
             if delta.content:
                 for kind, text in parser.feed(delta.content):
                     if kind == "content":
                         content_parts.append(text)
+                        full_content.append(text)
                     else:
                         thinking_parts.append(text)
+                        full_thinking.append(text)
                     yield (kind, text)
             for tc in delta.tool_calls or []:
                 slot = tool_calls.setdefault(
@@ -181,11 +191,12 @@ async def run_chat(client, model, ha, system_prompt, messages):
                     slot["arguments"] += tc.function.arguments
         for kind, text in parser.flush():
             (content_parts if kind == "content" else thinking_parts).append(text)
+            (full_content if kind == "content" else full_thinking).append(text)
             yield (kind, text)
         content = "".join(content_parts)
         if not tool_calls:
-            yield ("final", {"content": content.strip(),
-                             "thinking": "".join(thinking_parts).strip()})
+            yield ("final", {"content": "".join(full_content).strip(),
+                             "thinking": "".join(full_thinking).strip()})
             finished = True
             break
         calls = [tool_calls[i] for i in sorted(tool_calls)]
@@ -215,8 +226,8 @@ async def run_chat(client, model, ha, system_prompt, messages):
             convo.append({"role": "tool", "tool_call_id": c["id"],
                           "content": result_json})
     if not finished:
-        yield ("final", {"content": "Sorry, I couldn't complete that.",
-                         "thinking": ""})
+        yield ("final", {"content": ("".join(full_content) + "\n\nSorry, I couldn't complete that.").strip(),
+                         "thinking": "".join(full_thinking).strip()})
     if touched:
         try:
             yield ("entities", await ha.get_cards(touched[:8]))
