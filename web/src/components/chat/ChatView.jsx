@@ -15,7 +15,7 @@ export default function ChatView({ sendControl }) {
   }, [loadConversations]);
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-1 pt-[calc(52px+env(safe-area-inset-top))]">
+    <div className="flex min-h-0 w-full flex-1 pt-3">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         {active ? (

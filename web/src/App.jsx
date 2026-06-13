@@ -14,12 +14,19 @@ export default function App() {
   const mode = useVoiceStore((s) => s.mode);
   return (
     <main className="grain vignette relative flex h-dvh flex-col items-center overflow-hidden pb-[calc(28px+env(safe-area-inset-bottom))]">
-      <h1 className="absolute left-6 top-[calc(20px+env(safe-area-inset-top))] select-none font-mono text-[0.65rem] font-light uppercase tracking-[0.32em] text-zinc-600">
-        Voice
-      </h1>
-      <div className="absolute right-5 top-[calc(64px+env(safe-area-inset-top))] z-30">
-        <ModeSwitch />
-      </div>
+      {/* Top chrome lives in normal flow so it can never overlap view content. */}
+      <header className="z-30 flex w-full shrink-0 items-center justify-between gap-3 px-5 pt-[calc(12px+env(safe-area-inset-top))]">
+        <div className="flex items-center gap-4">
+          <h1 className="select-none font-mono text-[0.65rem] font-light uppercase tracking-[0.32em] text-zinc-600">
+            Voice
+          </h1>
+          <SettingsPanel />
+        </div>
+        <div className="flex items-center gap-3">
+          <ModeSwitch />
+          <HistoryDrawer />
+        </div>
+      </header>
       {mode === "chat" ? (
         <ChatView sendControl={sendControl} />
       ) : (
@@ -39,8 +46,6 @@ export default function App() {
           <PushToTalk onStart={startTalking} onStop={stopTalking} />
         </>
       )}
-      <HistoryDrawer />
-      <SettingsPanel />
     </main>
   );
 }

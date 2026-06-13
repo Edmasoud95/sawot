@@ -88,7 +88,7 @@ export default function SettingsPanel() {
         onClick={() => setOpen(!open)}
         aria-label="Settings"
         aria-expanded={open}
-        className="absolute left-5 top-[calc(52px+env(safe-area-inset-top))] z-30 grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/[0.04] text-zinc-400 backdrop-blur-md transition-colors duration-300 hover:border-white/25 hover:text-zinc-200"
+        className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/[0.04] text-zinc-400 backdrop-blur-md transition-colors duration-300 hover:border-white/25 hover:text-zinc-200"
       >
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
           <circle cx="12" cy="12" r="3" />
@@ -103,7 +103,7 @@ export default function SettingsPanel() {
       />
       <div
         ref={panel}
-        className="invisible absolute left-5 top-[calc(100px+env(safe-area-inset-top))] z-30 flex w-[min(85vw,320px)] flex-col gap-4 rounded-2xl border border-white/10 bg-ink-900/90 p-5 opacity-0 backdrop-blur-2xl"
+        className="invisible absolute left-5 top-[calc(64px+env(safe-area-inset-top))] z-40 flex w-[min(85vw,320px)] flex-col gap-4 rounded-2xl border border-white/10 bg-ink-900/90 p-5 opacity-0 backdrop-blur-2xl"
       >
         <h2 className="font-mono text-[0.65rem] font-light uppercase tracking-[0.3em] text-zinc-500">
           Settings

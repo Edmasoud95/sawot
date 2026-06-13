@@ -76,7 +76,7 @@ export default function HistoryDrawer() {
         onClick={toggleDrawer}
         aria-label="Toggle conversation history"
         aria-expanded={drawerOpen}
-        className="absolute right-5 top-[calc(16px+env(safe-area-inset-top))] z-30 grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/[0.04] text-zinc-400 backdrop-blur-md transition-colors duration-300 hover:border-white/25 hover:text-zinc-200"
+        className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/[0.04] text-zinc-400 backdrop-blur-md transition-colors duration-300 hover:border-white/25 hover:text-zinc-200"
       >
         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
           <circle cx="5" cy="12" r="1.6" />
@@ -92,7 +92,7 @@ export default function HistoryDrawer() {
       />
       <aside
         ref={panel}
-        className="absolute inset-y-0 right-0 z-30 w-[min(85vw,380px)] overflow-y-auto border-l border-white/10 bg-ink-900/90 p-7 pt-[calc(72px+env(safe-area-inset-top))] backdrop-blur-2xl"
+        className="absolute inset-y-0 right-0 z-40 w-[min(85vw,380px)] overflow-y-auto border-l border-white/10 bg-ink-900/90 p-7 pt-[calc(72px+env(safe-area-inset-top))] backdrop-blur-2xl"
       >
         <div className="mb-6 flex items-center justify-between">
           <h2 className="font-mono text-[0.65rem] font-light uppercase tracking-[0.3em] text-zinc-500">
