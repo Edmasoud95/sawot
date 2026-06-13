@@ -34,6 +34,7 @@ async def _handle_control(websocket, ha, raw: str) -> None:
     ):
         await websocket.send_json({"type": "error", "message": "control not allowed"})
         return
+    logger.info("control: %s.%s on %s data=%s", domain, service, entity_id, msg.get("data"))
     try:
         await ha.call_service(domain, service, entity_id, msg.get("data"))
         cards = await ha.get_cards([entity_id])
