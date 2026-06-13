@@ -11,7 +11,7 @@ logger = logging.getLogger("voice")
 WEB_DIR = Path(__file__).resolve().parent.parent / "web" / "dist"
 
 
-def create_app(stt, agent, tts) -> FastAPI:
+def create_app(stt, agent, tts, settings_ctx=None) -> FastAPI:
     app = FastAPI()
 
     @app.websocket("/ws")
@@ -61,10 +61,68 @@ def create_app(stt, agent, tts) -> FastAPI:
         except WebSocketDisconnect:
             pass
 
+    if settings_ctx is not None:
+        _register_settings_routes(app, settings_ctx)
+
     if WEB_DIR.is_dir():
         app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
     return app
+
+
+async def _fetch_models(ctx) -> list[str]:
+    resp = await ctx.http.get(f"{ctx.lmstudio_url}/models")
+    resp.raise_for_status()
+    return [m["id"] for m in resp.json().get("data", [])]
+
+
+def _register_settings_routes(app, ctx) -> None:
+    from fastapi import HTTPException
+
+    from server.settings import KOKORO_VOICES
+
+    def payload(models: list[str], error: str | None = None) -> dict:
+        data = {
+            "model": ctx.agent.model,
+            "voice": ctx.tts.voice,
+            "models": models,
+            "voices": KOKORO_VOICES,
+        }
+        if error:
+            data["models_error"] = error
+        return data
+
+    @app.get("/api/settings")
+    async def get_settings():
+        try:
+            return payload(await _fetch_models(ctx))
+        except Exception as exc:
+            return payload([], error=str(exc))
+
+    @app.post("/api/settings")
+    async def post_settings(body: dict):
+        model = body.get("model")
+        voice = body.get("voice")
+        if voice is not None and voice not in KOKORO_VOICES:
+            raise HTTPException(400, f"unknown voice: {voice}")
+        models: list[str] = []
+        if model is not None:
+            try:
+                models = await _fetch_models(ctx)
+            except Exception as exc:
+                raise HTTPException(502, f"LM Studio unreachable: {exc}")
+            if model not in models:
+                raise HTTPException(400, f"unknown model: {model}")
+            ctx.agent.set_model(model)
+        if voice is not None:
+            ctx.tts.set_voice(voice)
+        ctx.store.save({"model": ctx.agent.model, "voice": ctx.tts.voice})
+        if not models:
+            try:
+                models = await _fetch_models(ctx)
+            except Exception:
+                pass
+        return payload(models)
 
 
 def main() -> None:
@@ -86,17 +144,34 @@ async def _main() -> None:
     logging.basicConfig(level=logging.INFO)
     config = load_config()
 
+    import httpx
+
+    from server.settings import SettingsContext, SettingsStore
+
     ha = HomeAssistant(config.ha_url, config.ha_token)
     summary = await _startup_summary(ha)
+
+    store = SettingsStore()
+    overrides = store.load()
+    model = overrides.get("model", config.lmstudio_model)
+    voice = overrides.get("voice", config.tts_voice)
+
     llm_client = AsyncOpenAI(base_url=config.lmstudio_url, api_key="lm-studio")
-    agent = Agent(llm_client, config.lmstudio_model, ha, build_system_prompt(summary))
+    agent = Agent(llm_client, model, ha, build_system_prompt(summary))
 
     logger.info("loading STT model %s on %s", config.stt_model, config.stt_device)
     stt = Transcriber(config.stt_model, device=config.stt_device)
-    logger.info("loading Kokoro TTS (voice=%s)", config.tts_voice)
-    tts = KokoroTTS(voice=config.tts_voice)
+    logger.info("loading Kokoro TTS (voice=%s)", voice)
+    tts = KokoroTTS(voice=voice)
 
-    app = create_app(stt, agent, tts)
+    settings_ctx = SettingsContext(
+        store=store,
+        agent=agent,
+        tts=tts,
+        lmstudio_url=config.lmstudio_url,
+        http=httpx.AsyncClient(timeout=10.0),
+    )
+    app = create_app(stt, agent, tts, settings_ctx=settings_ctx)
     server = uvicorn.Server(
         uvicorn.Config(
             app,

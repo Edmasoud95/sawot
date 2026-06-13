@@ -18,6 +18,13 @@ class KokoroTTS:
         self._pipe = KPipeline(lang_code="a")  # 'a' = American English
         self._voice = voice
 
+    @property
+    def voice(self) -> str:
+        return self._voice
+
+    def set_voice(self, voice: str) -> None:
+        self._voice = voice
+
     def synthesize(self, text: str) -> bytes:
         chunks = [audio for _, _, audio in self._pipe(text, voice=self._voice)]
         if chunks:

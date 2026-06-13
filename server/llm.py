@@ -99,6 +99,13 @@ class Agent:
         self._ha = ha
         self._system = system_prompt
 
+    @property
+    def model(self) -> str:
+        return self._model
+
+    def set_model(self, model: str) -> None:
+        self._model = model
+
     async def run(self, history: list[dict], user_text: str, on_event=None) -> str:
         emit = _safe_emitter(on_event)
         history.append({"role": "user", "content": user_text})

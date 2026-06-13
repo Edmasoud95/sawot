@@ -7,3 +7,4 @@ out.wav
 node_modules/
 web/dist/
 certs/
+settings.json

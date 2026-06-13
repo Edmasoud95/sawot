@@ -1,0 +1,38 @@
+import json
+from dataclasses import dataclass
+from pathlib import Path
+
+# Curated Kokoro voices exposed in the UI (full list lives in the model card).
+KOKORO_VOICES = [
+    "af_heart", "af_alloy", "af_bella", "af_nicole", "af_nova", "af_sky",
+    "am_adam", "am_michael", "am_onyx",
+    "bf_emma", "bf_isabella", "bm_george", "bm_lewis",
+]
+
+
+class SettingsStore:
+    """User-tunable runtime settings persisted to a JSON file.
+
+    Values here override config.yaml defaults at startup."""
+
+    def __init__(self, path: str = "settings.json"):
+        self._path = Path(path)
+
+    def load(self) -> dict:
+        if self._path.exists():
+            return json.loads(self._path.read_text())
+        return {}
+
+    def save(self, data: dict) -> None:
+        self._path.write_text(json.dumps(data, indent=2))
+
+
+@dataclass
+class SettingsContext:
+    """Everything the settings endpoints need, injected for testability."""
+
+    store: SettingsStore
+    agent: object
+    tts: object
+    lmstudio_url: str
+    http: object  # httpx.AsyncClient
