@@ -53,3 +53,47 @@ class ChatStore:
                 continue
             out.append({k: conv[k] for k in ("id", "title", "model", "created", "updated")})
         return sorted(out, key=lambda c: c["updated"], reverse=True)
+
+
+class ThinkTagParser:
+    """Splits streamed text into ('thinking'|'content', text) pieces,
+    tolerating <think>/</think> tags split across chunks: a suffix that
+    could begin the next expected tag is held back until disambiguated."""
+
+    OPEN, CLOSE = "<think>", "</think>"
+
+    def __init__(self):
+        self._in_think = False
+        self._buf = ""
+
+    def feed(self, text: str) -> list[tuple[str, str]]:
+        self._buf += text
+        out: list[tuple[str, str]] = []
+        kind = lambda: "thinking" if self._in_think else "content"
+        while self._buf:
+            tag = self.CLOSE if self._in_think else self.OPEN
+            idx = self._buf.find(tag)
+            if idx != -1:
+                if idx:
+                    out.append((kind(), self._buf[:idx]))
+                self._buf = self._buf[idx + len(tag):]
+                self._in_think = not self._in_think
+                continue
+            keep = 0
+            for k in range(min(len(tag) - 1, len(self._buf)), 0, -1):
+                if tag.startswith(self._buf[-k:]):
+                    keep = k
+                    break
+            emit_len = len(self._buf) - keep
+            if emit_len:
+                out.append((kind(), self._buf[:emit_len]))
+                self._buf = self._buf[emit_len:]
+            break
+        return out
+
+    def flush(self) -> list[tuple[str, str]]:
+        out = []
+        if self._buf:
+            out.append(("thinking" if self._in_think else "content", self._buf))
+            self._buf = ""
+        return out
