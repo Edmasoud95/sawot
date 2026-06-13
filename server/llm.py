@@ -107,6 +107,31 @@ def _safe_emitter(on_event):
     return emit
 
 
+MAX_TOOL_ENTITIES = 60
+
+
+async def execute_tool(ha, name: str, args: dict):
+    try:
+        if name == "get_entities":
+            entities = await ha.get_entities(args.get("domain"), args.get("area"))
+            if len(entities) > MAX_TOOL_ENTITIES:
+                return {
+                    "entities": entities[:MAX_TOOL_ENTITIES],
+                    "note": (
+                        f"{len(entities) - MAX_TOOL_ENTITIES} more omitted — "
+                        "narrow the query with domain and/or area"
+                    ),
+                }
+            return entities
+        if name == "call_service":
+            return await ha.call_service(
+                args["domain"], args["service"], args["entity_id"], args.get("data")
+            )
+        return {"error": f"unknown tool: {name}"}
+    except Exception as exc:  # surfaced to the model so it can apologize
+        return {"error": str(exc)}
+
+
 class Agent:
     """Runs the chat + tool-calling loop against an OpenAI-compatible LLM."""
 
@@ -197,27 +222,5 @@ class Agent:
         history.append({"role": "assistant", "content": reply})
         return reply
 
-    MAX_TOOL_ENTITIES = 60
-
     async def _execute(self, name: str, args: dict):
-        try:
-            if name == "get_entities":
-                entities = await self._ha.get_entities(
-                    args.get("domain"), args.get("area")
-                )
-                if len(entities) > self.MAX_TOOL_ENTITIES:
-                    return {
-                        "entities": entities[: self.MAX_TOOL_ENTITIES],
-                        "note": (
-                            f"{len(entities) - self.MAX_TOOL_ENTITIES} more omitted — "
-                            "narrow the query with domain and/or area"
-                        ),
-                    }
-                return entities
-            if name == "call_service":
-                return await self._ha.call_service(
-                    args["domain"], args["service"], args["entity_id"], args.get("data")
-                )
-            return {"error": f"unknown tool: {name}"}
-        except Exception as exc:  # surfaced to the model so it can apologize
-            return {"error": str(exc)}
+        return await execute_tool(self._ha, name, args)
