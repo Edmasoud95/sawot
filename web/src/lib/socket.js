@@ -31,6 +31,10 @@ export class VoiceSocket {
     return this.ws.readyState === WebSocket.OPEN;
   }
 
+  sendControl(message) {
+    if (this.ready) this.ws.send(JSON.stringify(message));
+  }
+
   sendAudio(arrayBuffer) {
     this.ws.send(arrayBuffer);
   }

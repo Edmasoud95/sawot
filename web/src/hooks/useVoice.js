@@ -23,6 +23,8 @@ export function useVoice() {
         } else if (msg.type === "assistant_text") {
           s.setAssistantCaption(msg.text);
           s.addTurn("assistant", msg.text);
+        } else if (msg.type === "entities") {
+          s.setCards(msg.entities);
         } else if (msg.type === "error") {
           s.setAssistantCaption(msg.message);
           s.setStatus("idle");
@@ -62,5 +64,6 @@ export function useVoice() {
       const s = useVoiceStore.getState();
       if (s.status === "recording") s.setStatus("idle");
     },
+    sendControl: (message) => socketRef.current?.sendControl(message),
   };
 }
