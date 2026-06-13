@@ -120,8 +120,8 @@ def _register_settings_routes(app, ctx) -> None:
         if not models:
             try:
                 models = await _fetch_models(ctx)
-            except Exception:
-                pass
+            except Exception as exc:
+                return payload([], error=str(exc))
         return payload(models)
 
 
@@ -181,7 +181,11 @@ async def _main() -> None:
             ssl_keyfile=config.ssl_keyfile,
         )
     )
-    await server.serve()
+    try:
+        await server.serve()
+    finally:
+        await settings_ctx.http.aclose()
+        await ha.aclose()
 
 
 async def _startup_summary(ha) -> str:

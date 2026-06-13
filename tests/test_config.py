@@ -12,7 +12,7 @@ def test_load_config(tmp_path, monkeypatch):
         home_assistant:
           url: "http://ha.local:8123/"
         lm_studio:
-          url: "http://localhost:1234/v1"
+          url: "http://localhost:1234/v1/"
           model: "qwen3-8b"
         stt:
           model: "distil-small.en"
@@ -29,7 +29,7 @@ def test_load_config(tmp_path, monkeypatch):
 
     assert cfg.ha_url == "http://ha.local:8123"  # trailing slash stripped
     assert cfg.ha_token == "secret-token"
-    assert cfg.lmstudio_url == "http://localhost:1234/v1"
+    assert cfg.lmstudio_url == "http://localhost:1234/v1"  # trailing slash stripped
     assert cfg.lmstudio_model == "qwen3-8b"
     assert cfg.stt_model == "distil-small.en"
     assert cfg.stt_device == "cpu"

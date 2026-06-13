@@ -30,7 +30,7 @@ def load_config(path: str = "config.yaml") -> Config:
     return Config(
         ha_url=raw["home_assistant"]["url"].rstrip("/"),
         ha_token=token,
-        lmstudio_url=raw["lm_studio"]["url"],
+        lmstudio_url=raw["lm_studio"]["url"].rstrip("/"),
         lmstudio_model=raw["lm_studio"]["model"],
         stt_model=raw["stt"]["model"],
         stt_device=raw["stt"].get("device", "cuda"),

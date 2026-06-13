@@ -15,12 +15,15 @@ class SettingsStore:
 
     Values here override config.yaml defaults at startup."""
 
-    def __init__(self, path: str = "settings.json"):
-        self._path = Path(path)
+    def __init__(self, path: str | None = None):
+        self._path = Path(path) if path else Path(__file__).resolve().parent.parent / "settings.json"
 
     def load(self) -> dict:
-        if self._path.exists():
-            return json.loads(self._path.read_text())
+        try:
+            if self._path.exists():
+                return json.loads(self._path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {}
         return {}
 
     def save(self, data: dict) -> None:

@@ -124,6 +124,24 @@ def test_store_roundtrip(tmp_path):
     assert store.load() == {"model": "m"}
 
 
+def test_store_load_survives_corrupt_file(tmp_path):
+    p = tmp_path / "s.json"
+    p.write_text("{truncated")
+    assert SettingsStore(str(p)).load() == {}
+
+
+def test_post_voice_only_with_lmstudio_down_reports_models_error(tmp_path):
+    def down(request):
+        raise httpx.ConnectError("refused")
+
+    client, _, tts, _ = make_client(tmp_path, handler=down)
+    resp = client.post("/api/settings", json={"voice": "am_adam"})
+    assert resp.status_code == 200
+    assert tts.voice == "am_adam"
+    data = resp.json()
+    assert "models_error" in data
+
+
 def test_no_settings_routes_without_ctx():
     app = create_app(FakeSTT(), FakeAgent(), FakeTTS())
     client = TestClient(app)
