@@ -1,9 +1,46 @@
+import base64
 import json
 import time
 import uuid
 from pathlib import Path
 
 from server.llm import TOOLS, _touched_ids, execute_tool
+
+HISTORY_LIMIT = 30
+
+_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+         ".webp": "image/webp", ".gif": "image/gif"}
+
+
+def to_openai_messages(messages: list[dict], upload_dir) -> list[dict]:
+    """Stored messages -> OpenAI format. Text attachments are inlined as
+    fenced blocks; images become base64 image_url parts; assistant thinking
+    and cards are never sent back to the model."""
+    upload_dir = Path(upload_dir)
+    out = []
+    for m in messages[-HISTORY_LIMIT:]:
+        if m["role"] == "assistant":
+            out.append({"role": "assistant", "content": m.get("content", "")})
+            continue
+        text = m.get("content", "")
+        images = []
+        for a in m.get("attachments", []):
+            path = next(upload_dir.glob(f"{a['id']}.*"), None)
+            if a["kind"] == "text":
+                body = (path.read_text(errors="replace")[:50_000]
+                        if path else "(attachment missing)")
+                text += f"\n\n```{a['name']}\n{body}\n```"
+            elif a["kind"] == "image" and path:
+                b64 = base64.b64encode(path.read_bytes()).decode()
+                mime = _MIME.get(path.suffix.lower(), "image/png")
+                images.append({"type": "image_url",
+                               "image_url": {"url": f"data:{mime};base64,{b64}"}})
+        if images:
+            out.append({"role": "user",
+                        "content": [{"type": "text", "text": text}, *images]})
+        else:
+            out.append({"role": "user", "content": text})
+    return out
 
 MAX_ROUNDS = 5
 

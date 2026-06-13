@@ -48,7 +48,7 @@ logger = logging.getLogger("voice")
 WEB_DIR = Path(__file__).resolve().parent.parent / "web" / "dist"
 
 
-def create_app(stt, agent, tts, settings_ctx=None, ha=None) -> FastAPI:
+def create_app(stt, agent, tts, settings_ctx=None, ha=None, chat_ctx=None) -> FastAPI:
     app = FastAPI()
 
     @app.websocket("/ws")
@@ -126,6 +126,11 @@ def create_app(stt, agent, tts, settings_ctx=None, ha=None) -> FastAPI:
 
     if settings_ctx is not None:
         _register_settings_routes(app, settings_ctx)
+
+    if chat_ctx is not None:
+        from server.chat_routes import register_chat_routes
+
+        register_chat_routes(app, chat_ctx)
 
     if WEB_DIR.is_dir():
         app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
