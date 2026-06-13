@@ -247,6 +247,26 @@ async def test_touched_events_for_tools():
     ]
 
 
+async def test_no_touched_event_for_failed_tool():
+    class BrokenHA(FakeHA):
+        async def call_service(self, *a, **k):
+            raise RuntimeError("HA down")
+
+    tc = FakeToolCall(
+        "c1", "call_service",
+        json.dumps({"domain": "light", "service": "turn_on",
+                    "entity_id": "light.kitchen"}),
+    )
+    llm = FakeLLM([
+        make_response(tool_calls=[tc]),
+        make_response(content="Sorry."),
+    ])
+    agent = Agent(llm, "test-model", BrokenHA(), system_prompt="sys")
+    rec = RecordingEvents()
+    await agent.run([], "x", on_event=rec)
+    assert all(e != "touched" for e, _ in rec.events)
+
+
 async def test_get_entities_tool_result_is_capped():
     class HugeHA(FakeHA):
         async def get_entities(self, domain=None, area=None):

@@ -70,6 +70,8 @@ def build_system_prompt(entity_summary: str) -> str:
 
 
 def _touched_ids(name: str, args: dict, result) -> list[str]:
+    if isinstance(result, dict) and "error" in result:
+        return []
     if name == "call_service":
         eid = args.get("entity_id")
         return [eid] if eid else []
