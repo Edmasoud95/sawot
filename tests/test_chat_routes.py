@@ -230,3 +230,99 @@ def test_to_openai_messages_rejects_traversal_ids(tmp_path):
     }]
     out = to_openai_messages(messages, upload_dir)
     assert "TOP SECRET" not in str(out)
+
+
+def make_pdf_bytes(text="hello pdf world"):
+    import io as _io
+
+    from pypdf import PdfWriter
+    from pypdf.generic import (
+        DecodedStreamObject,
+        DictionaryObject,
+        NameObject,
+    )
+
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=200, height=200)
+    stream = DecodedStreamObject()
+    stream.set_data(f"BT /F1 12 Tf 10 100 Td ({text}) Tj ET".encode())
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+    })
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({
+            NameObject("/F1"): writer._add_object(font)
+        })
+    })
+    buf = _io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+def test_upload_pdf_extracts_text(tmp_path):
+    pdf = make_pdf_bytes("hello pdf world")
+    client, ctx = make_client(tmp_path)
+    resp = client.post(
+        "/api/chat/upload",
+        files={"file": ("doc.pdf", io.BytesIO(pdf), "application/pdf")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["kind"] == "pdf"
+    assert "hello pdf world" in body["text"]
+    assert (ctx.upload_dir / f"{body['id']}.pdf").exists()
+    assert (ctx.upload_dir / f"{body['id']}.pdftxt").exists()
+
+
+def test_upload_invalid_pdf_400(tmp_path):
+    client, _ = make_client(tmp_path)
+    resp = client.post(
+        "/api/chat/upload",
+        files={"file": ("bad.pdf", io.BytesIO(b"not a pdf"), "application/pdf")},
+    )
+    assert resp.status_code == 400
+
+
+def test_serve_uploaded_image(tmp_path):
+    client, ctx = make_client(tmp_path)
+    up = client.post(
+        "/api/chat/upload",
+        files={"file": ("p.png", io.BytesIO(b"\x89PNG fake"), "image/png")},
+    ).json()
+    resp = client.get(f"/api/chat/uploads/{up['id']}")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+    assert resp.content == b"\x89PNG fake"
+
+
+def test_serve_upload_rejects_bad_ids(tmp_path):
+    client, ctx = make_client(tmp_path)
+    (tmp_path / "uploads").mkdir(exist_ok=True)
+    assert client.get("/api/chat/uploads/missing0000ab").status_code == 404
+    assert client.get("/api/chat/uploads/..%2Fsecret").status_code == 404
+
+
+def test_serve_upload_never_serves_pdftxt_sidecar(tmp_path):
+    client, ctx = make_client(tmp_path)
+    ctx.upload_dir.mkdir(parents=True, exist_ok=True)
+    (ctx.upload_dir / "aaaabbbbcccc.pdftxt").write_text("sidecar")
+    assert client.get("/api/chat/uploads/aaaabbbbcccc").status_code == 404
+
+
+def test_to_openai_messages_pdf_kind(tmp_path):
+    from server.chat import to_openai_messages
+
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    (upload_dir / "aaaabbbbcccc.pdf").write_bytes(b"%PDF binary")
+    (upload_dir / "aaaabbbbcccc.pdftxt").write_text("extracted pdf text")
+    messages = [{
+        "role": "user", "content": "summarize",
+        "attachments": [{"id": "aaaabbbbcccc", "name": "doc.pdf", "kind": "pdf"}],
+    }]
+    out = to_openai_messages(messages, upload_dir)
+    assert "extracted pdf text" in out[0]["content"]
+    assert "%PDF binary" not in str(out)

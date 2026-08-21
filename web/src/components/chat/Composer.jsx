@@ -3,7 +3,7 @@ import { useChatStore } from "../../chatStore";
 import { uploadFile } from "../../lib/chatApi";
 import { useModels } from "./useModels";
 
-const ACCEPT = "image/*,.txt,.md,.csv,.json,.py,.js,.ts,.yaml,.yml,.html,.css";
+const ACCEPT = "image/*,.pdf,.txt,.md,.csv,.json,.py,.js,.ts,.yaml,.yml,.html,.css";
 const MAX_HEIGHT = 184; // ~8 lines of mono at 0.85rem
 const VISION_RE = /vl|vision/i;
 
@@ -20,13 +20,6 @@ const ArrowUp = () => (
 const Stop = () => (
   <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
     <rect x="6" y="6" width="12" height="12" rx="2" />
-  </svg>
-);
-const ImageIcon = () => (
-  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-    <rect x="3" y="3" width="18" height="18" rx="2" />
-    <circle cx="8.5" cy="8.5" r="1.5" />
-    <path d="M21 15l-5-5L5 21" />
   </svg>
 );
 const FileIcon = () => (
@@ -113,24 +106,41 @@ export default function Composer() {
       <div className="mx-auto max-w-3xl rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-md transition-colors duration-300 focus-within:border-aurora-teal/40">
         {pendingAttachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 border-b border-white/5 px-3 pb-2 pt-2.5">
-            {pendingAttachments.map((a) => (
-              <span
-                key={a.id}
-                className="flex max-w-[180px] items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] py-1 pl-2.5 pr-1.5 font-mono text-[0.62rem] text-zinc-300"
-              >
-                <span className={a.kind === "image" ? "text-aurora-ice" : "text-zinc-500"}>
-                  {a.kind === "image" ? <ImageIcon /> : <FileIcon />}
+            {pendingAttachments.map((a) =>
+              a.kind === "image" ? (
+                <span key={a.id} className="group relative block">
+                  <img
+                    src={`/api/chat/uploads/${a.id}`}
+                    alt={a.name}
+                    className="h-14 w-14 rounded-lg border border-white/10 object-cover"
+                  />
+                  <button
+                    onClick={() => removeAttachment(a.id)}
+                    aria-label={`Remove ${a.name}`}
+                    className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full border border-white/15 bg-ink-900 text-zinc-400 transition-colors duration-200 hover:bg-white/10 hover:text-zinc-100"
+                  >
+                    ×
+                  </button>
                 </span>
-                <span className="truncate">{a.name}</span>
-                <button
-                  onClick={() => removeAttachment(a.id)}
-                  aria-label={`Remove ${a.name}`}
-                  className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-white/10 hover:text-zinc-200"
+              ) : (
+                <span
+                  key={a.id}
+                  className="flex max-w-[180px] items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] py-1 pl-2.5 pr-1.5 font-mono text-[0.62rem] text-zinc-300"
                 >
-                  ×
-                </button>
-              </span>
-            ))}
+                  <span className="text-zinc-500">
+                    <FileIcon />
+                  </span>
+                  <span className="truncate">{a.name}</span>
+                  <button
+                    onClick={() => removeAttachment(a.id)}
+                    aria-label={`Remove ${a.name}`}
+                    className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-white/10 hover:text-zinc-200"
+                  >
+                    ×
+                  </button>
+                </span>
+              )
+            )}
           </div>
         )}
         <div className="flex items-end gap-2 px-2.5 py-2">

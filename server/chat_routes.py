@@ -29,7 +29,7 @@ class ChatContext:
 
 def register_chat_routes(app, ctx: ChatContext) -> None:
     from fastapi import HTTPException, UploadFile
-    from fastapi.responses import Response, StreamingResponse
+    from fastapi.responses import FileResponse, Response, StreamingResponse
 
     from server.chat import run_chat, to_openai_messages
 
@@ -82,7 +82,41 @@ def register_chat_routes(app, ctx: ChatContext) -> None:
             text = data.decode("utf-8", errors="replace")[:TEXT_CAP]
             (ctx.upload_dir / f"{uid}{ext}").write_bytes(data)
             return {"id": uid, "name": file.filename, "kind": "text", "text": text}
+        if ext == ".pdf":
+            import io
+
+            from pypdf import PdfReader
+
+            try:
+                reader = PdfReader(io.BytesIO(data))
+                text = "\n".join(
+                    page.extract_text() or "" for page in reader.pages
+                ).strip()[:TEXT_CAP]
+            except Exception as exc:
+                raise HTTPException(400, f"could not read PDF: {exc}")
+            (ctx.upload_dir / f"{uid}.pdf").write_bytes(data)
+            (ctx.upload_dir / f"{uid}.pdftxt").write_text(text)
+            return {"id": uid, "name": file.filename, "kind": "pdf", "text": text}
         raise HTTPException(400, f"unsupported file type: {ext or 'unknown'}")
+
+    @app.get("/api/chat/uploads/{uid}")
+    async def serve_upload(uid: str):
+        from server.chat import _SAFE_ID
+
+        if not _SAFE_ID.fullmatch(uid):
+            raise HTTPException(404)
+        path = next(
+            (p for p in ctx.upload_dir.glob(f"{uid}.*") if p.suffix != ".pdftxt"),
+            None,
+        )
+        if path is None:
+            raise HTTPException(404)
+        media = {
+            ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".webp": "image/webp", ".gif": "image/gif",
+            ".pdf": "application/pdf",
+        }.get(path.suffix.lower(), "text/plain; charset=utf-8")
+        return FileResponse(path, media_type=media)
 
     def sse(obj: dict) -> str:
         return f"data: {json.dumps(obj)}\n\n"

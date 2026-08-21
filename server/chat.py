@@ -31,7 +31,12 @@ def to_openai_messages(messages: list[dict], upload_dir) -> list[dict]:
             if not _SAFE_ID.fullmatch(str(a.get("id", ""))):
                 continue
             path = next(upload_dir.glob(f"{a['id']}.*"), None)
-            if a["kind"] == "text":
+            if a["kind"] == "pdf":
+                sidecar = upload_dir / f"{a['id']}.pdftxt"
+                body = (sidecar.read_text(errors="replace")[:50_000]
+                        if sidecar.exists() else "(attachment missing)")
+                text += f"\n\n```{a['name']}\n{body}\n```"
+            elif a["kind"] == "text":
                 body = (path.read_text(errors="replace")[:50_000]
                         if path else "(attachment missing)")
                 text += f"\n\n```{a['name']}\n{body}\n```"

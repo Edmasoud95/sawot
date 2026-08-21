@@ -114,22 +114,50 @@ export function CardGrid({ cards, sendControl }) {
   );
 }
 
+const uploadUrl = (a) => `/api/chat/uploads/${a.id}`;
+
+function Attachment({ a }) {
+  if (a.kind === "image") {
+    return (
+      <a
+        href={uploadUrl(a)}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`Open ${a.name} full size`}
+        className="block overflow-hidden rounded-xl border border-white/10 transition-opacity hover:opacity-90"
+      >
+        <img
+          src={uploadUrl(a)}
+          alt={a.name}
+          loading="lazy"
+          className="max-h-48 max-w-full object-cover"
+        />
+      </a>
+    );
+  }
+  return (
+    <a
+      href={uploadUrl(a)}
+      target="_blank"
+      rel="noreferrer"
+      className="flex max-w-[200px] items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 font-mono text-[0.62rem] text-zinc-300 transition-colors hover:border-white/25 hover:text-zinc-100"
+    >
+      <span className="text-zinc-500">
+        <FileIcon />
+      </span>
+      <span className="truncate">{a.name}</span>
+    </a>
+  );
+}
+
 function UserMessage({ message }) {
   return (
     <div className="flex justify-end">
       <div className="max-w-[80%] rounded-2xl bg-white/5 px-4 py-2.5">
         {message.attachments?.length > 0 && (
-          <div className="mb-1.5 flex flex-wrap gap-1.5">
+          <div className="mb-1.5 flex flex-wrap items-start gap-1.5">
             {message.attachments.map((a) => (
-              <span
-                key={a.id}
-                className="flex max-w-[180px] items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 font-mono text-[0.62rem] text-zinc-300"
-              >
-                <span className={a.kind === "image" ? "text-aurora-ice" : "text-zinc-500"}>
-                  {a.kind === "image" ? <ImageIcon /> : <FileIcon />}
-                </span>
-                <span className="truncate">{a.name}</span>
-              </span>
+              <Attachment key={a.id} a={a} />
             ))}
           </div>
         )}
