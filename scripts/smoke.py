@@ -11,21 +11,24 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 from server.config import load_config
 from server.ha import HomeAssistant
+from server.ha_tools import build_ha_tools
 from server.llm import Agent, build_system_prompt
 from server.stt import Transcriber
 from server.tts import KokoroTTS
 
 
 async def main(wav_path: str) -> None:
+    load_dotenv()
     config = load_config()
     audio = Path(wav_path).read_bytes()
 
     t0 = time.perf_counter()
-    stt = Transcriber(config.stt_model, device=config.stt_device)
+    stt = Transcriber(config.stt_model, device=config.stt_device, language=config.stt_language)
     text = stt.transcribe(audio)
     t1 = time.perf_counter()
     print(f"[stt {t1 - t0:5.2f}s] {text!r}")
@@ -36,12 +39,13 @@ async def main(wav_path: str) -> None:
     await ha.load_areas()
     summary = await ha.entity_summary()
     client = AsyncOpenAI(base_url=config.lmstudio_url, api_key="lm-studio")
-    agent = Agent(client, config.lmstudio_model, ha, build_system_prompt(summary))
+    agent = Agent(client, config.lmstudio_model, build_ha_tools(ha),
+                  build_system_prompt(summary, sassy=config.assistant_sassy, name=config.assistant_name))
     reply = await agent.run([], text)
     t2 = time.perf_counter()
     print(f"[llm {t2 - t1:5.2f}s] {reply!r}")
 
-    tts = KokoroTTS(voice=config.tts_voice)
+    tts = KokoroTTS(voice=config.tts_voice, lang_code=config.tts_lang_code)
     wav = tts.synthesize(reply)
     t3 = time.perf_counter()
     Path("out.wav").write_bytes(wav)

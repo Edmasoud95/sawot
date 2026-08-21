@@ -2,55 +2,12 @@ import json
 import logging
 import time
 
+from server.tools import execute_tool, to_openai_tools, touched_ids_for
+
 logger = logging.getLogger("voice.llm")
 
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_entities",
-            "description": (
-                "List Home Assistant entities with their current state. "
-                "Filter by domain (e.g. 'light', 'switch', 'climate') "
-                "and/or area name (e.g. 'Kitchen')."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "domain": {"type": "string", "description": "Entity domain filter"},
-                    "area": {"type": "string", "description": "Area name filter"},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "call_service",
-            "description": (
-                "Call a Home Assistant service to control a device, e.g. "
-                "domain='light', service='turn_on', entity_id='light.kitchen', "
-                "data={'brightness_pct': 50}."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "domain": {"type": "string"},
-                    "service": {"type": "string"},
-                    "entity_id": {"type": "string"},
-                    "data": {
-                        "type": "object",
-                        "description": "Optional extra service data",
-                    },
-                },
-                "required": ["domain", "service", "entity_id"],
-            },
-        },
-    },
-]
-
-_INTRO_SASSY = "You are Rita, a sassy voice assistant for a smart home, "
-_INTRO_PLAIN = "You are Rita, a friendly voice assistant for a smart home, "
+_INTRO_SASSY = "You are {name}, a sassy voice assistant for a smart home, "
+_INTRO_PLAIN = "You are {name}, a friendly voice assistant for a smart home, "
 
 _INTRO_TAIL = """speaking with the user out loud. Keep replies short, natural \
 and speakable — one or two sentences, no markdown, no lists, no emojis."""
@@ -81,28 +38,11 @@ Devices:
 {summary}"""
 
 
-def build_system_prompt(entity_summary: str, sassy: bool = True) -> str:
-    intro = _INTRO_SASSY if sassy else _INTRO_PLAIN
+def build_system_prompt(entity_summary: str, sassy: bool = True, name: str = "Rita") -> str:
+    intro = (_INTRO_SASSY if sassy else _INTRO_PLAIN).format(name=name)
     persona = _PERSONA if sassy else ""
     template = intro + _INTRO_TAIL + persona + _FUNCTIONAL
     return template.format(summary=entity_summary)
-
-
-def _touched_ids(name: str, args: dict, result) -> list[str]:
-    if isinstance(result, dict) and "error" in result:
-        return []
-    if name == "call_service":
-        eid = args.get("entity_id")
-        return [eid] if eid else []
-    if name == "get_entities":
-        items = result.get("entities") if isinstance(result, dict) else result
-        if isinstance(items, list):
-            return [
-                e["entity_id"]
-                for e in items
-                if isinstance(e, dict) and "entity_id" in e
-            ]
-    return []
 
 
 def _truncate(s: str, limit: int = 600) -> str:
@@ -124,40 +64,18 @@ def _safe_emitter(on_event):
     return emit
 
 
-MAX_TOOL_ENTITIES = 60
-
-
-async def execute_tool(ha, name: str, args: dict):
-    try:
-        if name == "get_entities":
-            entities = await ha.get_entities(args.get("domain"), args.get("area"))
-            if len(entities) > MAX_TOOL_ENTITIES:
-                return {
-                    "entities": entities[:MAX_TOOL_ENTITIES],
-                    "note": (
-                        f"{len(entities) - MAX_TOOL_ENTITIES} more omitted — "
-                        "narrow the query with domain and/or area"
-                    ),
-                }
-            return entities
-        if name == "call_service":
-            return await ha.call_service(
-                args["domain"], args["service"], args["entity_id"], args.get("data")
-            )
-        return {"error": f"unknown tool: {name}"}
-    except Exception as exc:  # surfaced to the model so it can apologize
-        return {"error": str(exc)}
-
-
 class Agent:
-    """Runs the chat + tool-calling loop against an OpenAI-compatible LLM."""
+    """Runs the chat + tool-calling loop against an OpenAI-compatible LLM.
+
+    Backend-agnostic: tool schemas and handlers are injected as a list of
+    `Tool` objects (see server.tools / server.ha_tools)."""
 
     MAX_ROUNDS = 5
 
-    def __init__(self, client, model: str, ha, system_prompt: str):
+    def __init__(self, client, model: str, tools, system_prompt: str):
         self._client = client
         self._model = model
-        self._ha = ha
+        self._tools = tools
         self._system = system_prompt
 
     @property
@@ -178,7 +96,7 @@ class Agent:
             response = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[{"role": "system", "content": self._system}, *history],
-                tools=TOOLS,
+                tools=to_openai_tools(self._tools),
             )
             msg = response.choices[0].message
             await emit(
@@ -217,7 +135,7 @@ class Agent:
                     result = {"error": f"invalid tool arguments: {exc}"}
                 else:
                     await emit("tool_call", {"name": tc.function.name, "args": args})
-                    result = await self._execute(tc.function.name, args)
+                    result = await execute_tool(self._tools, tc.function.name, args)
                 content = json.dumps(result)
                 await emit(
                     "tool_result",
@@ -228,7 +146,7 @@ class Agent:
                         "result": _truncate(content),
                     },
                 )
-                ids = _touched_ids(tc.function.name, args, result)
+                ids = touched_ids_for(self._tools, tc.function.name, args, result)
                 if ids:
                     await emit("touched", {"entity_ids": ids})
                 history.append(
@@ -241,6 +159,3 @@ class Agent:
         reply = "Sorry, I couldn't complete that."
         history.append({"role": "assistant", "content": reply})
         return reply
-
-    async def _execute(self, name: str, args: dict):
-        return await execute_tool(self._ha, name, args)

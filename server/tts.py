@@ -8,14 +8,14 @@ SAMPLE_RATE = 24000
 
 
 class TTSEngine(Protocol):
-    def synthesize(self, text: str) -> bytes: ...
+    def synthesize(self, text: str, voice: str | None = None) -> bytes: ...
 
 
 class KokoroTTS:
-    def __init__(self, voice: str = "af_heart"):
+    def __init__(self, voice: str = "af_heart", lang_code: str = "a"):
         from kokoro import KPipeline  # heavy import; deferred
 
-        self._pipe = KPipeline(lang_code="a")  # 'a' = American English
+        self._pipe = KPipeline(lang_code=lang_code)  # 'a' = American English
         self._voice = voice
 
     @property
@@ -25,8 +25,8 @@ class KokoroTTS:
     def set_voice(self, voice: str) -> None:
         self._voice = voice
 
-    def synthesize(self, text: str) -> bytes:
-        chunks = [audio for _, _, audio in self._pipe(text, voice=self._voice)]
+    def synthesize(self, text: str, voice: str | None = None) -> bytes:
+        chunks = [audio for _, _, audio in self._pipe(text, voice=voice or self._voice)]
         if chunks:
             wav = np.concatenate(chunks)
         else:

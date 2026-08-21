@@ -13,11 +13,13 @@ from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 from server.config import load_config
 from server.eval_support import DryRunHA
 from server.ha import HomeAssistant
+from server.ha_tools import build_ha_tools
 from server.llm import Agent, build_system_prompt
 
 
@@ -104,6 +106,7 @@ def build_cases(light, switch, climate, temp_sensor):
 
 
 async def main() -> None:
+    load_dotenv()
     config = load_config()
     real = HomeAssistant(config.ha_url, config.ha_token)
     await real.load_areas()
@@ -126,8 +129,8 @@ async def main() -> None:
     passed = 0
     for case in cases:
         dry = DryRunHA(real)
-        agent = Agent(client, config.lmstudio_model, dry,
-                      build_system_prompt(summary))
+        agent = Agent(client, config.lmstudio_model, build_ha_tools(dry),
+                      build_system_prompt(summary, sassy=config.assistant_sassy, name=config.assistant_name))
         try:
             reply = await agent.run([], case.utterance)
             ok, why = case.check(dry, reply)

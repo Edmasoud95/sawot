@@ -1,11 +1,13 @@
 import json
 import logging
-import time
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
+
+from server.openai_api import register_openai_api
+from server.pipeline import run_voice_turn
 
 ALLOWED_CONTROLS = {
     "light": {"turn_on", "turn_off"},
@@ -14,8 +16,12 @@ ALLOWED_CONTROLS = {
     "climate": {"set_temperature"},
 }
 
+logger = logging.getLogger("voice")
 
-async def _handle_control(websocket, ha, raw: str) -> None:
+WEB_DIR = Path(__file__).resolve().parent.parent / "web" / "dist"
+
+
+async def _handle_control(websocket, ha, raw: str, allowed_controls: dict) -> None:
     try:
         msg = json.loads(raw)
     except json.JSONDecodeError:
@@ -30,7 +36,7 @@ async def _handle_control(websocket, ha, raw: str) -> None:
     if (
         ha is None
         or not entity_id
-        or service not in ALLOWED_CONTROLS.get(domain, set())
+        or service not in allowed_controls.get(domain, set())
     ):
         await websocket.send_json({"type": "error", "message": "control not allowed"})
         return
@@ -43,21 +49,31 @@ async def _handle_control(websocket, ha, raw: str) -> None:
         logger.exception("control failed")
         await websocket.send_json({"type": "error", "message": "control failed"})
 
-logger = logging.getLogger("voice")
 
-WEB_DIR = Path(__file__).resolve().parent.parent / "web" / "dist"
-
-
-def create_app(stt, agent, tts, settings_ctx=None, ha=None, chat_ctx=None) -> FastAPI:
+def create_app(
+    stt,
+    agent,
+    tts,
+    settings_ctx=None,
+    ha=None,
+    chat_ctx=None,
+    allowed_controls=None,
+    openai_stt_model: str = "whisper-1",
+    openai_tts_model: str = "tts-1",
+) -> FastAPI:
     app = FastAPI()
+    controls = allowed_controls or ALLOWED_CONTROLS
 
     @app.websocket("/ws")
     async def ws_endpoint(websocket: WebSocket):
         await websocket.accept()
         history: list[dict] = []
 
-        async def debug(event: str, data: dict) -> None:
-            await websocket.send_json({"type": "debug", "event": event, "data": data})
+        async def send(kind: str, payload) -> None:
+            if kind == "wav":
+                await websocket.send_bytes(payload)
+            else:
+                await websocket.send_json({"type": kind, **payload})
 
         try:
             while True:
@@ -65,62 +81,20 @@ def create_app(stt, agent, tts, settings_ctx=None, ha=None, chat_ctx=None) -> Fa
                 if message["type"] == "websocket.disconnect":
                     break
                 if message.get("text") is not None:
-                    await _handle_control(websocket, ha, message["text"])
+                    await _handle_control(websocket, ha, message["text"], controls)
                     continue
                 audio = message.get("bytes")
                 if audio is None:
                     continue
-                t0 = time.perf_counter()
-                text = await run_in_threadpool(stt.transcribe, audio)
-                await debug(
-                    "stt",
-                    {"text": text, "latency_ms": round((time.perf_counter() - t0) * 1000)},
+                await run_voice_turn(
+                    stt,
+                    agent,
+                    tts,
+                    audio,
+                    history,
+                    send=send,
+                    get_cards=(ha.get_cards if ha is not None else None),
                 )
-                if not text:
-                    await websocket.send_json(
-                        {"type": "error", "message": "I didn't catch that"}
-                    )
-                    continue
-                await websocket.send_json({"type": "transcript", "text": text})
-                touched: list[str] = []
-
-                async def on_agent_event(event: str, data: dict) -> None:
-                    if event == "touched":
-                        for eid in data.get("entity_ids", []):
-                            if eid not in touched:
-                                touched.append(eid)
-                        return
-                    await debug(event, data)
-
-                checkpoint = len(history)
-                try:
-                    reply = await agent.run(history, text, on_event=on_agent_event)
-                except Exception:
-                    logger.exception("agent failure")
-                    del history[checkpoint:]
-                    await websocket.send_json(
-                        {"type": "error", "message": "LLM backend offline"}
-                    )
-                    continue
-                await websocket.send_json({"type": "assistant_text", "text": reply})
-                if ha is not None and touched:
-                    try:
-                        cards = await ha.get_cards(touched[:8])
-                        await websocket.send_json(
-                            {"type": "entities", "entities": cards}
-                        )
-                    except Exception:
-                        logger.exception("entities refresh failed")
-                t1 = time.perf_counter()
-                wav = await run_in_threadpool(tts.synthesize, reply)
-                await debug(
-                    "tts",
-                    {
-                        "latency_ms": round((time.perf_counter() - t1) * 1000),
-                        "bytes": len(wav),
-                    },
-                )
-                await websocket.send_bytes(wav)
         except WebSocketDisconnect:
             pass
 
@@ -131,6 +105,10 @@ def create_app(stt, agent, tts, settings_ctx=None, ha=None, chat_ctx=None) -> Fa
         from server.chat_routes import register_chat_routes
 
         register_chat_routes(app, chat_ctx)
+
+    register_openai_api(
+        app, stt, tts, stt_model=openai_stt_model, tts_model=openai_tts_model
+    )
 
     if WEB_DIR.is_dir():
         app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
@@ -190,7 +168,7 @@ def _register_settings_routes(app, ctx) -> None:
             ctx.tts.set_voice(voice)
         if sassy is not None:
             ctx.sassy = bool(sassy)
-            prompt = build_system_prompt(ctx.summary, sassy=ctx.sassy)
+            prompt = build_system_prompt(ctx.summary, sassy=ctx.sassy, name=ctx.name)
             ctx.agent.set_system_prompt(prompt)
             if ctx.chat_ctx is not None:
                 ctx.chat_ctx.system_prompt = prompt
@@ -217,10 +195,12 @@ async def _main() -> None:
 
     from server.config import load_config
     from server.ha import HomeAssistant
+    from server.ha_tools import build_ha_tools
     from server.llm import Agent, build_system_prompt
     from server.stt import Transcriber
     from server.tts import KokoroTTS
 
+    load_dotenv()
     logging.basicConfig(level=logging.INFO)
     config = load_config()
 
@@ -230,20 +210,26 @@ async def _main() -> None:
 
     ha = HomeAssistant(config.ha_url, config.ha_token)
     summary = await _startup_summary(ha)
+    tools = build_ha_tools(ha)
 
     store = SettingsStore()
     overrides = store.load()
     model = overrides.get("model", config.lmstudio_model)
     voice = overrides.get("voice", config.tts_voice)
-    sassy = bool(overrides.get("sassy", True))
+    sassy = bool(overrides.get("sassy", config.assistant_sassy))
 
     llm_client = AsyncOpenAI(base_url=config.lmstudio_url, api_key="lm-studio")
-    agent = Agent(llm_client, model, ha, build_system_prompt(summary, sassy=sassy))
+    agent = Agent(
+        llm_client,
+        model,
+        tools,
+        build_system_prompt(summary, sassy=sassy, name=config.assistant_name),
+    )
 
     logger.info("loading STT model %s on %s", config.stt_model, config.stt_device)
-    stt = Transcriber(config.stt_model, device=config.stt_device)
+    stt = Transcriber(config.stt_model, device=config.stt_device, language=config.stt_language)
     logger.info("loading Kokoro TTS (voice=%s)", voice)
-    tts = KokoroTTS(voice=voice)
+    tts = KokoroTTS(voice=voice, lang_code=config.tts_lang_code)
 
     settings_ctx = SettingsContext(
         store=store,
@@ -253,6 +239,7 @@ async def _main() -> None:
         http=httpx.AsyncClient(timeout=10.0),
         summary=summary,
         sassy=sassy,
+        name=config.assistant_name,
     )
 
     from server.chat import ChatStore
@@ -262,12 +249,23 @@ async def _main() -> None:
         store=ChatStore(),
         client=llm_client,
         ha=ha,
-        system_prompt=build_system_prompt(summary, sassy=sassy),
+        system_prompt=build_system_prompt(summary, sassy=sassy, name=config.assistant_name),
         default_model=lambda: agent.model,
         upload_dir=Path(__file__).resolve().parent.parent / "data" / "uploads",
+        tools=tools,
     )
     settings_ctx.chat_ctx = chat_ctx
-    app = create_app(stt, agent, tts, settings_ctx=settings_ctx, ha=ha, chat_ctx=chat_ctx)
+    app = create_app(
+        stt,
+        agent,
+        tts,
+        settings_ctx=settings_ctx,
+        ha=ha,
+        chat_ctx=chat_ctx,
+        allowed_controls=config.allowed_controls,
+        openai_stt_model=config.stt_model,
+        openai_tts_model=config.tts_voice,
+    )
     server = uvicorn.Server(
         uvicorn.Config(
             app,

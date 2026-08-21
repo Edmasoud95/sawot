@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 from server.chat import run_chat
+from server.ha_tools import build_ha_tools
 
 
 def chunk(content=None, reasoning=None, tool_calls=None):
@@ -65,7 +66,7 @@ async def collect(gen):
 
 async def test_plain_content_stream():
     llm = FakeLLM([[chunk(content="Hel"), chunk(content="lo")]])
-    events = await collect(run_chat(llm, "m", FakeHA(), "sys",
+    events = await collect(run_chat(llm, "m", build_ha_tools(FakeHA()), "sys",
                                     [{"role": "user", "content": "hi"}]))
     assert ("content", "Hel") in events and ("content", "lo") in events
     final = [d for e, d in events if e == "final"][0]
@@ -79,7 +80,7 @@ async def test_plain_content_stream():
 async def test_reasoning_content_stream():
     llm = FakeLLM([[chunk(reasoning="mull "), chunk(reasoning="it"),
                     chunk(content="Answer")]])
-    events = await collect(run_chat(llm, "m", FakeHA(), "sys",
+    events = await collect(run_chat(llm, "m", build_ha_tools(FakeHA()), "sys",
                                     [{"role": "user", "content": "hi"}]))
     assert ("thinking", "mull ") in events
     final = [d for e, d in events if e == "final"][0]
@@ -89,7 +90,7 @@ async def test_reasoning_content_stream():
 
 async def test_inline_think_tags_stream():
     llm = FakeLLM([[chunk(content="<thi"), chunk(content="nk>hmm</think>Yes")]])
-    events = await collect(run_chat(llm, "m", FakeHA(), "sys",
+    events = await collect(run_chat(llm, "m", build_ha_tools(FakeHA()), "sys",
                                     [{"role": "user", "content": "hi"}]))
     final = [d for e, d in events if e == "final"][0]
     assert final["thinking"] == "hmm"
@@ -107,8 +108,9 @@ async def test_tool_round_with_split_deltas_and_entities():
     round2 = [chunk(content="Done.")]
     ha = FakeHA()
     llm = FakeLLM([round1, round2])
-    events = await collect(run_chat(llm, "m", ha, "sys",
-                                    [{"role": "user", "content": "lights on"}]))
+    events = await collect(run_chat(llm, "m", build_ha_tools(ha), "sys",
+                                    [{"role": "user", "content": "lights on"}],
+                                    get_cards=ha.get_cards))
     assert ha.service_calls == [("light", "turn_on", "light.kitchen", None)]
     tool = [d for e, d in events if e == "tool"][0]
     assert tool["name"] == "call_service"
@@ -131,7 +133,7 @@ async def test_tool_error_no_entities():
                                     arguments=args)])],
         [chunk(content="Sorry.")],
     ])
-    events = await collect(run_chat(llm, "m", BrokenHA(), "sys",
+    events = await collect(run_chat(llm, "m", build_ha_tools(BrokenHA()), "sys",
                                     [{"role": "user", "content": "x"}]))
     assert not [d for e, d in events if e == "entities"]
     assert "down" in [d for e, d in events if e == "tool"][0]["result"]
@@ -142,7 +144,7 @@ async def test_round_cap():
     rounds = [[chunk(tool_calls=[tc_delta(0, id=f"c{i}", name="get_entities",
                                           arguments=args)])] for i in range(5)]
     llm = FakeLLM(rounds)
-    events = await collect(run_chat(llm, "m", FakeHA(), "sys",
+    events = await collect(run_chat(llm, "m", build_ha_tools(FakeHA()), "sys",
                                     [{"role": "user", "content": "loop"}]))
     final = [d for e, d in events if e == "final"][0]
     assert final["content"] == "Sorry, I couldn't complete that."
@@ -159,7 +161,7 @@ async def test_content_before_tool_round_is_kept():
     ]
     round2 = [chunk(content="Done.")]
     llm = FakeLLM([round1, round2])
-    events = await collect(run_chat(llm, "m", FakeHA(), "sys",
+    events = await collect(run_chat(llm, "m", build_ha_tools(FakeHA()), "sys",
                                     [{"role": "user", "content": "x"}]))
     final = [d for e, d in events if e == "final"][0]
     assert final["content"] == "Let me do that. Done."

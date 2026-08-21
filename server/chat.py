@@ -7,7 +7,7 @@ from pathlib import Path
 
 _SAFE_ID = re.compile(r"^[0-9a-f]{12}$")
 
-from server.llm import TOOLS, _touched_ids, execute_tool
+from server.tools import execute_tool, to_openai_tools, touched_ids_for
 
 HISTORY_LIMIT = 30
 
@@ -150,7 +150,7 @@ class ThinkTagParser:
         return out
 
 
-async def run_chat(client, model, ha, system_prompt, messages):
+async def run_chat(client, model, tools, system_prompt, messages, get_cards=None):
     """Streaming chat agent. Yields ("thinking"|"content", str),
     ("tool", dict), ("entities", list), and exactly one ("final", dict)."""
     convo = [{"role": "system", "content": system_prompt}, *messages]
@@ -164,7 +164,7 @@ async def run_chat(client, model, ha, system_prompt, messages):
         thinking_parts: list[str] = []
         tool_calls: dict[int, dict] = {}
         stream = await client.chat.completions.create(
-            model=model, messages=convo, tools=TOOLS, stream=True
+            model=model, messages=convo, tools=to_openai_tools(tools), stream=True
         )
         async for chunk in stream:
             if not chunk.choices:
@@ -221,11 +221,11 @@ async def run_chat(client, model, ha, system_prompt, messages):
                 args = {}
                 result = {"error": f"invalid tool arguments: {exc}"}
             else:
-                result = await execute_tool(ha, c["name"], args)
+                result = await execute_tool(tools, c["name"], args)
             result_json = json.dumps(result)
             yield ("tool", {"name": c["name"], "args": args,
                             "result": result_json[:300]})
-            for eid in _touched_ids(c["name"], args, result):
+            for eid in touched_ids_for(tools, c["name"], args, result):
                 if eid not in touched:
                     touched.append(eid)
             convo.append({"role": "tool", "tool_call_id": c["id"],
@@ -233,8 +233,8 @@ async def run_chat(client, model, ha, system_prompt, messages):
     if not finished:
         yield ("final", {"content": ("".join(full_content) + "\n\nSorry, I couldn't complete that.").strip(),
                          "thinking": "".join(full_thinking).strip()})
-    if touched:
+    if touched and get_cards is not None:
         try:
-            yield ("entities", await ha.get_cards(touched[:8]))
+            yield ("entities", await get_cards(touched[:8]))
         except Exception:
             pass

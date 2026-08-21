@@ -52,9 +52,6 @@ def test_load_config_missing_token_raises(tmp_path, monkeypatch):
           voice: "af_heart"
         server: {}
     """))
-    # load_dotenv() resolves the repo's real .env regardless of cwd, so stub
-    # it out — this test verifies the guard, not dotenv discovery.
-    monkeypatch.setattr(config_mod, "load_dotenv", lambda: None)
     monkeypatch.delenv("HA_TOKEN", raising=False)
     with pytest.raises(RuntimeError, match="HA_TOKEN"):
         load_config(str(cfg_file))
@@ -81,6 +78,47 @@ def test_load_config_parses_optional_tls(tmp_path, monkeypatch):
     cfg = load_config(str(cfg_file))
     assert cfg.ssl_certfile == "certs/voice.crt"
     assert cfg.ssl_keyfile == "certs/voice.key"
+
+
+def test_load_config_accepts_dict_source_and_assistant(monkeypatch):
+    monkeypatch.setenv("HA_TOKEN", "t")
+    cfg = load_config({
+        "home_assistant": {"url": "http://ha.local:8123"},
+        "lm_studio": {"url": "http://localhost:1234/v1", "model": "m"},
+        "stt": {"model": "distil-small.en", "device": "cpu", "language": "de"},
+        "tts": {"voice": "af_heart", "lang_code": "a"},
+        "assistant": {"name": "Jarvis", "personality": "plain"},
+        "controls": {"light": ["turn_on"]},
+        "server": {},
+    })
+    assert cfg.stt_language == "de"
+    assert cfg.tts_lang_code == "a"
+    assert cfg.assistant_name == "Jarvis"
+    assert cfg.assistant_sassy is False
+    assert cfg.allowed_controls == {"light": ["turn_on"]}
+
+
+def test_load_config_defaults_assistant_and_language(tmp_path, monkeypatch):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(textwrap.dedent("""
+        home_assistant:
+          url: "http://ha.local:8123"
+        lm_studio:
+          url: "http://localhost:1234/v1"
+          model: "m"
+        stt:
+          model: "distil-small.en"
+        tts:
+          voice: "af_heart"
+        server: {}
+    """))
+    monkeypatch.setenv("HA_TOKEN", "t")
+    cfg = load_config(str(cfg_file))
+    assert cfg.assistant_name == "Rita"
+    assert cfg.assistant_sassy is True
+    assert cfg.stt_language == "en"
+    assert cfg.tts_lang_code == "a"
+    assert cfg.allowed_controls is None
 
 
 def test_load_config_tls_defaults_to_none(tmp_path, monkeypatch):

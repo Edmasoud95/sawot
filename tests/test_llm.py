@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 
+from server.ha_tools import build_ha_tools
 from server.llm import Agent, build_system_prompt
 
 
@@ -56,7 +57,7 @@ class FakeHA:
 
 async def test_plain_answer_no_tools():
     llm = FakeLLM([make_response(content="Hello there!")])
-    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    agent = Agent(llm, "test-model", build_ha_tools(FakeHA()), system_prompt="sys")
     history = []
     reply = await agent.run(history, "hi")
     assert reply == "Hello there!"
@@ -78,7 +79,7 @@ async def test_tool_call_round_trip():
         make_response(content="Kitchen light is on."),
     ])
     ha = FakeHA()
-    agent = Agent(llm, "test-model", ha, system_prompt="sys")
+    agent = Agent(llm, "test-model", build_ha_tools(ha), system_prompt="sys")
     reply = await agent.run([], "turn on the kitchen light")
     assert reply == "Kitchen light is on."
     assert ha.service_calls == [("light", "turn_on", "light.kitchen", None)]
@@ -102,7 +103,7 @@ async def test_tool_error_is_fed_back_to_model():
         make_response(tool_calls=[tc]),
         make_response(content="Sorry, I can't reach Home Assistant."),
     ])
-    agent = Agent(llm, "test-model", BrokenHA(), system_prompt="sys")
+    agent = Agent(llm, "test-model", build_ha_tools(BrokenHA()), system_prompt="sys")
     reply = await agent.run([], "turn on the kitchen light")
     assert reply == "Sorry, I can't reach Home Assistant."
     tool_msg = llm.calls[1]["messages"][-1]
@@ -112,7 +113,7 @@ async def test_tool_error_is_fed_back_to_model():
 async def test_max_rounds_bails_out():
     llm = FakeLLM([make_response(tool_calls=[FakeToolCall("c%d" % i, "get_entities", "{}")])
                    for i in range(5)])
-    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    agent = Agent(llm, "test-model", build_ha_tools(FakeHA()), system_prompt="sys")
     reply = await agent.run([], "loop forever")
     assert reply == "Sorry, I couldn't complete that."
     assert len(llm.calls) == 5
@@ -130,7 +131,7 @@ async def test_malformed_tool_arguments_survive():
         make_response(tool_calls=[tc]),
         make_response(content="Something went wrong with that."),
     ])
-    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    agent = Agent(llm, "test-model", build_ha_tools(FakeHA()), system_prompt="sys")
     history = []
     reply = await agent.run(history, "turn on the light")
     assert reply == "Something went wrong with that."
@@ -145,7 +146,7 @@ async def test_unknown_tool_returns_error_result():
         make_response(tool_calls=[tc]),
         make_response(content="I can't do that."),
     ])
-    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    agent = Agent(llm, "test-model", build_ha_tools(FakeHA()), system_prompt="sys")
     reply = await agent.run([], "reboot the house")
     assert reply == "I can't do that."
     assert "unknown tool" in llm.calls[1]["messages"][-1]["content"]
@@ -154,7 +155,7 @@ async def test_unknown_tool_returns_error_result():
 async def test_bailout_reply_is_stored_in_history():
     llm = FakeLLM([make_response(tool_calls=[FakeToolCall(f"c{i}", "get_entities", "{}")])
                    for i in range(5)])
-    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    agent = Agent(llm, "test-model", build_ha_tools(FakeHA()), system_prompt="sys")
     history = []
     reply = await agent.run(history, "loop forever")
     assert history[-1] == {"role": "assistant", "content": reply}
@@ -170,7 +171,7 @@ class RecordingEvents:
 
 async def test_debug_events_plain_answer():
     llm = FakeLLM([make_response(content="Hello!")])
-    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    agent = Agent(llm, "test-model", build_ha_tools(FakeHA()), system_prompt="sys")
     rec = RecordingEvents()
     await agent.run([], "hi", on_event=rec)
     assert len(rec.events) == 1
@@ -191,7 +192,7 @@ async def test_debug_events_tool_round_trip():
         make_response(tool_calls=[tc]),
         make_response(content="Done."),
     ])
-    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    agent = Agent(llm, "test-model", build_ha_tools(FakeHA()), system_prompt="sys")
     rec = RecordingEvents()
     await agent.run([], "turn on the kitchen light", on_event=rec)
     names = [e for e, _ in rec.events]
@@ -213,7 +214,7 @@ async def test_debug_event_failure_does_not_break_turn():
         raise RuntimeError("observer exploded")
 
     llm = FakeLLM([make_response(content="Still fine.")])
-    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    agent = Agent(llm, "test-model", build_ha_tools(FakeHA()), system_prompt="sys")
     reply = await agent.run([], "hi", on_event=broken)
     assert reply == "Still fine."
 
@@ -237,7 +238,7 @@ async def test_touched_events_for_tools():
         make_response(tool_calls=[tc1, tc2]),
         make_response(content="Done."),
     ])
-    agent = Agent(llm, "test-model", FakeHA(), system_prompt="sys")
+    agent = Agent(llm, "test-model", build_ha_tools(FakeHA()), system_prompt="sys")
     rec = RecordingEvents()
     await agent.run([], "do things", on_event=rec)
     touched = [d for e, d in rec.events if e == "touched"]
@@ -261,7 +262,7 @@ async def test_no_touched_event_for_failed_tool():
         make_response(tool_calls=[tc]),
         make_response(content="Sorry."),
     ])
-    agent = Agent(llm, "test-model", BrokenHA(), system_prompt="sys")
+    agent = Agent(llm, "test-model", build_ha_tools(BrokenHA()), system_prompt="sys")
     rec = RecordingEvents()
     await agent.run([], "x", on_event=rec)
     assert all(e != "touched" for e, _ in rec.events)
@@ -278,7 +279,7 @@ async def test_get_entities_tool_result_is_capped():
         make_response(tool_calls=[tc]),
         make_response(content="There are many sensors."),
     ])
-    agent = Agent(llm, "test-model", HugeHA(), system_prompt="sys")
+    agent = Agent(llm, "test-model", build_ha_tools(HugeHA()), system_prompt="sys")
     await agent.run([], "list all sensors")
     tool_msg = json.loads(llm.calls[1]["messages"][-1]["content"])
     assert len(tool_msg["entities"]) == 60

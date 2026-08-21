@@ -41,4 +41,5 @@ class SettingsContext:
     http: object  # httpx.AsyncClient
     summary: str = ""        # device list, needed to rebuild the system prompt
     chat_ctx: object = None  # ChatContext, so personality applies to chat too
-    sassy: bool = True       # current personality state (Rita's sass on/off)
+    sassy: bool = True       # current personality state (sass on/off)
+    name: str = "Rita"       # assistant name used to rebuild the system prompt

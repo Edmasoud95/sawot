@@ -25,6 +25,7 @@ class ChatContext:
     system_prompt: str
     default_model: Callable[[], str]
     upload_dir: Path
+    tools: object = None  # list[Tool] for run_chat
 
 
 def register_chat_routes(app, ctx: ChatContext) -> None:
@@ -169,8 +170,10 @@ def register_chat_routes(app, ctx: ChatContext) -> None:
 
             try:
                 history = to_openai_messages(conv["messages"], ctx.upload_dir)
+                get_cards = ctx.ha.get_cards if ctx.ha is not None else None
                 async for event, data in run_chat(
-                    ctx.client, conv["model"], ctx.ha, ctx.system_prompt, history
+                    ctx.client, conv["model"], ctx.tools or [], ctx.system_prompt,
+                    history, get_cards=get_cards,
                 ):
                     if event == "thinking":
                         assistant["thinking"] += data

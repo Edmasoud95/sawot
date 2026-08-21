@@ -7,11 +7,21 @@ lm_studio:
 stt:
   model: "distil-small.en"            # faster-whisper model size
   device: "cuda"                      # "cuda" or "cpu"
+  language: "en"                      # transcription language
 tts:
   voice: "af_heart"                   # any Kokoro voice in the UI list
+  lang_code: "a"                      # Kokoro language code ('a' = American English)
+assistant:
+  name: "Rita"                        # assistant name/persona
+  personality: "sassy"                # "sassy" or "plain"
 server:
   host: "0.0.0.0"                     # use "127.0.0.1" to restrict to localhost
   port: 8765
+# controls:                            # optional service whitelist override
+#   light: ["turn_on", "turn_off"]
+#   switch: ["turn_on", "turn_off"]
+#   media_player: ["turn_on", "turn_off"]
+#   climate: ["set_temperature"]
 tls:
   # Optional; required for phone microphone access over https.
   certfile: "certs/voice.crt"
