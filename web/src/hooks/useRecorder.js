@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import { audioContext, meterFrom } from "../lib/audio";
-import { levelBus } from "../store";
+import { levelBus } from "../lib/levelBus";
 
 export function useRecorder(onUtterance) {
   const recorderRef = useRef(null);

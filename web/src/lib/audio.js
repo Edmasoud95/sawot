@@ -1,4 +1,4 @@
-import { levelBus } from "../store";
+import { levelBus } from "./levelBus";
 
 let ctx, analyser, data;
 let currentSource = null;

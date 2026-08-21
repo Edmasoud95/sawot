@@ -1,3 +1,5 @@
+import { WS_BASE } from "./config";
+
 export class VoiceSocket {
   /**
    * @param {{ onOpen(): void, onClose(): void,
@@ -10,8 +12,7 @@ export class VoiceSocket {
   }
 
   connect() {
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    this.ws = new WebSocket(`${proto}://${location.host}/ws`);
+    this.ws = new WebSocket(`${WS_BASE}/ws`);
     this.ws.binaryType = "arraybuffer";
     this.ws.onopen = () => this.handlers.onOpen();
     this.ws.onclose = () => {

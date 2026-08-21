@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { API_BASE } from "../../lib/config";
 
 // Module-level cache so ChatHeader and Composer share one GET /api/settings.
 let cache = null;
@@ -7,7 +8,7 @@ let inflight = null;
 export function fetchModels() {
   if (cache) return Promise.resolve(cache);
   if (!inflight) {
-    inflight = fetch("/api/settings")
+    inflight = fetch(`${API_BASE}/api/settings`)
       .then((r) => {
         if (!r.ok) throw new Error(r.statusText);
         return r.json();
