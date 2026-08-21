@@ -1,0 +1,18 @@
+# Copy to config.yaml and fill in your values.
+home_assistant:
+  url: "http://192.168.1.10:8123"     # Home Assistant URL
+lm_studio:
+  url: "http://192.168.1.11:1234/v1"  # LM Studio server (LAN IP of the host)
+  model: "qwen3-8b"                    # any tool-calling model you have loaded
+stt:
+  model: "distil-small.en"            # faster-whisper model size
+  device: "cuda"                      # "cuda" or "cpu"
+tts:
+  voice: "af_heart"                   # any Kokoro voice in the UI list
+server:
+  host: "0.0.0.0"                     # use "127.0.0.1" to restrict to localhost
+  port: 8765
+tls:
+  # Optional; required for phone microphone access over https.
+  certfile: "certs/voice.crt"
+  keyfile: "certs/voice.key"

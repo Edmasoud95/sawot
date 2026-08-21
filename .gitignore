@@ -9,3 +9,8 @@ web/dist/
 certs/
 settings.json
 data/
+config.yaml
+.claude/
+.vscode/
+.idea/
+.DS_Store
