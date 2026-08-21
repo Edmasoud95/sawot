@@ -1,6 +1,38 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import gsap from "gsap";
 
+function Toggle({ label, hint, checked, onChange }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <span className="flex flex-col gap-0.5">
+        <span className="font-mono text-[0.62rem] uppercase tracking-[0.22em] text-zinc-500">
+          {label}
+        </span>
+        {hint && (
+          <span className="font-mono text-[0.58rem] leading-snug text-zinc-600">
+            {hint}
+          </span>
+        )}
+      </span>
+      <button
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={() => onChange(!checked)}
+        className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors duration-300 ${
+          checked ? "bg-aurora-teal/70" : "bg-white/10"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-300 ${
+            checked ? "translate-x-[18px]" : "translate-x-0.5"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
 function Select({ label, value, options, onChange, disabled }) {
   return (
     <label className="flex flex-col gap-1.5">
@@ -130,6 +162,12 @@ export default function SettingsPanel() {
               value={data.voice}
               options={data.voices}
               onChange={(voice) => update({ voice })}
+            />
+            <Toggle
+              label="Sassy personality"
+              hint="Rita gets witty and teases you. Off = plain and friendly."
+              checked={!!data.sassy}
+              onChange={(sassy) => update({ sassy })}
             />
           </>
         )}

@@ -49,9 +49,23 @@ TOOLS = [
     },
 ]
 
-_SYSTEM_TEMPLATE = """You are a friendly voice assistant for a smart home, \
-speaking with the user out loud. Keep replies short, natural and speakable — \
-one or two sentences, no markdown, no lists, no emojis.
+_INTRO_SASSY = "You are Rita, a sassy voice assistant for a smart home, "
+_INTRO_PLAIN = "You are Rita, a friendly voice assistant for a smart home, "
+
+_INTRO_TAIL = """speaking with the user out loud. Keep replies short, natural \
+and speakable — one or two sentences, no markdown, no lists, no emojis."""
+
+_PERSONA = """
+
+You have personality: you're witty, a little sarcastic, and you tease the user \
+while still getting the job done. After doing a chore for them you might quip \
+something like "Next time do it yourself." When the user asks you to control or \
+find something that doesn't exist, don't just say you can't — be playfully \
+incredulous, e.g. "Hmm, interesting. Is that thing in the room with us right \
+now? Want me to help you book a psychiatrist appointment instead?" Keep the \
+sass light and good-natured; never be genuinely mean, and always still help."""
+
+_FUNCTIONAL = """
 
 You control Home Assistant devices with the provided tools. Use the device \
 list below to pick entity_ids directly when acting. The list's states are a \
@@ -67,8 +81,11 @@ Devices:
 {summary}"""
 
 
-def build_system_prompt(entity_summary: str) -> str:
-    return _SYSTEM_TEMPLATE.format(summary=entity_summary)
+def build_system_prompt(entity_summary: str, sassy: bool = True) -> str:
+    intro = _INTRO_SASSY if sassy else _INTRO_PLAIN
+    persona = _PERSONA if sassy else ""
+    template = intro + _INTRO_TAIL + persona + _FUNCTIONAL
+    return template.format(summary=entity_summary)
 
 
 def _touched_ids(name: str, args: dict, result) -> list[str]:
@@ -149,6 +166,9 @@ class Agent:
 
     def set_model(self, model: str) -> None:
         self._model = model
+
+    def set_system_prompt(self, system_prompt: str) -> None:
+        self._system = system_prompt
 
     async def run(self, history: list[dict], user_text: str, on_event=None) -> str:
         emit = _safe_emitter(on_event)

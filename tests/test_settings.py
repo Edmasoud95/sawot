@@ -23,6 +23,9 @@ class FakeAgent:
     def set_model(self, model):
         self._model = model
 
+    def set_system_prompt(self, system_prompt):
+        self.system_prompt = system_prompt
+
     async def run(self, history, user_text, on_event=None):
         return "ok"
 
@@ -90,7 +93,26 @@ def test_post_settings_applies_and_persists(tmp_path):
     assert agent.model == "model-b"
     assert tts.voice == "am_adam"
     saved = json.loads((tmp_path / "settings.json").read_text())
-    assert saved == {"model": "model-b", "voice": "am_adam"}
+    assert saved == {"model": "model-b", "voice": "am_adam", "sassy": True}
+
+
+def test_get_settings_reports_personality(tmp_path):
+    client, *_ = make_client(tmp_path)
+    assert client.get("/api/settings").json()["sassy"] is True
+
+
+def test_post_personality_toggle_applies_and_persists(tmp_path):
+    client, agent, _, ctx = make_client(tmp_path)
+    ctx.summary = "Living room light"
+    resp = client.post("/api/settings", json={"sassy": False})
+    assert resp.status_code == 200
+    assert resp.json()["sassy"] is False
+    assert ctx.sassy is False
+    # the agent's prompt was rebuilt without the sassy persona
+    assert "friendly voice assistant" in agent.system_prompt
+    assert "Next time do it yourself" not in agent.system_prompt
+    saved = json.loads((tmp_path / "settings.json").read_text())
+    assert saved["sassy"] is False
 
 
 def test_post_unknown_model_rejected(tmp_path):

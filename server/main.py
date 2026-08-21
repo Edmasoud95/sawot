@@ -153,6 +153,7 @@ def _register_settings_routes(app, ctx) -> None:
         data = {
             "model": ctx.agent.model,
             "voice": ctx.tts.voice,
+            "sassy": ctx.sassy,
             "models": models,
             "voices": KOKORO_VOICES,
         }
@@ -169,8 +170,11 @@ def _register_settings_routes(app, ctx) -> None:
 
     @app.post("/api/settings")
     async def post_settings(body: dict):
+        from server.llm import build_system_prompt
+
         model = body.get("model")
         voice = body.get("voice")
+        sassy = body.get("sassy")
         if voice is not None and voice not in KOKORO_VOICES:
             raise HTTPException(400, f"unknown voice: {voice}")
         models: list[str] = []
@@ -184,7 +188,15 @@ def _register_settings_routes(app, ctx) -> None:
             ctx.agent.set_model(model)
         if voice is not None:
             ctx.tts.set_voice(voice)
-        ctx.store.save({"model": ctx.agent.model, "voice": ctx.tts.voice})
+        if sassy is not None:
+            ctx.sassy = bool(sassy)
+            prompt = build_system_prompt(ctx.summary, sassy=ctx.sassy)
+            ctx.agent.set_system_prompt(prompt)
+            if ctx.chat_ctx is not None:
+                ctx.chat_ctx.system_prompt = prompt
+        ctx.store.save(
+            {"model": ctx.agent.model, "voice": ctx.tts.voice, "sassy": ctx.sassy}
+        )
         if not models:
             try:
                 models = await _fetch_models(ctx)
@@ -223,9 +235,10 @@ async def _main() -> None:
     overrides = store.load()
     model = overrides.get("model", config.lmstudio_model)
     voice = overrides.get("voice", config.tts_voice)
+    sassy = bool(overrides.get("sassy", True))
 
     llm_client = AsyncOpenAI(base_url=config.lmstudio_url, api_key="lm-studio")
-    agent = Agent(llm_client, model, ha, build_system_prompt(summary))
+    agent = Agent(llm_client, model, ha, build_system_prompt(summary, sassy=sassy))
 
     logger.info("loading STT model %s on %s", config.stt_model, config.stt_device)
     stt = Transcriber(config.stt_model, device=config.stt_device)
@@ -238,6 +251,8 @@ async def _main() -> None:
         tts=tts,
         lmstudio_url=config.lmstudio_url,
         http=httpx.AsyncClient(timeout=10.0),
+        summary=summary,
+        sassy=sassy,
     )
 
     from server.chat import ChatStore
@@ -247,10 +262,11 @@ async def _main() -> None:
         store=ChatStore(),
         client=llm_client,
         ha=ha,
-        system_prompt=build_system_prompt(summary),
+        system_prompt=build_system_prompt(summary, sassy=sassy),
         default_model=lambda: agent.model,
         upload_dir=Path(__file__).resolve().parent.parent / "data" / "uploads",
     )
+    settings_ctx.chat_ctx = chat_ctx
     app = create_app(stt, agent, tts, settings_ctx=settings_ctx, ha=ha, chat_ctx=chat_ctx)
     server = uvicorn.Server(
         uvicorn.Config(
