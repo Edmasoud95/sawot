@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sawot"
+version = "1.0.0"
+description = "Fully local voice and chat assistant for Home Assistant"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Ed Masoud" }]
+keywords = ["home-assistant", "voice", "llm", "stt", "tts", "local", "openai"]
+dependencies = [
+  "fastapi",
+  "python-multipart",
+  "uvicorn[standard]",
+  "httpx",
+  "openai",
+  "pyyaml",
+  "python-dotenv",
+  "faster-whisper",
+  "kokoro>=0.9",
+  "soundfile",
+  "numpy",
+  "nvidia-cublas-cu12; platform_system == 'Linux'",
+  "nvidia-cudnn-cu12>=9,<10; platform_system == 'Linux'",
+  "pypdf",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
+
+[project.scripts]
+sawot = "server.main:main"
+
+[tool.setuptools]
+packages = ["server"]

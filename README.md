@@ -27,6 +27,9 @@ speech-to-text, an LM Studio LLM with Home Assistant tool calling, and
   switch off from Settings for a plain, friendly assistant.
 - **Live settings** — switch the LLM model and Kokoro voice at runtime;
   choices apply instantly and persist to `settings.json`.
+- **OpenAI-compatible audio API** — `POST /v1/audio/speech` (TTS) and
+  `POST /v1/audio/transcriptions` (STT) let any OpenAI SDK client use the
+  local engines as a drop-in speech backend.
 
 ## Architecture
 
@@ -71,8 +74,13 @@ Edit `config.yaml`:
 | `lm_studio.model` | The tool-calling model loaded in LM Studio |
 | `stt.model` | faster-whisper model size (e.g. `distil-small.en`) |
 | `stt.device` | `cuda` (default) or `cpu` |
+| `stt.language` | Transcription language (default `en`) |
 | `tts.voice` | Kokoro voice (see the Settings panel for the list) |
+| `tts.lang_code` | Kokoro language code (default `a` = American English) |
+| `assistant.name` | Assistant name in the system prompt (default `Rita`) |
+| `assistant.personality` | `sassy` (default) or `plain` |
 | `server.host` / `server.port` | Bind address / port (default `0.0.0.0:8765`) |
+| `controls` | Optional per-domain service whitelist override |
 | `tls.certfile` / `tls.keyfile` | Optional — required for phone mic access over https |
 
 Put your Home Assistant token in `.env` as `HA_TOKEN=...`.
@@ -128,6 +136,21 @@ Prompt/tool-choice eval (live LM Studio, dry-run HA — never touches devices):
 ## Development
 
 Frontend hot reload: `cd web && npm run dev` (proxies `/ws` to the server on 8765).
+
+## Extending
+
+- **Tools** — the LLM agent consumes a list of `Tool` objects
+  (`server/tools.py`); Home Assistant tools are one provided set
+  (`server/ha_tools.py`). Add a `Tool` and pass it to `Agent` to teach the
+  assistant new skills.
+- **Engines** — `STTEngine` and `TTSEngine` protocols (`server/stt.py`,
+  `server/tts.py`) let you swap faster-whisper/Kokoro for any backend.
+- **Voice pipeline** — `server/pipeline.py` exposes the STT → agent → TTS turn
+  as a reusable coroutine independent of the WebSocket transport.
+- **OpenAI API** — `server/openai_api.py` registers `/v1/audio/speech`,
+  `/v1/audio/transcriptions`, and `/v1/models`.
+- **Packaging** — `pip install -e ".[dev]"` installs the `server` package (and a
+  `sawot` entrypoint), so scripts and tests don't need `sys.path` hacks.
 
 ## License
 
