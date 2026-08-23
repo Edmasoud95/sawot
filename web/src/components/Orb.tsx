@@ -31,7 +31,7 @@ const REDUCED_MOTION =
   matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function OrbMesh() {
-  const group = useRef();
+  const group = useRef<THREE.Group>(null);
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },

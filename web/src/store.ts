@@ -6,7 +6,7 @@ import { create } from "zustand";
 // module (lib/levelBus) so lib code doesn't import app state.
 export { levelBus } from "./lib/levelBus";
 
-export const useVoiceStore = create((set) => ({
+export const useVoiceStore = create<any>()((set) => ({
   status: "connecting", // connecting | idle | recording | thinking | speaking
   userCaption: "",
   assistantCaption: "",

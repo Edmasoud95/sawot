@@ -1,18 +1,24 @@
 import { WS_BASE } from "./config";
 
+export interface VoiceSocketHandlers {
+  onOpen(): void;
+  onClose(): void;
+  onEvent(msg: any): void;
+  onAudio(buf: ArrayBuffer): void;
+}
+
 export class VoiceSocket {
-  /**
-   * @param {{ onOpen(): void, onClose(): void,
-   *           onEvent(msg: object): void, onAudio(buf: ArrayBuffer): void }} handlers
-   */
-  constructor(handlers) {
+  private handlers: VoiceSocketHandlers;
+  private closed = false;
+  private ws!: WebSocket;
+
+  constructor(handlers: VoiceSocketHandlers) {
     this.handlers = handlers;
-    this.closed = false;
     this.connect();
   }
 
   connect() {
-    this.ws = new WebSocket(`${WS_BASE}/ws`);
+    this.ws = new WebSocket(WS_BASE + "/ws");
     this.ws.binaryType = "arraybuffer";
     this.ws.onopen = () => this.handlers.onOpen();
     this.ws.onclose = () => {
@@ -32,11 +38,11 @@ export class VoiceSocket {
     return this.ws.readyState === WebSocket.OPEN;
   }
 
-  sendControl(message) {
+  sendControl(message: any) {
     if (this.ready) this.ws.send(JSON.stringify(message));
   }
 
-  sendAudio(arrayBuffer) {
+  sendAudio(arrayBuffer: ArrayBuffer) {
     this.ws.send(arrayBuffer);
   }
 

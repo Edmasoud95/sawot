@@ -6,10 +6,12 @@ __pycache__/
 out.wav
 node_modules/
 web/dist/
+ts-backend/dist/
 certs/
 settings.json
 data/
 config.yaml
+models/
 .claude/
 .vscode/
 .idea/

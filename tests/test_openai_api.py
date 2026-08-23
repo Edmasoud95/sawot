@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from server.main import create_app
+from sidecar.app import create_sidecar_app
 
 
 class FakeSTT:
@@ -19,16 +19,9 @@ class FakeTTS:
         return b"RIFF-fake-wav"
 
 
-class FakeAgent:
-    model = "m"
-
-    async def run(self, history, user_text, on_event=None):
-        return "ok"
-
-
 def make_client(stt=None, tts=None):
     tts = tts or FakeTTS()
-    app = create_app(stt or FakeSTT(), FakeAgent(), tts)
+    app = create_sidecar_app(stt or FakeSTT(), tts)
     return TestClient(app), tts
 
 
@@ -142,9 +135,10 @@ def test_transcription_empty_file_400():
 
 
 def test_models_lists_stt_and_tts():
-    client, _ = make_client()
-    app2 = create_app(FakeSTT(), FakeAgent(), FakeTTS(), openai_stt_model="whisper-small", openai_tts_model="af_heart")
-    resp = TestClient(app2).get("/v1/models")
+    app = create_sidecar_app(
+        FakeSTT(), FakeTTS(), openai_stt_model="whisper-small", openai_tts_model="af_heart"
+    )
+    resp = TestClient(app).get("/v1/models")
     assert resp.status_code == 200
     ids = [m["id"] for m in resp.json()["data"]]
     assert ids == ["whisper-small", "af_heart"]

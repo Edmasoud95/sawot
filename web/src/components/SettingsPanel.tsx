@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import gsap from "gsap";
+import ModelsSection from "./ModelsSection";
 
 function Toggle({ label, hint, checked, onChange }) {
   return (
@@ -33,7 +34,7 @@ function Toggle({ label, hint, checked, onChange }) {
   );
 }
 
-function Select({ label, value, options, onChange, disabled }) {
+function Select({ label, value, options, onChange, disabled = false }) {
   return (
     <label className="flex flex-col gap-1.5">
       <span className="font-mono text-[0.62rem] uppercase tracking-[0.22em] text-zinc-500">
@@ -135,7 +136,7 @@ export default function SettingsPanel() {
       />
       <div
         ref={panel}
-        className="invisible absolute left-5 top-[calc(64px+env(safe-area-inset-top))] z-40 flex w-[min(85vw,320px)] flex-col gap-4 rounded-2xl border border-white/10 bg-ink-900/90 p-5 opacity-0 backdrop-blur-2xl"
+        className="invisible absolute left-5 top-[calc(64px+env(safe-area-inset-top))] z-40 flex max-h-[calc(100vh-88px)] w-[min(85vw,320px)] flex-col gap-4 overflow-y-auto rounded-2xl border border-white/10 bg-ink-900/90 p-5 opacity-0 backdrop-blur-2xl"
       >
         <h2 className="font-mono text-[0.65rem] font-light uppercase tracking-[0.3em] text-zinc-500">
           Settings
@@ -177,6 +178,8 @@ export default function SettingsPanel() {
         {saved && (
           <p className="font-mono text-[0.65rem] text-aurora-teal">saved</p>
         )}
+        <div className="my-1 border-t border-white/10" />
+        <ModelsSection />
       </div>
     </>
   );

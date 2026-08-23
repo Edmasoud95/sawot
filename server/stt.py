@@ -3,6 +3,8 @@ from typing import Protocol
 
 from faster_whisper import WhisperModel
 
+from server.models import MODELS_DIR
+
 
 class STTEngine(Protocol):
     def transcribe(self, audio: bytes, language: str | None = None) -> str: ...
@@ -20,7 +22,9 @@ class Transcriber:
         vad_filter: bool = True,
     ):
         compute_type = "float16" if device == "cuda" else "int8"
-        self._model = WhisperModel(model_size, device=device, compute_type=compute_type)
+        local = MODELS_DIR / "stt" / model_size / "model.bin"
+        model_path = str(MODELS_DIR / "stt" / model_size) if local.exists() else model_size
+        self._model = WhisperModel(model_path, device=device, compute_type=compute_type)
         self._language = language
         self._vad_filter = vad_filter
 

@@ -74,7 +74,7 @@ function Brightness({ card, accent, sendControl }) {
           domain: "light",
           service: "turn_on",
           entity_id: card.entity_id,
-          data: { brightness_pct: Number(e.target.value) },
+          data: { brightness_pct: Number((e.target as HTMLInputElement).value) },
         })
       }
       className={`h-1 w-full cursor-pointer appearance-auto ${accent.slider}`}
@@ -136,7 +136,7 @@ function ColorControls({ card, sendControl }) {
               domain: "light",
               service: "turn_on",
               entity_id: card.entity_id,
-              data: { color_temp_kelvin: Number(e.target.value) },
+              data: { color_temp_kelvin: Number((e.target as HTMLInputElement).value) },
             })
           }
           className="temp-slider h-1.5 w-full cursor-pointer appearance-none rounded-full"

@@ -8,7 +8,7 @@ import {
   streamMessage,
 } from "./lib/chatApi";
 
-export const useChatStore = create((set, get) => ({
+export const useChatStore = create<any>()((set, get) => ({
   conversations: [],
   activeId: null,
   active: null,
