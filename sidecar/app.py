@@ -26,5 +26,6 @@ def create_sidecar_app(
     # OpenAI-compatible audio endpoints: POST /v1/audio/speech + /v1/audio/transcriptions
     register_openai_api(app, stt, tts, stt_model=openai_stt_model, tts_model=openai_tts_model)
     # Model registry + download manager: GET /api/models, POST /api/models/{kind}/{id}/download
-    register_model_routes(app)
+    # openai_stt_model doubles as the configured (active) STT model id.
+    register_model_routes(app, active_stt=openai_stt_model)
     return app

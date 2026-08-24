@@ -1,10 +1,16 @@
 @import "@fontsource/instrument-serif/400.css";
+@import "@fontsource/instrument-sans/400.css";
+@import "@fontsource/instrument-sans/500.css";
 @import "@fontsource/azeret-mono/300.css";
 @import "@fontsource/azeret-mono/400.css";
 @import "highlight.js/styles/github-dark-dimmed.css";
 @import "tailwindcss";
 
 @theme {
+  /* Instrument Sans is the workhorse UI face (designed alongside Instrument
+     Serif, so the pairing stays coherent); Azeret Mono is reserved for data:
+     eyebrows, sizes, timings, code. */
+  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
   --font-mono: "Azeret Mono", ui-monospace, "SFMono-Regular", monospace;
 
@@ -35,6 +41,7 @@ html, body, #root {
 }
 
 body {
+  font-family: var(--font-sans);
   background:
     radial-gradient(110% 75% at 50% 0%, rgba(46, 84, 92, 0.20) 0%, rgba(46, 84, 92, 0) 55%),
     radial-gradient(90% 60% at 50% 110%, rgba(36, 38, 66, 0.45) 0%, rgba(36, 38, 66, 0) 60%),
@@ -70,6 +77,22 @@ body {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
+}
+
+/* Slim, theme-matched scrollbar for the settings dialog. */
+.modal-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+.modal-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.modal-scroll::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.modal-scroll::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* ---- Chat message rendering ---------------------------------------- */

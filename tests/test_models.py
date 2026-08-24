@@ -81,3 +81,19 @@ async def test_manager_status_and_run(monkeypatch, tmp_path):
     monkeypatch.setattr(models, "download", fake_download)
     await manager._run(spec)
     assert manager.status(spec)["state"] == "downloaded"
+
+
+def test_models_route_marks_configured_stt_active():
+    from fastapi.testclient import TestClient
+
+    from sidecar.app import create_sidecar_app
+
+    app = create_sidecar_app(None, None, openai_stt_model="distil-small.en")
+    client = TestClient(app)
+    by_id = {
+        (m["kind"], m["id"]): m
+        for m in client.get("/api/models").json()["models"]
+    }
+    assert by_id[("stt", "distil-small.en")]["active"] is True
+    assert by_id[("stt", "tiny.en")]["active"] is False
+    assert by_id[("tts", "kokoro")]["active"] is True
