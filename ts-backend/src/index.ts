@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import Fastify from "fastify";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
-import websocket from "@fastify/websocket";
+import { WebSocketServer } from "ws";
 import proxy from "@fastify/http-proxy";
 import OpenAI from "openai";
 
@@ -76,7 +76,6 @@ async function main() {
   // mis-infer HTTP/2 here, so type the instance loosely (runtime is HTTPS).
   const app: any = Fastify((https ? { https } : {}) as any);
 
-  app.register(websocket);
   app.register(multipart, { limits: { fileSize: 11 * 1024 * 1024 } });
   app.register(proxy, { upstream: config.sidecarUrl, prefix: "/v1/audio", rewritePrefix: "/v1/audio" });
   app.register(proxy, { upstream: config.sidecarUrl, prefix: "/v1/models", rewritePrefix: "/v1/models" });
@@ -142,23 +141,33 @@ async function main() {
     sidecar: await inference.health().catch(() => null),
   }));
 
-  app.get("/ws", { websocket: true }, (socket: any) => {
-    const history: any[] = [];
-    const controls = config.allowedControls ?? DEFAULT_ALLOWED_CONTROLS;
-    const send: SendFn = async (kind, payload) => {
-      if (kind === "wav") socket.send(payload);
-      else socket.send(JSON.stringify({ type: kind, ...payload }));
-    };
-    const getCards = (ids: string[]) => ha.getCards(ids);
+  // Voice pipeline over WebSocket (direct ws + Fastify's upgrade event;
+  // @fastify/websocket 11.x mis-wraps handlers under Fastify 5).
+  const wss = new WebSocketServer({ noServer: true });
+  app.server.on("upgrade", (req: any, socket: any, head: any) => {
+    const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+    if (pathname !== "/ws") {
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws: any) => {
+      const history: any[] = [];
+      const controls = config.allowedControls ?? DEFAULT_ALLOWED_CONTROLS;
+      const send: SendFn = async (kind, payload) => {
+        if (kind === "wav") ws.send(payload);
+        else ws.send(JSON.stringify({ type: kind, ...payload }));
+      };
+      const getCards = (ids: string[]) => ha.getCards(ids);
 
-    socket.on("message", (data: any, isBinary: boolean) => {
-      if (isBinary) {
-        runVoiceTurn(
-          inference, agent, Buffer.from(data), history, send, state.voice, getCards,
-        ).catch((e) => send("error", { message: String(e?.message ?? e) }));
-      } else {
-        handleControl(socket, ha, data.toString(), controls);
-      }
+      ws.on("message", (data: any, isBinary: boolean) => {
+        if (isBinary) {
+          runVoiceTurn(
+            inference, agent, Buffer.from(data), history, send, state.voice, getCards,
+          ).catch((e) => send("error", { message: String(e?.message ?? e) }));
+        } else {
+          handleControl(ws, ha, data.toString(), controls);
+        }
+      });
     });
   });
 
