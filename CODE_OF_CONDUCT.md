@@ -48,7 +48,7 @@ when an individual is officially representing the community in public spaces.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement at
-<ed.masoud@revive.de>. All complaints will be reviewed and investigated
+<edmasoud@proton.me>. All complaints will be reviewed and investigated
 promptly and fairly.
 
 ## Attribution

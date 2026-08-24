@@ -57,8 +57,8 @@ speech-to-text, an LM Studio LLM with Home Assistant tool calling, and
 
 ## Prerequisites
 
-- NVIDIA GPU visible in WSL2 (`nvidia-smi`) — STT uses CUDA by default;
-  CPU-only works if you set `stt.device: "cpu"`.
+- Linux (native or WSL2) with an NVIDIA GPU (`nvidia-smi`) — STT uses CUDA by
+  default; CPU-only works if you set `stt.device: "cpu"`.
 - `sudo apt install espeak-ng ffmpeg`
 - Node.js 20+ and npm (TypeScript backend + frontend)
 - [LM Studio](https://lmstudio.ai/) running with a tool-calling model loaded

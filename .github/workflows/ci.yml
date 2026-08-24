@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            ts-backend/package-lock.json
+            web/package-lock.json
+      - name: Backend
+        working-directory: ts-backend
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+      - name: Frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        # Skip kokoro (pulls torch) and the CUDA libraries — the tests fake
+        # the TTS pipeline and run STT/TTS logic on CPU stubs.
+        run: |
+          grep -vE '^(kokoro|nvidia)' requirements.txt > ci-requirements.txt
+          pip install -r ci-requirements.txt pytest pytest-asyncio
+      - name: Tests
+        run: pytest

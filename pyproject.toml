@@ -32,7 +32,7 @@ dependencies = [
 dev = ["pytest", "pytest-asyncio"]
 
 [project.scripts]
-sawot = "server.main:main"
+sawot-sidecar = "sidecar.main:main"
 
 [tool.setuptools]
-packages = ["server"]
+packages = ["server", "sidecar"]

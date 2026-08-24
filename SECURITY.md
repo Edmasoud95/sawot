@@ -26,5 +26,5 @@ read conversation history. Treat it as a **trusted-LAN-only** service.
 
 ## Reporting a vulnerability
 
-Please report security issues privately to <ed.masoud@revive.de> rather than
-opening a public issue. (Update this address to wherever you want reports sent.)
+Please report security issues privately to <edmasoud@proton.me> rather than
+opening a public issue.
