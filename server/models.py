@@ -77,37 +77,19 @@ def is_downloaded(spec: ModelSpec) -> bool:
 
 
 def _make_tqdm(on_update: Callable[[int, int], None] | None):
-    """Minimal tqdm-compatible class for huggingface_hub progress callbacks."""
+    """tqdm subclass that reports progress through a callback.
 
-    class Shim:
-        def __init__(self, total=None, **kwargs):
-            self.total = int(total) if total is not None else 0
-            self.n = 0
-            if on_update:
-                on_update(0, self.total)
+    Subclassing (rather than reimplementing) keeps huggingface_hub's usage
+    compatible — including thread_map's ensure_lock/get_lock/set_lock and the
+    iterable-wrapping constructor.
+    """
+    from tqdm import tqdm as _tqdm
 
+    class Shim(_tqdm):
         def update(self, n=1):
-            self.n += int(n)
+            super().update(n)
             if on_update:
-                on_update(self.n, self.total)
-
-        def close(self):
-            pass
-
-        def refresh(self):
-            pass
-
-        def set_description(self, *a, **k):
-            pass
-
-        def set_postfix(self, *a, **k):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
+                on_update(self.n, self.total or 0)
 
     return Shim
 
