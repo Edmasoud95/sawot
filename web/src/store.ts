@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { expressionFromActivity, expressionFromSentiment, expressionFromReading } from "./lib/orbExpression";
 
 // High-frequency mic/playback level, deliberately OUTSIDE React state:
 // the orb reads it per-frame in its render loop; pushing 60Hz updates
@@ -17,8 +18,13 @@ export const useVoiceStore = create<any>()((set) => ({
   debugEnabled: localStorage.getItem("voice-debug") === "1",
   traces: [], // [{ id, events: [{event, data}] }], capped at MAX_TRACES
   nextTraceId: 1,
+  expression: null,
 
-  setStatus: (status) => set({ status }),
+  setStatus: (status) => set({ status, ...(["recording", "connecting"].includes(status) ? { expression: null } : {}) }),
+  showActivity: (activity) => set((s) => ({ expression: expressionFromActivity(s.expression, activity) })),
+  showReading: (reading) => set((s) => ({ expression: expressionFromReading(s.expression, reading) })),
+  showSentiment: (sentiment) => set((s) => ({ expression: expressionFromSentiment(s.expression, sentiment) })),
+  clearExpression: (expected?) => set((s) => !expected || s.expression === expected ? { expression: null } : {}),
   setUserCaption: (text) => set({ userCaption: text }),
   setAssistantCaption: (text) => set({ assistantCaption: text }),
   clearCaptions: () => set({ userCaption: "", assistantCaption: "" }),

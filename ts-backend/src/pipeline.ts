@@ -1,3 +1,4 @@
+import type { TemperatureReading } from "./temperature.js";
 import type { Agent, HistoryMessage } from "./agent.js";
 import type { InferenceClient } from "./inference.js";
 
@@ -32,12 +33,41 @@ export async function runVoiceTurn(
   await send("transcript", { text });
 
   const touched: string[] = [];
+  let reading: TemperatureReading | null = null;
+  let expression: { sentiment: string } | null = null;
+  let activity: { tool: string; domain: string; service?: string } | null = null;
   const onAgentEvent = async (event: string, data: any) => {
+    if (event === "reading") {
+      reading = data;
+      return;
+    }
+    if (event === "expression") {
+      expression = data;
+      return;
+    }
     if (event === "touched") {
       for (const eid of data.entity_ids ?? []) {
         if (!touched.includes(eid)) touched.push(eid);
       }
       return;
+    }
+    // Product activity is separate from diagnostic text, including untruncated
+    // success/failure information. Tool calls within a voice turn are sequential.
+    if (event === "tool_call") {
+      activity = null;
+      const args = data.args;
+      if ((data.name === "call_service" || data.name === "get_entities") &&
+          args && typeof args === "object" && typeof args.domain === "string") {
+        activity = {
+          tool: data.name,
+          domain: args.domain,
+          ...(typeof args.service === "string" ? { service: args.service } : {}),
+        };
+        await send("activity", { ...activity, phase: "start" });
+      }
+    } else if (event === "tool_result" && activity?.tool === data.name) {
+      await send("activity", { ...activity, phase: data.ok ? "complete" : "error" });
+      activity = null;
     }
     await send("debug", { event, data });
   };
@@ -45,7 +75,7 @@ export async function runVoiceTurn(
   const checkpoint = history.length;
   let reply: string;
   try {
-    reply = await agent.run(history, text, onAgentEvent);
+    reply = await agent.run(history, text, onAgentEvent, { expressions: true });
   } catch {
     history.splice(checkpoint);
     await send("error", { message: "LLM backend offline" });
@@ -73,5 +103,8 @@ export async function runVoiceTurn(
     event: "tts",
     data: { latency_ms: Math.round(performance.now() - t1), bytes: wav.length },
   });
+  // Begin the expression with playback, so slow synthesis cannot use up its lifetime.
+  if (expression) await send("expression", expression);
+  if (reading) await send("reading", reading);
   await send("wav", wav);
 }

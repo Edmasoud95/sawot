@@ -14,7 +14,13 @@ export function useVoice() {
       onClose: () => useVoiceStore.getState().setStatus("connecting"),
       onEvent: (msg) => {
         const s = useVoiceStore.getState();
-        if (msg.type === "debug") {
+        if (msg.type === "reading") {
+          s.showReading(msg);
+        } else if (msg.type === "expression") {
+          s.showSentiment(msg.sentiment);
+        } else if (msg.type === "activity") {
+          s.showActivity(msg);
+        } else if (msg.type === "debug") {
           s.addDebugEvent(msg);
         } else if (msg.type === "transcript") {
           s.setUserCaption(msg.text);
@@ -29,15 +35,17 @@ export function useVoice() {
           // Keep inline chat cards in sync with control refreshes.
           useChatStore.getState().patchCards(msg.entities);
         } else if (msg.type === "error") {
+          s.clearExpression();
           s.setAssistantCaption(msg.message);
           s.setStatus("idle");
         }
       },
       onAudio: (buf) => {
         useVoiceStore.getState().setStatus("speaking");
-        playWav(buf, () => useVoiceStore.getState().setStatus("idle")).catch(() =>
-          useVoiceStore.getState().setStatus("idle")
-        );
+        playWav(buf, () => useVoiceStore.getState().setStatus("idle")).catch(() => {
+          useVoiceStore.getState().clearExpression();
+          useVoiceStore.getState().setStatus("idle");
+        });
       },
     });
     socketRef.current = socket;

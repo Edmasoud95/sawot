@@ -89,7 +89,7 @@ export default function Composer() {
   const showVisionWarning = hasImage && !visionOk;
 
   return (
-    <div className="shrink-0 px-4 pb-1 pt-2 sm:px-6">
+    <div className="composer shrink-0 px-4 pb-1 pt-2 sm:px-6">
       {showVisionWarning && (
         <div className="mx-auto mb-2 flex max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-aurora-ember/30 bg-aurora-ember/10 px-3 py-1.5 font-mono text-[0.65rem] text-aurora-ember">
           <span>model may not support images</span>
@@ -103,7 +103,7 @@ export default function Composer() {
           )}
         </div>
       )}
-      <div className="mx-auto max-w-3xl rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-md transition-colors duration-300 focus-within:border-aurora-teal/40">
+      <div className="composer-field mx-auto max-w-3xl">
         {pendingAttachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 border-b border-white/5 px-3 pb-2 pt-2.5">
             {pendingAttachments.map((a) =>
@@ -171,7 +171,7 @@ export default function Composer() {
             onKeyDown={onKeyDown}
             placeholder="Message the assistant…"
             aria-label="Message"
-            className="max-h-[184px] min-h-9 flex-1 resize-none self-center bg-transparent py-2 font-mono text-[0.85rem] font-light leading-snug text-zinc-200 outline-none placeholder:text-zinc-600"
+            className="max-h-[184px] min-h-9 flex-1 resize-none self-center bg-transparent py-2 font-sans text-[0.95rem] leading-snug text-zinc-200 outline-none placeholder:text-zinc-500"
           />
           {streaming ? (
             <button
@@ -193,8 +193,8 @@ export default function Composer() {
           )}
         </div>
       </div>
-      <p className="mx-auto mt-1.5 max-w-3xl text-center font-mono text-[0.55rem] uppercase tracking-[0.2em] text-zinc-700">
-        enter to send · shift+enter for newline
+      <p className="composer-hint">
+        Enter to send · Shift + Enter for a new line
       </p>
     </div>
   );

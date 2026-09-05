@@ -22,9 +22,9 @@ const ChatIcon = () => (
 );
 
 const MODES = [
-  { key: "orb", label: "Switch to orb", Icon: OrbIcon },
-  { key: "cards", label: "Switch to control cards", Icon: CardsIcon },
-  { key: "chat", label: "Switch to chat", Icon: ChatIcon },
+  { key: "orb", label: "Voice", Icon: OrbIcon },
+  { key: "cards", label: "Devices", Icon: CardsIcon },
+  { key: "chat", label: "Chat", Icon: ChatIcon },
 ];
 
 export default function ModeSwitch() {
@@ -33,7 +33,7 @@ export default function ModeSwitch() {
 
   return (
     <div
-      className="flex items-center rounded-full border border-white/10 bg-white/[0.04] backdrop-blur-md"
+      className="mode-switch"
       role="group"
       aria-label="View mode"
     >
@@ -42,12 +42,9 @@ export default function ModeSwitch() {
           key={key}
           onClick={() => setMode(key)}
           aria-label={label}
+          title={label}
           aria-pressed={mode === key}
-          className={`grid h-9 w-9 place-items-center rounded-full transition-colors duration-200 ${
-            mode === key
-              ? "bg-white/10 text-zinc-100"
-              : "text-zinc-500 hover:text-zinc-300"
-          }`}
+          className={`mode-button ${mode === key ? "is-active" : ""}`}
         >
           <Icon />
         </button>

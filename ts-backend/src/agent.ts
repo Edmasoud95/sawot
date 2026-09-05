@@ -1,3 +1,4 @@
+import { temperatureReading, type TemperatureReading } from "./temperature.js";
 import type OpenAI from "openai";
 import { executeTool, toOpenAiTools, touchedIdsFor, type Tool } from "./tools.js";
 
@@ -71,6 +72,7 @@ export class Agent {
     history: HistoryMessage[],
     userText: string,
     onEvent?: (event: string, data: any) => void | Promise<void>,
+    options: { expressions?: boolean } = {},
   ): Promise<string> {
     const emit = async (event: string, data: any) => {
       if (!onEvent) return;
@@ -81,13 +83,25 @@ export class Agent {
       }
     };
 
+    const readings = new Map<string, TemperatureReading>();
     history.push({ role: "user", content: userText });
 
     for (let round = 1; round <= Agent.MAX_ROUNDS; round++) {
       const t0 = performance.now();
       const response = await this.client.chat.completions.create({
         model: this.model,
-        messages: [{ role: "system", content: this.system }, ...history] as any,
+        messages: [{ role: "system", content: this.system + (options.expressions ?
+          "\n\nFor your final spoken reply, begin with exactly one hidden expression marker: " +
+          "<expression:happy>, <expression:sad>, or <expression:neutral>. " +
+          "Choose the expression appropriate to your response in the full conversation: happy for celebration, gratitude or warmth; " +
+          "sad for sympathy, disappointment or bad news. Use neutral for factual, ambiguous, mixed or routine device exchanges. " +
+          "Reflect the conversational tone, do not diagnose or claim to know the user's feelings. " +
+          "Take negation, quotations and sarcasm into account. Put the marker only at the start of the final reply, never in tool arguments. " +
+          "The marker is removed before speech; follow it with your normal reply. " +
+          "When answering a current temperature question, check get_entities live and add <temperature:entity_id> " +
+          "after the expression marker, selecting the exact temperature sensor you are discussing from this turn's results. " +
+          "Use its actual value and unit in your spoken answer. For climate devices use current_temperature, never the setpoint. " +
+          "Omit the temperature marker for unavailable readings, unrelated questions, or comparisons with no single primary reading." : "") }, ...history] as any,
         tools: toOpenAiTools(this.tools) as any,
       });
       const msg = response.choices[0].message;
@@ -100,7 +114,21 @@ export class Agent {
       });
 
       if (!msg.tool_calls || msg.tool_calls.length === 0) {
-        const reply = (msg.content ?? "").trim();
+        let reply = (msg.content ?? "").trim();
+        if (options.expressions) {
+          let tone = "neutral";
+          let selected: string | undefined;
+          // Consume metadata only at the beginning; it never reaches TTS/history.
+          for (let i = 0; i < 8; i++) {
+            const marker = reply.match(/^<(expression|temperature):([^>\r\n]{1,200})>\s*/i);
+            if (!marker) break;
+            reply = reply.slice(marker[0].length);
+            if (marker[1].toLowerCase() === "expression") tone = marker[2].toLowerCase();
+            else selected = marker[2].trim();
+          }
+          await emit("expression", { sentiment: tone === "happy" || tone === "sad" ? tone : "neutral" });
+          if (selected && readings.has(selected)) await emit("reading", readings.get(selected));
+        }
         history.push({ role: "assistant", content: reply });
         return reply;
       }
@@ -119,9 +147,19 @@ export class Agent {
           await emit("tool_call", { name: tc.function.name, args: tc.function.arguments });
           result = { error: "invalid tool arguments: " + (e?.message ?? e) };
         }
+        if (options.expressions && tc.function.name === "get_entities") {
+          const entities = Array.isArray(result) ? result : result?.entities;
+          if (Array.isArray(entities)) for (const entity of entities) {
+            if (typeof entity?.entity_id !== "string") continue;
+            readings.delete(entity.entity_id);
+            const reading = temperatureReading(entity);
+            if (reading) readings.set(reading.entity_id, reading);
+          }
+        }
         const content = JSON.stringify(result);
         await emit("tool_result", {
           name: tc.function.name,
+          ok: !(result && typeof result === "object" && "error" in result),
           latency_ms: Math.round(performance.now() - t1),
           size_chars: content.length,
           result: truncate(content),

@@ -12,39 +12,36 @@ import { useVoiceStore } from "./store";
 export default function App() {
   const { startTalking, stopTalking, sendControl } = useVoice();
   const mode = useVoiceStore((s) => s.mode);
+  const hasCaptions = useVoiceStore((s) => !!(s.userCaption || s.assistantCaption));
   return (
-    <main className="grain vignette relative flex h-dvh flex-col items-center overflow-hidden pb-[calc(28px+env(safe-area-inset-bottom))]">
-      {/* Top chrome lives in normal flow so it can never overlap view content. */}
-      <header className="z-30 flex w-full shrink-0 items-center justify-between gap-3 px-5 pt-[calc(12px+env(safe-area-inset-top))]">
-        <div className="flex items-center gap-4">
-          <h1 className="select-none font-mono text-[0.65rem] font-light uppercase tracking-[0.32em] text-zinc-600">
-            Voice
-          </h1>
-          <SettingsPanel />
-        </div>
-        <div className="flex items-center gap-3">
+    <main className="app-shell" data-mode={mode}>
+      <header className="app-header">
+        <h1 className="brand" aria-label="SAWOT">sawot<span aria-hidden="true">•</span></h1>
+        <div className="header-actions">
           <ModeSwitch />
+          <span className="header-divider" aria-hidden="true" />
           <HistoryDrawer />
+          <SettingsPanel />
         </div>
       </header>
       {mode === "chat" ? (
         <ChatView sendControl={sendControl} />
       ) : (
-        <>
-          <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-center">
+        <div className="voice-workspace">
+          <div className="voice-content">
             {mode === "orb" ? (
-              <div className="h-[min(64vw,48vh,380px)] w-[min(64vw,48vh,380px)] animate-rise-in">
-                <Orb />
-              </div>
+              <div className="orb-stage" aria-hidden="true"><Orb /></div>
             ) : (
-              <div className="flex w-full flex-1 items-center justify-center overflow-y-auto py-4">
+              <section className="controls-workspace" aria-label="Device controls">
                 <CardGrid sendControl={sendControl} />
-              </div>
+              </section>
             )}
-            <Captions />
+            <div className="caption-space" data-visible={hasCaptions}>
+              {hasCaptions && <Captions />}
+            </div>
           </div>
           <PushToTalk onStart={startTalking} onStop={stopTalking} />
-        </>
+        </div>
       )}
     </main>
   );

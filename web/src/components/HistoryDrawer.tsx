@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import gsap from "gsap";
 import { useVoiceStore } from "../store";
+import { useDialogFocus } from "../hooks/useDialogFocus";
 
 // One line per pipeline event, dense and scannable.
 function traceLine({ event, data }) {
@@ -50,16 +51,19 @@ export default function HistoryDrawer() {
   const traces = useVoiceStore((s) => s.traces);
   const panel = useRef(null);
   const scrim = useRef(null);
+  const trigger = useRef(null);
+  useDialogFocus(drawerOpen, panel, trigger, toggleDrawer);
 
   // Park the panel off-screen via GSAP itself — a Tailwind translate class
   // would be read as a pixel `x` offset that xPercent then adds to.
   useLayoutEffect(() => {
-    gsap.set(panel.current, { xPercent: 100 });
+    gsap.set(panel.current, { xPercent: 100, autoAlpha: 0 });
   }, []);
 
   useLayoutEffect(() => {
     gsap.to(panel.current, {
       xPercent: drawerOpen ? 0 : 100,
+      autoAlpha: drawerOpen ? 1 : 0,
       duration: 0.55,
       ease: "power4.out",
     });
@@ -73,15 +77,15 @@ export default function HistoryDrawer() {
   return (
     <>
       <button
+        ref={trigger}
         onClick={toggleDrawer}
         aria-label="Toggle conversation history"
+        title="History"
         aria-expanded={drawerOpen}
-        className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/[0.04] text-zinc-400 backdrop-blur-md transition-colors duration-300 hover:border-white/25 hover:text-zinc-200"
+        className="header-button"
       >
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
-          <circle cx="5" cy="12" r="1.6" />
-          <circle cx="12" cy="12" r="1.6" />
-          <circle cx="19" cy="12" r="1.6" />
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+          <path d="M3 11a9 9 0 1 1 3 8M3 5v6h6M12 7v5l3 2" />
         </svg>
       </button>
       <div
@@ -92,12 +96,17 @@ export default function HistoryDrawer() {
       />
       <aside
         ref={panel}
-        className="absolute inset-y-0 right-0 z-40 w-[min(85vw,380px)] overflow-y-auto border-l border-white/10 bg-ink-900/90 p-7 pt-[calc(72px+env(safe-area-inset-top))] backdrop-blur-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Voice history"
+        inert={!drawerOpen}
+        className="history-panel absolute inset-y-0 right-0 z-40 w-[min(85vw,380px)] overflow-y-auto border-l border-white/10 bg-ink-900/90 p-7 pt-[calc(72px+env(safe-area-inset-top))] backdrop-blur-2xl"
       >
         <div className="mb-6 flex items-center justify-between">
-          <h2 className="font-mono text-[0.65rem] font-light uppercase tracking-[0.3em] text-zinc-500">
-            Conversation
-          </h2>
+          <h2 className="history-title">Voice history</h2>
+          <button onClick={toggleDrawer} aria-label="Close history" className="icon-button">×</button>
+        </div>
+        <div className="mb-6">
           <button
             onClick={toggleDebug}
             aria-pressed={debugEnabled}
@@ -107,7 +116,7 @@ export default function HistoryDrawer() {
                 : "border-white/10 text-zinc-600 hover:border-white/25 hover:text-zinc-400"
             }`}
           >
-            debug
+            Show diagnostics
           </button>
         </div>
         {history.length === 0 && (

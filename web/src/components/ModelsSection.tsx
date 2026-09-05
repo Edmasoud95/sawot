@@ -7,15 +7,15 @@ function ModelCard({ m, onDownload }) {
   const active = m.active && m.state === "downloaded";
   return (
     <div
-      className={`flex flex-col gap-2 rounded-xl border p-4 transition-colors duration-300 ${
+      className={`model-card flex flex-col gap-2 rounded-xl border p-4 transition-colors duration-300 ${
         active
           ? "border-aurora-teal/50 bg-aurora-teal/[0.07]"
           : "border-white/10 bg-white/[0.03]"
       }`}
     >
-      <div className="flex items-center justify-between gap-3">
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-[0.9rem] font-medium text-zinc-100">
+      <div className="model-card-title">
+        <span className="model-card-name">
+          <span className="text-[0.9rem] font-medium text-zinc-100">
             {m.label}
           </span>
           {m.recommended && (

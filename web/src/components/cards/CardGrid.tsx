@@ -30,20 +30,16 @@ export default function CardGrid({ sendControl }) {
 
   if (cards.length === 0) {
     return (
-      <div className="flex animate-rise-in flex-col items-center gap-3">
-        <span className="font-mono text-[0.6rem] uppercase tracking-[0.3em] text-zinc-700">
-          Control
-        </span>
-        <p className="max-w-[26ch] text-center font-serif text-xl italic leading-relaxed text-zinc-600">
-          Ask about a device and its controls will appear here.
-        </p>
+      <div className="devices-empty">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="3" width="7" height="7" rx="2" /><rect x="3" y="14" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /></svg>
+        <p>Ask about a device to see its controls.</p>
       </div>
     );
   }
   return (
     <div
       ref={grid}
-      className="grid w-full max-w-[640px] grid-cols-1 gap-3 px-5 sm:grid-cols-2"
+      className="grid w-full max-w-[920px] grid-cols-1 gap-4 sm:grid-cols-2"
     >
       {cards.map((card) => (
         <EntityCard key={card.entity_id} card={card} sendControl={sendControl} />

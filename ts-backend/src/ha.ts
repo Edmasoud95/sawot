@@ -3,6 +3,7 @@ export interface Entity {
   name: string;
   state: string;
   area?: string;
+  attributes?: Record<string, unknown>;
 }
 
 export interface Card {
@@ -65,6 +66,11 @@ export class HomeAssistant {
         name: s.attributes?.friendly_name ?? s.entity_id,
         state: s.state,
         area: entityArea,
+        attributes: Object.fromEntries(
+          ["unit_of_measurement", "device_class", "current_temperature"]
+            .filter(key => key in (s.attributes ?? {}))
+            .map(key => [key, s.attributes[key]]),
+        ),
       });
     }
     return out;

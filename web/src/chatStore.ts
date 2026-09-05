@@ -18,7 +18,7 @@ export const useChatStore = create<any>()((set, get) => ({
   streamTools: [],
   streamCards: [],
   pendingAttachments: [],
-  sidebarOpen: true,
+  sidebarOpen: window.matchMedia("(min-width: 640px)").matches,
   abortStream: null,
 
   loadConversations: async () => {

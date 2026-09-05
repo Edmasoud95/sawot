@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useChatStore } from "../../chatStore";
 import Message, { Markdown, ToolChips, CardGrid } from "./Message";
 import ThinkingBlock from "./ThinkingBlock";
+import Welcome from "./Welcome";
 
 const NEAR_BOTTOM_PX = 120;
 
@@ -64,8 +65,9 @@ export default function MessageList({ sendControl }) {
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      className="min-h-0 flex-1 overflow-y-auto px-4 sm:px-6"
+      className="message-scroll min-h-0 flex-1 overflow-y-auto px-4 sm:px-6"
     >
+      {messages.length === 0 && !streaming && <Welcome />}
       <div className="mx-auto flex max-w-3xl flex-col gap-6 py-6">
         {messages.map((msg, i) => (
           <Message key={i} message={msg} sendControl={sendControl} />

@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import ModelsSection from "./ModelsSection";
+import { useDialogFocus } from "../hooks/useDialogFocus";
 
 function SectionTitle({ children }) {
   return (
@@ -43,6 +44,7 @@ function Select({ label, value, options, onChange, disabled = false }) {
     <label className="flex flex-col gap-1.5">
       <span className="text-[0.85rem] font-medium text-zinc-200">{label}</span>
       <select
+        aria-label={label}
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
@@ -110,19 +112,8 @@ export default function SettingsPanel() {
       .catch(() => setError("Couldn't load settings — is the server running?"));
   }, [open]);
 
-  // Dialog behavior: Escape closes, focus moves in on open and back on close.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    closeBtn.current?.focus();
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      trigger.current?.focus();
-    };
-  }, [open]);
+  const close = useCallback(() => setOpen(false), []);
+  useDialogFocus(open, panel, trigger, close);
 
   async function update(patch) {
     setSaved(false);
@@ -151,9 +142,10 @@ export default function SettingsPanel() {
       <button
         ref={trigger}
         onClick={() => setOpen(!open)}
+        title="Settings"
         aria-label="Settings"
         aria-expanded={open}
-        className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/[0.04] text-zinc-400 backdrop-blur-md transition-colors duration-300 hover:border-white/25 hover:text-zinc-200"
+        className="header-button"
       >
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
           <circle cx="12" cy="12" r="3" />
@@ -169,12 +161,13 @@ export default function SettingsPanel() {
       <div className="pointer-events-none fixed inset-0 z-50 grid place-items-center p-4 pt-[max(1rem,env(safe-area-inset-top))]">
         <div
           ref={panel}
+          inert={!open}
           role="dialog"
           aria-modal="true"
           aria-label="Settings"
-          className="pointer-events-auto invisible flex max-h-[min(88vh,48rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-ink-900/95 opacity-0 shadow-2xl shadow-black/60 backdrop-blur-2xl"
+          className="settings-panel pointer-events-auto invisible flex max-h-[min(88vh,48rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-ink-900/95 opacity-0 shadow-2xl shadow-black/60 backdrop-blur-2xl"
         >
-          <header className="flex items-center justify-between gap-3 px-6 pb-5 pt-6 sm:px-10">
+          <header className="settings-header flex items-center justify-between gap-3">
             <div className="flex items-baseline gap-4">
               <h2 className="font-serif text-2xl italic text-zinc-100">Settings</h2>
               <span
@@ -191,7 +184,7 @@ export default function SettingsPanel() {
               ref={closeBtn}
               onClick={() => setOpen(false)}
               aria-label="Close settings"
-              className="grid h-8 w-8 place-items-center rounded-full border border-white/10 text-zinc-400 transition-colors duration-300 hover:border-white/25 hover:text-zinc-200"
+              className="icon-button"
             >
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path d="M6 6l12 12M18 6L6 18" />
@@ -203,7 +196,7 @@ export default function SettingsPanel() {
               {error}
             </p>
           )}
-          <div className="modal-scroll grid gap-x-10 gap-y-8 overflow-y-auto px-6 pb-8 sm:grid-cols-2 sm:px-10 sm:pb-10">
+          <div className="settings-content modal-scroll grid overflow-y-auto">
             <section className="flex min-w-0 flex-col gap-5">
               <SectionTitle>Assistant</SectionTitle>
               {!data && !error && <Skeleton />}

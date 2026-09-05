@@ -1,19 +1,11 @@
 import { useVoiceStore } from "../store";
 
 const LABELS = {
-  connecting: "connecting",
-  idle: "hold to talk",
-  recording: "listening",
-  thinking: "thinking",
-  speaking: "speaking",
-};
-
-const DOT_COLORS = {
-  connecting: "bg-zinc-600",
-  idle: "bg-aurora-teal",
-  recording: "bg-aurora-ember",
-  thinking: "bg-aurora-violet",
-  speaking: "bg-aurora-ice",
+  connecting: "Connecting…",
+  idle: "Hold to talk",
+  recording: "Release to send",
+  thinking: "Thinking…",
+  speaking: "Speaking…",
 };
 
 export default function PushToTalk({ onStart, onStop }) {
@@ -21,9 +13,24 @@ export default function PushToTalk({ onStart, onStop }) {
   const recording = status === "recording";
   const busy = status === "thinking" || status === "speaking";
   return (
-    <div className="flex flex-col items-center gap-4 pt-4">
+    <div className="talk-dock">
       <button
         aria-label="Hold to talk"
+        title="Hold to talk"
+        disabled={status === "connecting" || busy}
+        onKeyDown={(e) => {
+          if ((e.key === " " || e.key === "Enter") && !e.repeat) {
+            e.preventDefault();
+            onStart();
+          }
+        }}
+        onKeyUp={(e) => {
+          if (e.key === " " || e.key === "Enter") {
+            e.preventDefault();
+            onStop();
+          }
+        }}
+        onBlur={onStop}
         onPointerDown={(e) => {
           e.preventDefault();
           onStart();
@@ -31,19 +38,8 @@ export default function PushToTalk({ onStart, onStop }) {
         onPointerUp={onStop}
         onPointerCancel={onStop}
         onPointerLeave={onStop}
-        className={`group relative grid h-[80px] w-[80px] touch-none select-none place-items-center rounded-full border backdrop-blur-md transition-all duration-300 ${
-          recording
-            ? "scale-110 border-aurora-ember/50 bg-aurora-ember/15 text-aurora-ember shadow-[0_0_60px_rgba(255,157,107,0.35),inset_0_0_24px_rgba(255,157,107,0.12)]"
-            : "border-white/12 bg-white/[0.04] text-zinc-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] hover:border-white/25 hover:bg-white/[0.08] active:scale-95"
-        }`}
+        className={`talk-button ${recording ? "is-recording" : ""}`}
       >
-        {/* breathing outline ring while the mic is hot */}
-        <span
-          aria-hidden="true"
-          className={`absolute inset-0 rounded-full border border-aurora-ember/40 transition-opacity duration-300 ${
-            recording ? "animate-ping opacity-60" : "opacity-0"
-          }`}
-        />
         <svg
           viewBox="0 0 24 24"
           width="26"
@@ -58,14 +54,8 @@ export default function PushToTalk({ onStart, onStop }) {
       <p
         role="status"
         aria-live="polite"
-        className="flex items-center gap-2 font-mono text-[0.68rem] font-light uppercase tracking-[0.28em] text-zinc-500"
+        className="talk-status"
       >
-        <span
-          aria-hidden="true"
-          className={`h-1.5 w-1.5 rounded-full transition-colors duration-500 ${DOT_COLORS[status]} ${
-            busy || status === "connecting" ? "animate-pulse-dot" : ""
-          }`}
-        />
         {LABELS[status]}
       </p>
     </div>
