@@ -1,38 +1,46 @@
-from types import SimpleNamespace
-
 import server.stt as stt_mod
-from server.stt import Transcriber
 
 
-class FakeWhisperModel:
-    def __init__(self, model_size, device, compute_type):
-        self.args = (model_size, device, compute_type)
-
-    def transcribe(self, audio, language, vad_filter):
-        segments = [SimpleNamespace(text=" Hello "), SimpleNamespace(text=" world. ")]
-        return iter(segments), SimpleNamespace()
+class FakeEngine:
+    def __init__(self, model_id, language="en"):
+        self.args = (model_id, language)
 
 
-def test_transcribe_joins_segments(monkeypatch, tmp_path):
-    monkeypatch.setattr(stt_mod, "WhisperModel", FakeWhisperModel)
-    monkeypatch.setattr(stt_mod, "MODELS_DIR", tmp_path)  # no local download
-    t = Transcriber("distil-small.en", device="cpu")
-    assert t._model.args == ("distil-small.en", "cpu", "int8")
-    assert t.transcribe(b"fake-audio-bytes") == "Hello world."
+def test_make_stt_engine_builds_gguf_engine(monkeypatch):
+    monkeypatch.setattr(stt_mod, "GgufTranscriber", FakeEngine)
+
+    engine = stt_mod.make_stt_engine("cohere-transcribe", language="de")
+    assert engine.args == ("cohere-transcribe", "de")
+
+    engine = stt_mod.make_stt_engine("parakeet-unified-en")
+    assert engine.args == ("parakeet-unified-en", "en")
 
 
-def test_cuda_uses_float16(monkeypatch, tmp_path):
-    monkeypatch.setattr(stt_mod, "WhisperModel", FakeWhisperModel)
-    monkeypatch.setattr(stt_mod, "MODELS_DIR", tmp_path)  # no local download
-    t = Transcriber("distil-small.en", device="cuda")
-    assert t._model.args == ("distil-small.en", "cuda", "float16")
+def test_gguf_transcriber_requires_downloaded_file(monkeypatch, tmp_path):
+    import pytest
 
-
-def test_uses_local_model_dir_when_downloaded(monkeypatch, tmp_path):
-    monkeypatch.setattr(stt_mod, "WhisperModel", FakeWhisperModel)
     monkeypatch.setattr(stt_mod, "MODELS_DIR", tmp_path)
-    model_dir = tmp_path / "stt" / "distil-small.en"
-    model_dir.mkdir(parents=True)
-    (model_dir / "model.bin").write_bytes(b"")
-    t = Transcriber("distil-small.en", device="cpu")
-    assert t._model.args == (str(model_dir), "cpu", "int8")
+    with pytest.raises(RuntimeError, match="no .gguf file"):
+        stt_mod.GgufTranscriber("cohere-transcribe")
+
+
+def test_decode_to_pcm_roundtrips_wav():
+    import io
+
+    import numpy as np
+    import soundfile as sf
+
+    tone = np.sin(np.linspace(0, 2 * np.pi * 440, 16000)).astype(np.float32)
+    buf = io.BytesIO()
+    sf.write(buf, tone, 16000, format="WAV")
+
+    pcm = stt_mod.decode_to_pcm(buf.getvalue())
+    assert pcm.dtype == np.float32
+    assert abs(len(pcm) - 16000) < 100  # ~1 s at 16 kHz
+
+
+def test_decode_to_pcm_rejects_garbage():
+    import pytest
+
+    with pytest.raises(RuntimeError, match="ffmpeg"):
+        stt_mod.decode_to_pcm(b"not audio at all")

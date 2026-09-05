@@ -64,6 +64,10 @@ export class Agent {
     this.model = model;
   }
 
+  setClient(client: OpenAI): void {
+    this.client = client;
+  }
+
   setSystemPrompt(system: string): void {
     this.system = system;
   }

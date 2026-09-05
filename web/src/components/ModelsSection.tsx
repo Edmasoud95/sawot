@@ -1,17 +1,23 @@
 import { useEffect, useState } from "react";
 import { API_BASE } from "../lib/config";
 
-function ModelCard({ m, onDownload }) {
+function ModelCard({ m, onDownload, onSelect, switching }) {
   const pct =
     m.total > 0 ? Math.min(100, Math.round((m.downloaded / m.total) * 100)) : 0;
   const active = m.active && m.state === "downloaded";
+  const loading = switching === m.id;
+  const selectable =
+    m.selectable && m.state === "downloaded" && !active && !switching;
+  const Card = selectable ? "button" : "div";
+
   return (
-    <div
-      className={`model-card flex flex-col gap-2 rounded-xl border p-4 transition-colors duration-300 ${
+    <Card
+      onClick={selectable ? () => onSelect(m) : undefined}
+      className={`model-card flex flex-col gap-2 rounded-xl border p-4 text-left transition-colors duration-300 ${
         active
           ? "border-aurora-teal/50 bg-aurora-teal/[0.07]"
           : "border-white/10 bg-white/[0.03]"
-      }`}
+      } ${selectable ? "cursor-pointer hover:border-aurora-teal/40 hover:bg-white/[0.05]" : ""}`}
     >
       <div className="model-card-title">
         <span className="model-card-name">
@@ -37,12 +43,17 @@ function ModelCard({ m, onDownload }) {
         </span>
       )}
       <div className="flex items-center justify-between gap-3 pt-1">
-        {m.state === "downloaded" ? (
+        {loading ? (
+          <span className="flex items-center gap-1.5 text-[0.78rem] text-aurora-teal">
+            <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-aurora-teal" />
+            Loading model…
+          </span>
+        ) : m.state === "downloaded" ? (
           <span className="flex items-center gap-1.5 text-[0.78rem] text-zinc-400">
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
               <path d="M4 12.5l5 5L20 6.5" />
             </svg>
-            Downloaded
+            {selectable ? "Downloaded — click to use" : "Downloaded"}
           </span>
         ) : m.state === "downloading" ? (
           <div className="flex flex-1 items-center gap-2">
@@ -69,12 +80,14 @@ function ModelCard({ m, onDownload }) {
       {m.error && (
         <span className="text-[0.75rem] leading-tight text-red-400">{m.error}</span>
       )}
-    </div>
+    </Card>
   );
 }
 
 export default function ModelsSection({ active = true }) {
   const [models, setModels] = useState([]);
+  const [switching, setSwitching] = useState(null);
+  const [selectError, setSelectError] = useState("");
 
   const refresh = () =>
     fetch(`${API_BASE}/api/models`)
@@ -96,6 +109,25 @@ export default function ModelsSection({ active = true }) {
       method: "POST",
     }).then(refresh);
 
+  const select = async (m) => {
+    setSelectError("");
+    setSwitching(m.id);
+    try {
+      const res = await fetch(`${API_BASE}/api/models/${m.kind}/${m.id}/select`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setSelectError(body.detail || "Couldn't switch the model — try again.");
+      }
+    } catch {
+      setSelectError("Couldn't reach the server.");
+    } finally {
+      setSwitching(null);
+      refresh();
+    }
+  };
+
   const stt = models.filter((m) => m.kind === "stt");
   const tts = models.filter((m) => m.kind === "tts");
 
@@ -105,8 +137,17 @@ export default function ModelsSection({ active = true }) {
         <h3 className="font-mono text-[0.65rem] uppercase tracking-[0.25em] text-zinc-500">
           Speech-to-text
         </h3>
+        {selectError && (
+          <p className="text-[0.75rem] leading-snug text-red-400/90">{selectError}</p>
+        )}
         {stt.map((m) => (
-          <ModelCard key={m.id} m={m} onDownload={download} />
+          <ModelCard
+            key={m.id}
+            m={m}
+            onDownload={download}
+            onSelect={select}
+            switching={switching}
+          />
         ))}
       </div>
       <div className="flex flex-col gap-3">
@@ -114,7 +155,13 @@ export default function ModelsSection({ active = true }) {
           Text-to-speech
         </h3>
         {tts.map((m) => (
-          <ModelCard key={m.id} m={m} onDownload={download} />
+          <ModelCard
+            key={m.id}
+            m={m}
+            onDownload={download}
+            onSelect={select}
+            switching={switching}
+          />
         ))}
       </div>
     </div>

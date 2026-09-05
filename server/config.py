@@ -13,7 +13,6 @@ class Config:
     lmstudio_url: str
     lmstudio_model: str
     stt_model: str
-    stt_device: str
     stt_language: str
     tts_voice: str
     tts_lang_code: str
@@ -60,7 +59,6 @@ def load_config(
         lmstudio_url=raw["lm_studio"]["url"].rstrip("/"),
         lmstudio_model=raw["lm_studio"]["model"],
         stt_model=raw["stt"]["model"],
-        stt_device=raw["stt"].get("device", "cuda"),
         stt_language=raw["stt"].get("language", "en"),
         tts_voice=raw["tts"]["voice"],
         tts_lang_code=raw["tts"].get("lang_code", "a"),

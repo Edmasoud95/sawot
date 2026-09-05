@@ -29,21 +29,32 @@ class ModelSpec:
     size_mb: int
     recommended: bool = False
     description: str = ""
-    files: tuple[str, ...] = ()  # for TTS: specific files; empty => full snapshot
+    files: tuple[str, ...] = ()  # specific files; empty => full snapshot
 
 
+# All STT models are quantized GGUFs from Handy's catalog, run by
+# transcribe.cpp on CPU (or Vulkan when available) — no CUDA required.
 STT_MODELS = [
-    ModelSpec("stt", "tiny.en", "tiny.en", "Systran/faster-whisper-tiny.en", 75,
-              description="Fastest; lowest accuracy"),
-    ModelSpec("stt", "base.en", "base.en", "Systran/faster-whisper-base.en", 145,
-              description="Fast, decent accuracy"),
-    ModelSpec("stt", "small.en", "small.en", "Systran/faster-whisper-small.en", 465,
-              description="Slower, more accurate"),
-    ModelSpec("stt", "distil-small.en", "distil-small.en",
-              "Systran/faster-distil-whisper-small.en", 300, recommended=True,
-              description="Recommended — best speed/accuracy balance"),
-    ModelSpec("stt", "medium.en", "medium.en", "Systran/faster-whisper-medium.en", 1500,
-              description="High accuracy; more RAM"),
+    ModelSpec("stt", "cohere-transcribe", "Cohere Transcribe",
+              "handy-computer/cohere-transcribe-03-2026-gguf", 1560, recommended=True,
+              description="Recommended — top accuracy, 14 languages",
+              files=("cohere-transcribe-03-2026-Q4_K_M.gguf",)),
+    ModelSpec("stt", "parakeet-unified-en", "Parakeet Unified EN 0.6B",
+              "handy-computer/parakeet-unified-en-0.6b-gguf", 731,
+              description="Very fast; English only",
+              files=("parakeet-unified-en-0.6b-Q8_0.gguf",)),
+    ModelSpec("stt", "parakeet-tdt-v3", "Parakeet TDT 0.6B v3",
+              "handy-computer/parakeet-tdt-0.6b-v3-gguf", 740,
+              description="Fast; 25 European languages",
+              files=("parakeet-tdt-0.6b-v3-Q8_0.gguf",)),
+    ModelSpec("stt", "whisper-large-v3-turbo", "Whisper Large v3 Turbo",
+              "handy-computer/whisper-large-v3-turbo-gguf", 886,
+              description="Multilingual all-rounder (~100 languages)",
+              files=("whisper-large-v3-turbo-Q8_0.gguf",)),
+    ModelSpec("stt", "canary-180m-flash", "Canary 180M Flash",
+              "handy-computer/canary-180m-flash-gguf", 218,
+              description="Smallest and fastest; en, de, es, fr",
+              files=("canary-180m-flash-Q8_0.gguf",)),
 ]
 
 _KOKORO_FILES = ("config.json", "kokoro-v1_0.pth") + tuple(
@@ -70,7 +81,7 @@ def get_model(kind: str, model_id: str) -> ModelSpec | None:
 
 def is_downloaded(spec: ModelSpec) -> bool:
     if spec.kind == "stt":
-        return (MODELS_DIR / "stt" / spec.id / "model.bin").exists()
+        return any((MODELS_DIR / "stt" / spec.id).glob("*.gguf"))
     if spec.kind == "tts":
         return (MODELS_DIR / "tts" / "kokoro-v1_0.pth").exists()
     return False
@@ -97,20 +108,32 @@ def _make_tqdm(on_update: Callable[[int, int], None] | None):
 def download(spec: ModelSpec, on_update: Callable[[int, int], None] | None = None) -> None:
     """Download a model into the local `models/` directory (blocking)."""
     tqdm_cls = _make_tqdm(on_update) if on_update is not None else None
-    if spec.kind == "stt":
-        snapshot_download(
-            repo_id=spec.repo,
-            local_dir=str(MODELS_DIR / "stt" / spec.id),
-            tqdm_class=tqdm_cls,
-        )
-    else:
-        for filename in spec.files:
-            hf_hub_download(
+    target = MODELS_DIR / ("tts" if spec.kind == "tts" else f"stt/{spec.id}")
+    try:
+        if spec.files:
+            # Specific files only — e.g. one GGUF quant out of a repo of many.
+            for filename in spec.files:
+                hf_hub_download(
+                    repo_id=spec.repo,
+                    filename=filename,
+                    local_dir=str(target),
+                    tqdm_class=tqdm_cls,
+                )
+        else:
+            snapshot_download(
                 repo_id=spec.repo,
-                filename=filename,
-                local_dir=str(MODELS_DIR / "tts"),
+                local_dir=str(target),
                 tqdm_class=tqdm_cls,
             )
+    except Exception as exc:
+        msg = str(exc)
+        if "gated" in msg.lower() or "403" in msg:
+            raise RuntimeError(
+                f"This model is gated on Hugging Face: accept access at "
+                f"https://huggingface.co/{spec.repo} while signed in, make the "
+                f"token available (`hf auth login` or HF_TOKEN in .env), then retry."
+            ) from exc
+        raise
 
 
 class ModelManager:

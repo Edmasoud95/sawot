@@ -1,19 +1,17 @@
 import { useChatStore } from "../../chatStore";
-import { useModels } from "./useModels";
+import { splitModelId, useProviders } from "./useModels";
 
 export default function ChatHeader() {
   const active = useChatStore((s) => s.active);
   const renameModel = useChatStore((s) => s.renameModel);
-  const models = useModels();
+  const providers = useProviders();
 
   if (!active) return null;
 
-  // Fall back to just the conversation's model until (or if) the list loads.
-  const options = models.length
-    ? models.includes(active.model)
-      ? models
-      : [active.model, ...models]
-    : [active.model];
+  const groups = providers.filter((p) => p.models.length);
+  const known = groups.some((p) =>
+    p.models.some((m) => `${p.id}::${m}` === active.model),
+  );
 
   return (
     <header className="chat-header">
@@ -29,10 +27,20 @@ export default function ChatHeader() {
           onChange={(e) => renameModel(e.target.value)}
           className="max-w-[200px] truncate rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-[0.78rem] text-zinc-300 outline-none backdrop-blur transition-colors duration-300 hover:border-white/25 focus:border-aurora-teal/50"
         >
-          {options.map((m) => (
-            <option key={m} value={m} className="bg-ink-900">
-              {m}
+          {/* Conversation's model until the list loads, or if it's gone. */}
+          {!known && (
+            <option value={active.model} className="bg-ink-900">
+              {splitModelId(active.model).model}
             </option>
+          )}
+          {groups.map((p) => (
+            <optgroup key={p.id} label={p.name} className="bg-ink-900">
+              {p.models.map((m) => (
+                <option key={m} value={`${p.id}::${m}`} className="bg-ink-900">
+                  {m}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </label>

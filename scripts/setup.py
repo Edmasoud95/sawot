@@ -69,7 +69,6 @@ lm_studio:
   model: "{cfg['lm_model']}"
 stt:
   model: "{cfg['stt'].id}"
-  device: "{cfg['device']}"
   language: "en"
 tts:
   voice: "{cfg['voice']}"
@@ -93,10 +92,9 @@ def main():
     print("SAWOT setup")
     print("=" * 60)
 
-    stt = choose("Speech-to-text model:", STT_MODELS, "distil-small.en")
+    stt = choose("Speech-to-text model:", STT_MODELS, "cohere-transcribe")
     tts = TTS_MODELS[0]
 
-    device = ask("STT device (cuda/cpu)", "cuda")
     voice = ask("Kokoro voice", "af_heart")
 
     print("\n--- Configuration ---")
@@ -113,7 +111,7 @@ def main():
 
     write_config(dict(
         ha_url=ha_url, ha_token=ha_token, lm_url=lm_url, lm_model=lm_model,
-        stt=stt, device=device, voice=voice,
+        stt=stt, voice=voice,
     ))
 
     print("\nSetup complete. Start the server with ./run.sh")

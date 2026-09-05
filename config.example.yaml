@@ -5,8 +5,7 @@ lm_studio:
   url: "http://192.168.1.11:1234/v1"  # LM Studio server (LAN IP of the host)
   model: "qwen3-8b"                    # any tool-calling model you have loaded
 stt:
-  model: "distil-small.en"            # faster-whisper model size
-  device: "cuda"                      # "cuda" or "cpu"
+  model: "cohere-transcribe"           # STT model id (see Settings for the list)
   language: "en"                      # transcription language
 tts:
   voice: "af_heart"                   # any Kokoro voice in the UI list

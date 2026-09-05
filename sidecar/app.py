@@ -5,10 +5,23 @@ text-to-speech. It isolates the only Python-native dependencies
 (faster-whisper, Kokoro) behind a tiny HTTP API on localhost.
 """
 
+from typing import Callable
+
 from fastapi import FastAPI
 
 from server.model_routes import register_model_routes
 from server.openai_api import register_openai_api
+
+
+class EngineState:
+    """Mutable holder for the live engines, so the STT model can be swapped
+    at runtime without rebuilding the app."""
+
+    def __init__(self, stt, tts, stt_model: str, tts_model: str):
+        self.stt = stt
+        self.tts = tts
+        self.stt_model = stt_model
+        self.tts_model = tts_model
 
 
 def create_sidecar_app(
@@ -16,16 +29,19 @@ def create_sidecar_app(
     tts,
     openai_stt_model: str = "whisper-1",
     openai_tts_model: str = "tts-1",
+    stt_factory: Callable | None = None,
+    persist_stt: Callable[[str], None] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="SAWOT inference sidecar")
+    state = EngineState(stt, tts, openai_stt_model, openai_tts_model)
 
     @app.get("/health")
     async def health():
         return {"ok": True, "service": "sawot-inference"}
 
     # OpenAI-compatible audio endpoints: POST /v1/audio/speech + /v1/audio/transcriptions
-    register_openai_api(app, stt, tts, stt_model=openai_stt_model, tts_model=openai_tts_model)
-    # Model registry + download manager: GET /api/models, POST /api/models/{kind}/{id}/download
-    # openai_stt_model doubles as the configured (active) STT model id.
-    register_model_routes(app, active_stt=openai_stt_model)
+    register_openai_api(app, state)
+    # Model registry + download manager + STT switching:
+    # GET /api/models, POST /api/models/{kind}/{id}/download, POST .../select
+    register_model_routes(app, state, stt_factory=stt_factory, persist_stt=persist_stt)
     return app

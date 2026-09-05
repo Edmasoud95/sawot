@@ -27,6 +27,9 @@ speech-to-text, an LM Studio LLM with Home Assistant tool calling, and
   switch off from Settings for a plain, friendly assistant.
 - **Live settings** — switch the LLM model and Kokoro voice at runtime;
   choices apply instantly and persist to `settings.json`.
+- **Custom providers** — add any OpenAI-compatible endpoint (OpenRouter,
+  Ollama, vLLM, OpenAI, …) with its API key from Settings; models from every
+  provider appear in the model pickers alongside LM Studio's.
 - **OpenAI-compatible audio API** — `POST /v1/audio/speech` (TTS) and
   `POST /v1/audio/transcriptions` (STT) let any OpenAI SDK client use the
   local engines as a drop-in speech backend.
@@ -57,8 +60,8 @@ speech-to-text, an LM Studio LLM with Home Assistant tool calling, and
 
 ## Prerequisites
 
-- Linux (native or WSL2) with an NVIDIA GPU (`nvidia-smi`) — STT uses CUDA by
-  default; CPU-only works if you set `stt.device: "cpu"`.
+- Linux (native or WSL2). Speech-to-text runs on CPU (ggml); text-to-speech
+  uses an NVIDIA GPU when present and falls back to CPU.
 - `sudo apt install espeak-ng ffmpeg`
 - Node.js 20+ and npm (TypeScript backend + frontend)
 - [LM Studio](https://lmstudio.ai/) running with a tool-calling model loaded
@@ -93,8 +96,7 @@ Edit `config.yaml`:
 | `home_assistant.url` | Your Home Assistant URL |
 | `lm_studio.url` | LM Studio server URL (LAN IP of the host) |
 | `lm_studio.model` | The tool-calling model loaded in LM Studio |
-| `stt.model` | faster-whisper model size (e.g. `distil-small.en`) |
-| `stt.device` | `cuda` (default) or `cpu` |
+| `stt.model` | STT model id (default `cohere-transcribe`; see Settings for the list) |
 | `stt.language` | Transcription language (default `en`) |
 | `tts.voice` | Kokoro voice (see the Settings panel for the list) |
 | `tts.lang_code` | Kokoro language code (default `a` = American English) |
@@ -115,8 +117,12 @@ Speech-to-text and text-to-speech models are downloaded on demand into a local
   bar. The recommended model for each kind is flagged.
 - **Setup wizard** → `.venv/bin/python scripts/setup.py`.
 
-Recommended defaults: `distil-small.en` (STT) and Kokoro-82M (TTS). Once
-downloaded, the server runs fully offline.
+The STT catalog mirrors [Handy](https://github.com/cjpais/Handy)'s: quantized
+GGUF models (Cohere Transcribe, Parakeet, Whisper Large v3 Turbo, Canary) run
+on CPU by [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) —
+no CUDA or Hugging Face account needed. Recommended defaults: Cohere
+Transcribe (STT — top of the Open ASR Leaderboard, 14 languages, 1.6 GB) and
+Kokoro-82M (TTS). Once downloaded, the server runs fully offline.
 
 ## Run
 

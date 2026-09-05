@@ -8,8 +8,7 @@ cd "$(dirname "$0")"
 [ -d web/dist ] || (cd web && npm install && npm run build)
 
 # Start the Python inference sidecar (STT/TTS) in the background.
-SP="$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
-env LD_LIBRARY_PATH="$SP/nvidia/cublas/lib:$SP/nvidia/cudnn/lib:${LD_LIBRARY_PATH:-}" .venv/bin/python -m sidecar.main &
+.venv/bin/python -m sidecar.main &
 SIDECAR_PID=$!
 
 cleanup() {

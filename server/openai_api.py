@@ -33,7 +33,10 @@ def _convert(wav: bytes, fmt: str, speed: float) -> bytes:
     return proc.stdout
 
 
-def register_openai_api(app, stt, tts, *, stt_model: str = "whisper-1", tts_model: str = "tts-1") -> None:
+def register_openai_api(app, state) -> None:
+    """Register the audio endpoints against a mutable engine `state` (an
+    object with .stt/.tts engines and .stt_model/.tts_model ids), so a
+    runtime STT model swap is picked up without re-registering routes."""
     @app.post("/v1/audio/speech")
     async def create_speech(body: dict):
         text = body.get("input")
@@ -51,9 +54,9 @@ def register_openai_api(app, stt, tts, *, stt_model: str = "whisper-1", tts_mode
             raise HTTPException(400, f"unsupported response_format: {fmt}")
 
         if voice is not None:
-            wav = await asyncio.to_thread(tts.synthesize, text, voice)
+            wav = await asyncio.to_thread(state.tts.synthesize, text, voice)
         else:
-            wav = await asyncio.to_thread(tts.synthesize, text)
+            wav = await asyncio.to_thread(state.tts.synthesize, text)
 
         if fmt == "wav" and speed == 1.0:
             return Response(content=wav, media_type="audio/wav")
@@ -73,7 +76,7 @@ def register_openai_api(app, stt, tts, *, stt_model: str = "whisper-1", tts_mode
         data = await file.read()
         if not data:
             raise HTTPException(400, "empty audio file")
-        text = await asyncio.to_thread(stt.transcribe, data, language=language)
+        text = await asyncio.to_thread(state.stt.transcribe, data, language=language)
         if response_format == "text":
             return Response(content=text, media_type="text/plain")
         if response_format == "verbose_json":
@@ -87,7 +90,7 @@ def register_openai_api(app, stt, tts, *, stt_model: str = "whisper-1", tts_mode
         return {
             "object": "list",
             "data": [
-                {"id": stt_model, "object": "model", "created": 0, "owned_by": "sawot"},
-                {"id": tts_model, "object": "model", "created": 0, "owned_by": "sawot"},
+                {"id": state.stt_model, "object": "model", "created": 0, "owned_by": "sawot"},
+                {"id": state.tts_model, "object": "model", "created": 0, "owned_by": "sawot"},
             ],
         }

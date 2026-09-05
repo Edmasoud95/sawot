@@ -9,7 +9,6 @@ export interface Config {
   lmstudioUrl: string;
   lmstudioModel: string;
   sttModel: string;
-  sttDevice: string;
   sttLanguage: string;
   ttsVoice: string;
   ttsLangCode: string;
@@ -45,7 +44,6 @@ export function loadConfig(path = "config.yaml"): Config {
     lmstudioUrl: String(raw.lm_studio.url).replace(/\/+$/, ""),
     lmstudioModel: raw.lm_studio.model,
     sttModel: raw.stt.model,
-    sttDevice: raw.stt.device ?? "cuda",
     sttLanguage: raw.stt.language ?? "en",
     ttsVoice: raw.tts.voice,
     ttsLangCode: raw.tts.lang_code ?? "a",

@@ -6,7 +6,6 @@ import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { WebSocketServer } from "ws";
 import proxy from "@fastify/http-proxy";
-import OpenAI from "openai";
 
 import { Agent, buildSystemPrompt } from "./agent.js";
 import { ChatStore } from "./chat.js";
@@ -15,6 +14,7 @@ import { loadConfig } from "./config.js";
 import { HomeAssistant } from "./ha.js";
 import { InferenceClient } from "./inference.js";
 import { runVoiceTurn, type SendFn } from "./pipeline.js";
+import { ProviderRegistry, qualifyModel } from "./providers.js";
 import { registerSettingsRoutes, SettingsStore, type SettingsState } from "./settings.js";
 import { buildHaTools } from "./tools.js";
 
@@ -83,20 +83,25 @@ async function main() {
 
   const inference = new InferenceClient(config.sidecarUrl);
   const ha = new HomeAssistant(config.haUrl, config.haToken);
-  const llm = new OpenAI({ baseURL: config.lmstudioUrl, apiKey: "lm-studio" });
   const tools = buildHaTools(ha);
 
   const store = new SettingsStore(join(root, "settings.json"));
   const overrides = store.load();
+  const registry = new ProviderRegistry(
+    { id: "lm-studio", name: "LM Studio", baseUrl: config.lmstudioUrl, builtin: true },
+    Array.isArray(overrides.providers) ? overrides.providers : [],
+  );
+  const fallbackModel = qualifyModel(registry.defaultId, config.lmstudioModel);
+  const initial = registry.resolve(overrides.model ?? fallbackModel);
   const state: SettingsState = {
-    model: overrides.model ?? config.lmstudioModel,
+    model: qualifyModel(initial.providerId, initial.model),
     voice: overrides.voice ?? config.ttsVoice,
     sassy: overrides.sassy ?? config.assistantSassy,
   };
 
   let summary = "";
   let systemPrompt = buildSystemPrompt(summary, state.sassy, config.assistantName);
-  const agent = new Agent(llm, state.model, tools, systemPrompt);
+  const agent = new Agent(initial.client, initial.model, tools, systemPrompt);
 
   const setSystemPrompt = (prompt: string) => {
     systemPrompt = prompt;
@@ -116,7 +121,8 @@ async function main() {
     store,
     agent,
     state,
-    lmstudioUrl: config.lmstudioUrl,
+    registry,
+    fallbackModel,
     summary,
     name: config.assistantName,
     setSystemPrompt,
@@ -124,7 +130,7 @@ async function main() {
 
   const chatCtx: ChatCtx = {
     store: new ChatStore(join(root, "data", "conversations")),
-    client: llm,
+    resolve: (model) => registry.resolve(model),
     tools,
     ha,
     uploadDir: join(root, "data", "uploads"),

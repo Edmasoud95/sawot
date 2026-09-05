@@ -5,7 +5,7 @@ import { API_BASE } from "../../lib/config";
 let cache = null;
 let inflight = null;
 
-export function fetchModels() {
+function fetchSettings() {
   if (cache) return Promise.resolve(cache);
   if (!inflight) {
     inflight = fetch(`${API_BASE}/api/settings`)
@@ -14,7 +14,10 @@ export function fetchModels() {
         return r.json();
       })
       .then((d) => {
-        cache = Array.isArray(d.models) ? d.models : [];
+        cache = {
+          models: Array.isArray(d.models) ? d.models : [],
+          providers: Array.isArray(d.providers) ? d.providers : [],
+        };
         return cache;
       })
       .catch((e) => {
@@ -25,17 +28,38 @@ export function fetchModels() {
   return inflight;
 }
 
-/** Model list from /api/settings; [] until loaded or on error. */
-export function useModels() {
-  const [models, setModels] = useState(cache ?? []);
+export function fetchModels() {
+  return fetchSettings().then((d) => d.models);
+}
+
+function useSettingsField(field) {
+  const [value, setValue] = useState(cache?.[field] ?? []);
   useEffect(() => {
     let on = true;
-    fetchModels()
-      .then((m) => on && setModels(m))
+    fetchSettings()
+      .then((d) => on && setValue(d[field]))
       .catch(() => {});
     return () => {
       on = false;
     };
-  }, []);
-  return models;
+  }, [field]);
+  return value;
+}
+
+/** Provider-qualified model ids from /api/settings; [] until loaded. */
+export function useModels() {
+  return useSettingsField("models");
+}
+
+/** Providers with their model lists from /api/settings; [] until loaded. */
+export function useProviders() {
+  return useSettingsField("providers");
+}
+
+/** Display name for a possibly provider-qualified model id. */
+export function splitModelId(id) {
+  const at = id.indexOf("::");
+  return at >= 0
+    ? { provider: id.slice(0, at), model: id.slice(at + 2) }
+    : { provider: null, model: id };
 }

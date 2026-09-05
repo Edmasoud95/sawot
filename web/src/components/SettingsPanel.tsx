@@ -39,6 +39,148 @@ function Toggle({ label, hint, checked, onChange }) {
   );
 }
 
+const FIELD_CLS =
+  "w-full min-w-0 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[0.85rem] text-zinc-200 outline-none backdrop-blur transition-colors duration-300 hover:border-white/25 focus:border-aurora-teal/50 disabled:opacity-50";
+
+function ModelSelect({ label, value, providers, onChange }) {
+  const groups = providers.filter((p) => p.models.length);
+  const known = groups.some((p) => p.models.some((m) => `${p.id}::${m}` === value));
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[0.85rem] font-medium text-zinc-200">{label}</span>
+      <select
+        aria-label={label}
+        value={value}
+        disabled={!groups.length}
+        onChange={(e) => onChange(e.target.value)}
+        className={FIELD_CLS}
+      >
+        {!known && (
+          <option value={value} className="bg-ink-900">
+            {value.includes("::") ? value.split("::")[1] : value}
+          </option>
+        )}
+        {groups.map((p) => (
+          <optgroup key={p.id} label={p.name} className="bg-ink-900">
+            {p.models.map((m) => (
+              <option key={m} value={`${p.id}::${m}`} className="bg-ink-900">
+                {m}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function ProviderRow({ p, onRemove }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5">
+      <div className="flex min-w-0 flex-col">
+        <span className="flex items-center gap-2 text-[0.85rem] font-medium text-zinc-200">
+          {p.name}
+          {p.builtin && (
+            <span className="rounded-full bg-white/[0.06] px-2 py-0.5 font-mono text-[0.55rem] uppercase tracking-wider text-zinc-400">
+              built-in
+            </span>
+          )}
+        </span>
+        <span className="truncate text-[0.72rem] text-zinc-500">{p.baseUrl}</span>
+        <span className={`text-[0.72rem] ${p.error ? "text-red-400/90" : "text-zinc-500"}`}>
+          {p.error ? "Unreachable — check the URL and key" : `${p.models.length} models`}
+        </span>
+      </div>
+      {!p.builtin && (
+        <button
+          onClick={() => onRemove(p)}
+          aria-label={`Remove provider ${p.name}`}
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-white/10 text-zinc-500 transition-colors duration-300 hover:border-red-400/50 hover:text-red-300"
+        >
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AddProviderForm({ apply }) {
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  async function add(e) {
+    e.preventDefault();
+    setFormError("");
+    setBusy(true);
+    try {
+      const res = await fetch("/api/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, baseUrl: url, apiKey: key || undefined }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setFormError(body.detail || "Couldn't add the provider — try again.");
+        return;
+      }
+      apply(body);
+      setName("");
+      setUrl("");
+      setKey("");
+    } catch {
+      setFormError("Couldn't reach the server.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={add} className="flex flex-col gap-2.5">
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Name (e.g. OpenRouter)"
+        aria-label="Provider name"
+        required
+        className={FIELD_CLS}
+      />
+      <input
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        placeholder="Base URL (e.g. https://openrouter.ai/api/v1)"
+        aria-label="Provider base URL"
+        required
+        type="url"
+        className={FIELD_CLS}
+      />
+      <input
+        value={key}
+        onChange={(e) => setKey(e.target.value)}
+        placeholder="API key (optional for local servers)"
+        aria-label="Provider API key"
+        type="password"
+        autoComplete="off"
+        className={FIELD_CLS}
+      />
+      {formError && (
+        <p className="text-[0.75rem] leading-snug text-red-400/90">{formError}</p>
+      )}
+      <button
+        type="submit"
+        disabled={busy || !name.trim() || !url.trim()}
+        className="self-start rounded-full border border-white/10 bg-white/[0.04] px-4 py-1.5 text-[0.8rem] text-zinc-200 transition-colors duration-300 hover:border-aurora-teal/50 hover:text-zinc-100 disabled:opacity-50"
+      >
+        {busy ? "Checking endpoint…" : "Add provider"}
+      </button>
+    </form>
+  );
+}
+
 function Select({ label, value, options, onChange, disabled = false }) {
   return (
     <label className="flex flex-col gap-1.5">
@@ -48,7 +190,7 @@ function Select({ label, value, options, onChange, disabled = false }) {
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full min-w-0 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[0.85rem] text-zinc-200 outline-none backdrop-blur transition-colors duration-300 hover:border-white/25 focus:border-aurora-teal/50 disabled:opacity-50"
+        className={FIELD_CLS}
       >
         {options.map((o) => (
           <option key={o} value={o} className="bg-ink-900">
@@ -115,6 +257,21 @@ export default function SettingsPanel() {
   const close = useCallback(() => setOpen(false), []);
   useDialogFocus(open, panel, trigger, close);
 
+  async function removeProvider(p) {
+    setError("");
+    try {
+      const res = await fetch(`/api/providers/${p.id}`, { method: "DELETE" });
+      const body = await res.json();
+      if (!res.ok) {
+        setError(body.detail || "Couldn't remove the provider — try again.");
+        return;
+      }
+      setData(body);
+    } catch {
+      setError("Couldn't reach the server.");
+    }
+  }
+
   async function update(patch) {
     setSaved(false);
     setError("");
@@ -142,8 +299,8 @@ export default function SettingsPanel() {
       <button
         ref={trigger}
         onClick={() => setOpen(!open)}
-        title="Settings"
         aria-label="Settings"
+        title="Settings"
         aria-expanded={open}
         className="header-button"
       >
@@ -202,11 +359,10 @@ export default function SettingsPanel() {
               {!data && !error && <Skeleton />}
               {data && (
                 <>
-                  <Select
+                  <ModelSelect
                     label="Model"
                     value={data.model}
-                    options={data.models.length ? data.models : [data.model]}
-                    disabled={!data.models.length}
+                    providers={data.providers ?? []}
                     onChange={(model) => update({ model })}
                   />
                   {data.models_error && (
@@ -226,6 +382,13 @@ export default function SettingsPanel() {
                     checked={!!data.sassy}
                     onChange={(sassy) => update({ sassy })}
                   />
+                  <div className="mt-3 flex flex-col gap-3">
+                    <SectionTitle>Providers</SectionTitle>
+                    {(data.providers ?? []).map((p) => (
+                      <ProviderRow key={p.id} p={p} onRemove={removeProvider} />
+                    ))}
+                    <AddProviderForm apply={setData} />
+                  </div>
                 </>
               )}
             </section>

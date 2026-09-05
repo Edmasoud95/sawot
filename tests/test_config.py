@@ -32,7 +32,6 @@ def test_load_config(tmp_path, monkeypatch):
     assert cfg.lmstudio_url == "http://localhost:1234/v1"  # trailing slash stripped
     assert cfg.lmstudio_model == "qwen3-8b"
     assert cfg.stt_model == "distil-small.en"
-    assert cfg.stt_device == "cpu"
     assert cfg.tts_voice == "af_heart"
     assert cfg.host == "127.0.0.1"
     assert cfg.port == 9999

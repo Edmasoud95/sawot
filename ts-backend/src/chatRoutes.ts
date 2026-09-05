@@ -21,7 +21,8 @@ const UPLOAD_MEDIA: Record<string, string> = {
 
 export interface ChatCtx {
   store: ChatStore;
-  client: any;
+  /** Resolve a (possibly provider-qualified) model id to its client. */
+  resolve: (model: string) => { client: any; model: string };
   tools: Tool[];
   ha: HomeAssistant | null;
   uploadDir: string;
@@ -41,10 +42,11 @@ function findUploadFile(dir: string, uid: string): string | null {
 }
 
 async function maybeTitle(ctx: ChatCtx, conv: any): Promise<void> {
-  if (conv.title !== "New chat" || !ctx.client) return;
+  if (conv.title !== "New chat") return;
   try {
-    const resp = await ctx.client.chat.completions.create({
-      model: conv.model,
+    const { client, model } = ctx.resolve(conv.model);
+    const resp = await client.chat.completions.create({
+      model,
       messages: [{
         role: "user",
         content:
@@ -160,8 +162,9 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     try {
       const history = toOpenAiMessages(conv.messages, ctx.uploadDir);
       const getCards = ctx.ha ? (ids: string[]) => ctx.ha!.getCards(ids) : undefined;
+      const llm = ctx.resolve(conv.model);
       for await (const [event, data] of runChat(
-        ctx.client, conv.model, ctx.tools, ctx.getSystemPrompt(), history, getCards,
+        llm.client, llm.model, ctx.tools, ctx.getSystemPrompt(), history, getCards,
       )) {
         if (event === "thinking") {
           assistant.thinking += data;

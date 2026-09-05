@@ -48,8 +48,10 @@ jobs:
           cache: pip
       - name: Install dependencies
         # Skip kokoro (pulls torch) and the CUDA libraries — the tests fake
-        # the TTS pipeline and run STT/TTS logic on CPU stubs.
+        # the TTS pipeline and run STT/TTS logic on CPU stubs. ffmpeg is
+        # needed by the audio-decode tests.
         run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
           grep -vE '^(kokoro|nvidia)' requirements.txt > ci-requirements.txt
           pip install -r ci-requirements.txt pytest pytest-asyncio
       - name: Tests
