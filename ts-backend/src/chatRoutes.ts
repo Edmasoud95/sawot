@@ -174,6 +174,8 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
           sse({ type: "content", delta: data });
         } else if (event === "tool") {
           sse({ type: "tool", ...data });
+        } else if (event === "debug") {
+          sse({ type: "debug", ...data });
         } else if (event === "entities") {
           assistant.cards = data;
           sse({ type: "entities", entities: data });

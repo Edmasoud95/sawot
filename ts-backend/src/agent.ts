@@ -1,6 +1,10 @@
+import { parseExpressionMarkers, expressionPrompt, expressionFromToolArgs, ORB_TOOL, ORB_TOOL_NAME, type ExpressionPayload } from "./expressions.js";
+import { appendFileSync, mkdirSync, statSync, truncateSync } from "node:fs";
+import { dirname } from "node:path";
 import { temperatureReading, type TemperatureReading } from "./temperature.js";
 import type OpenAI from "openai";
 import { executeTool, toOpenAiTools, touchedIdsFor, type Tool } from "./tools.js";
+import { createChatCompletion } from "./reasoningFallback.js";
 
 export type HistoryMessage = Record<string, any>;
 
@@ -46,8 +50,20 @@ function truncate(s: string, limit = 600): string {
   return s.length <= limit ? s : s.slice(0, limit) + "…";
 }
 
+// Raw model replies with their parsed expression, for diagnosing what the orb
+// was asked to show. Truncated when it grows past a megabyte.
+function logReply(path: string, entry: Record<string, unknown>) {
+  if (!path) return;
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    try { if (statSync(path).size > 1_000_000) truncateSync(path, 0); } catch { /* new file */ }
+    appendFileSync(path, JSON.stringify({ at: new Date().toISOString(), ...entry }) + "\n");
+  } catch { /* logging must never break a turn */ }
+}
+
 export class Agent {
   static MAX_ROUNDS = 5;
+  static replyLogPath = "data/orb-replies.log";
 
   constructor(
     private client: OpenAI,
@@ -88,25 +104,17 @@ export class Agent {
     };
 
     const readings = new Map<string, TemperatureReading>();
+    let toolExpression: ExpressionPayload = { kind: "none" };
+    const modelTools = options.expressions ? [...this.tools, ORB_TOOL as unknown as Tool] : this.tools;
     history.push({ role: "user", content: userText });
 
+    const turnStart = performance.now();
     for (let round = 1; round <= Agent.MAX_ROUNDS; round++) {
       const t0 = performance.now();
-      const response = await this.client.chat.completions.create({
+      const response = await createChatCompletion<any>(this.client, {
         model: this.model,
-        messages: [{ role: "system", content: this.system + (options.expressions ?
-          "\n\nFor your final spoken reply, begin with exactly one hidden expression marker: " +
-          "<expression:happy>, <expression:sad>, or <expression:neutral>. " +
-          "Choose the expression appropriate to your response in the full conversation: happy for celebration, gratitude or warmth; " +
-          "sad for sympathy, disappointment or bad news. Use neutral for factual, ambiguous, mixed or routine device exchanges. " +
-          "Reflect the conversational tone, do not diagnose or claim to know the user's feelings. " +
-          "Take negation, quotations and sarcasm into account. Put the marker only at the start of the final reply, never in tool arguments. " +
-          "The marker is removed before speech; follow it with your normal reply. " +
-          "When answering a current temperature question, check get_entities live and add <temperature:entity_id> " +
-          "after the expression marker, selecting the exact temperature sensor you are discussing from this turn's results. " +
-          "Use its actual value and unit in your spoken answer. For climate devices use current_temperature, never the setpoint. " +
-          "Omit the temperature marker for unavailable readings, unrelated questions, or comparisons with no single primary reading." : "") }, ...history] as any,
-        tools: toOpenAiTools(this.tools) as any,
+        messages: [{ role: "system", content: this.system + (options.expressions ? expressionPrompt() : "") }, ...history] as any,
+        tools: toOpenAiTools(modelTools) as any,
       });
       const msg = response.choices[0].message;
       await emit("llm_round", {
@@ -120,18 +128,23 @@ export class Agent {
       if (!msg.tool_calls || msg.tool_calls.length === 0) {
         let reply = (msg.content ?? "").trim();
         if (options.expressions) {
-          let tone = "neutral";
-          let selected: string | undefined;
           // Consume metadata only at the beginning; it never reaches TTS/history.
-          for (let i = 0; i < 8; i++) {
-            const marker = reply.match(/^<(expression|temperature):([^>\r\n]{1,200})>\s*/i);
-            if (!marker) break;
-            reply = reply.slice(marker[0].length);
-            if (marker[1].toLowerCase() === "expression") tone = marker[2].toLowerCase();
-            else selected = marker[2].trim();
+          const parsed = parseExpressionMarkers(reply);
+          reply = parsed.reply;
+          // A marker in the final reply is the model's latest word; otherwise
+          // whatever it showed through the tool stands.
+          const expression = parsed.expression.kind !== "none" ? parsed.expression : toolExpression;
+          logReply(Agent.replyLogPath, { user: userText, raw: msg.content ?? "", tool: toolExpression, expression });
+          await emit("expression", expression);
+          if (parsed.temperatureEntity && readings.has(parsed.temperatureEntity)) {
+            await emit("reading", readings.get(parsed.temperatureEntity));
           }
-          await emit("expression", { sentiment: tone === "happy" || tone === "sad" ? tone : "neutral" });
-          if (selected && readings.has(selected)) await emit("reading", readings.get(selected));
+          // Diagnostics: the raw text and what the orb was asked to show.
+          await emit("reply", { raw: msg.content ?? "", text: reply, expression, rounds: round,
+            latency_ms: Math.round(performance.now() - turnStart) });
+        } else {
+          await emit("reply", { raw: msg.content ?? "", text: reply, rounds: round,
+            latency_ms: Math.round(performance.now() - turnStart) });
         }
         history.push({ role: "assistant", content: reply });
         return reply;
@@ -146,7 +159,13 @@ export class Agent {
         try {
           args = JSON.parse(tc.function.arguments || "{}");
           await emit("tool_call", { name: tc.function.name, args });
-          result = await executeTool(this.tools, tc.function.name, args);
+          if (options.expressions && tc.function.name === ORB_TOOL_NAME) {
+            const chosen = expressionFromToolArgs(args);
+            if (chosen.kind === "none") result = { error: "nothing shown: give kind plus a catalogue name, a short text, or sketch strokes" };
+            else { toolExpression = chosen; result = { ok: true, shown: chosen.kind }; }
+          } else {
+            result = await executeTool(this.tools, tc.function.name, args);
+          }
         } catch (e: any) {
           await emit("tool_call", { name: tc.function.name, args: tc.function.arguments });
           result = { error: "invalid tool arguments: " + (e?.message ?? e) };

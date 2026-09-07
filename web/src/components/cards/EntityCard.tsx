@@ -1,261 +1,206 @@
-// Domain → aurora accent. Full class strings (not interpolated) so Tailwind
-// can see them at build time; the glow rides the same token via box-shadow.
-const ACCENTS = {
-  light: {
-    label: "text-aurora-ember/70",
-    toggleOn: "border-aurora-ember/60 bg-aurora-ember/25",
-    slider: "accent-[#ff9d6b]",
-    glow: "0 0 44px -14px rgba(255, 157, 107, 0.55)",
-    edge: "rgba(255, 157, 107, 0.35)",
-  },
-  switch: {
-    label: "text-aurora-teal/70",
-    toggleOn: "border-aurora-teal/60 bg-aurora-teal/25",
-    glow: "0 0 44px -14px rgba(62, 230, 196, 0.5)",
-    edge: "rgba(62, 230, 196, 0.35)",
-  },
-  media_player: {
-    label: "text-aurora-violet/70",
-    toggleOn: "border-aurora-violet/60 bg-aurora-violet/25",
-    glow: "0 0 44px -14px rgba(182, 156, 255, 0.5)",
-    edge: "rgba(182, 156, 255, 0.35)",
-  },
-  climate: {
-    label: "text-aurora-ice/70",
-    glow: "0 0 44px -14px rgba(154, 212, 255, 0.4)",
-    edge: "rgba(154, 212, 255, 0.3)",
-  },
+import { useEffect, useRef, useState } from "react";
+import { fractionOf, valueFromPointer } from "../../lib/touchSlider";
+
+// Domain accents come from the shared aurora tokens so the cards sit at the
+// same volume as the rest of the interface.
+const ACCENTS: Record<string, string> = {
+  light: "var(--color-aurora-ember)",
+  switch: "var(--color-aurora-teal)",
+  media_player: "var(--color-aurora-violet)",
+  climate: "var(--color-aurora-ice)",
 };
-const FALLBACK = { label: "text-zinc-500" };
-
-const UNIT = (card) => card.attrs.unit_of_measurement || "";
-
-function Toggle({ card, accent, sendControl }) {
-  const on = card.state === "on";
-  return (
-    <button
-      onClick={() =>
-        sendControl({
-          type: "control",
-          domain: card.domain,
-          service: on ? "turn_off" : "turn_on",
-          entity_id: card.entity_id,
-        })
-      }
-      aria-label={`Turn ${on ? "off" : "on"} ${card.name}`}
-      className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors duration-300 ${
-        on ? accent.toggleOn : "border-white/15 bg-white/5"
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 h-4.5 w-4.5 rounded-full transition-all duration-300 ${
-          on ? "left-[calc(100%-20px)] bg-zinc-100" : "left-0.5 bg-zinc-400"
-        }`}
-      />
-    </button>
-  );
-}
-
-function Brightness({ card, accent, sendControl }) {
-  const pct =
-    card.attrs.brightness != null
-      ? Math.max(1, Math.round((card.attrs.brightness / 255) * 100))
-      : 0;
-  return (
-    <input
-      type="range"
-      min="1"
-      max="100"
-      defaultValue={pct}
-      aria-label={`${card.name} brightness`}
-      onPointerUp={(e) =>
-        sendControl({
-          type: "control",
-          domain: "light",
-          service: "turn_on",
-          entity_id: card.entity_id,
-          data: { brightness_pct: Number((e.target as HTMLInputElement).value) },
-        })
-      }
-      className={`h-1 w-full cursor-pointer appearance-auto ${accent.slider}`}
-    />
-  );
-}
-
-// Curated palette: warm domestic tones first, saturated accents after.
-const SWATCHES = [
-  [255, 180, 107], // candle
-  [255, 214, 170], // warm white
-  [255, 244, 229], // soft white
-  [255, 92, 64],   // ember red
-  [255, 170, 36],  // amber
-  [64, 200, 120],  // sage green
-  [80, 140, 255],  // azure
-  [168, 110, 255], // violet
-];
 
 const COLOR_MODES = ["hs", "rgb", "rgbw", "rgbww", "xy"];
 
-function nearestSwatch(rgb) {
+// Warm domestic tones first, saturated accents after.
+const SWATCHES: [number, number, number][] = [
+  [255, 180, 107], [255, 214, 170], [255, 244, 229], [255, 92, 64],
+  [255, 170, 36], [64, 200, 120], [80, 140, 255], [168, 110, 255],
+];
+
+function nearestSwatch(rgb?: number[]) {
   if (!rgb) return -1;
-  let best = -1;
-  let bestDist = Infinity;
+  let best = -1, bestDist = Infinity;
   SWATCHES.forEach(([r, g, b], i) => {
     const d = (r - rgb[0]) ** 2 + (g - rgb[1]) ** 2 + (b - rgb[2]) ** 2;
-    if (d < bestDist) {
-      bestDist = d;
-      best = i;
-    }
+    if (d < bestDist) { bestDist = d; best = i; }
   });
   return bestDist < 60 ** 2 ? best : -1;
 }
 
-function ColorControls({ card, sendControl }) {
-  const modes = card.attrs.supported_color_modes || [];
-  const hasTemp = modes.includes("color_temp");
-  const hasColor = modes.some((m) => COLOR_MODES.includes(m));
-  if (!hasTemp && !hasColor) return null;
-
-  const minK = card.attrs.min_color_temp_kelvin ?? 2000;
-  const maxK = card.attrs.max_color_temp_kelvin ?? 6500;
-  const activeSwatch = nearestSwatch(card.attrs.rgb_color);
-
+function Switch({ on, label, onChange }: { on: boolean; label: string; onChange: () => void }) {
   return (
-    <div className="flex flex-col gap-2.5">
-      {hasTemp && (
-        <input
-          type="range"
-          min={minK}
-          max={maxK}
-          step="50"
-          defaultValue={card.attrs.color_temp_kelvin ?? (minK + maxK) / 2}
-          aria-label={`${card.name} color temperature`}
-          onPointerUp={(e) =>
-            sendControl({
-              type: "control",
-              domain: "light",
-              service: "turn_on",
-              entity_id: card.entity_id,
-              data: { color_temp_kelvin: Number((e.target as HTMLInputElement).value) },
-            })
-          }
-          className="temp-slider h-1.5 w-full cursor-pointer appearance-none rounded-full"
-          style={{
-            background:
-              "linear-gradient(to right, #ffb46b, #fff4e5 45%, #cfe4ff)",
-          }}
-        />
-      )}
-      {hasColor && (
-        <div className="flex items-center gap-2">
-          {SWATCHES.map(([r, g, b], i) => (
-            <button
-              key={i}
-              aria-label={`Set ${card.name} color to rgb(${r}, ${g}, ${b})`}
-              onClick={() =>
-                sendControl({
-                  type: "control",
-                  domain: "light",
-                  service: "turn_on",
-                  entity_id: card.entity_id,
-                  data: { rgb_color: [r, g, b] },
-                })
-              }
-              className={`h-5 w-5 shrink-0 rounded-full transition-transform duration-200 hover:scale-110 ${
-                activeSwatch === i
-                  ? "ring-2 ring-white/70 ring-offset-2 ring-offset-ink-900"
-                  : "ring-1 ring-white/15"
-              }`}
-              style={{ backgroundColor: `rgb(${r}, ${g}, ${b})` }}
-            />
-          ))}
-        </div>
-      )}
+    <button type="button" role="switch" aria-checked={on} aria-label={label}
+      className="tswitch" data-on={on} onClick={onChange}>
+      <span className="tswitch-track"><span className="tswitch-knob" /></span>
+    </button>
+  );
+}
+
+interface BarProps {
+  label: string; value: number; min: number; max: number; step: number;
+  format: (value: number) => string; onCommit: (value: number) => void;
+  ariaLabel: string; track?: string; showValue?: "always" | "drag";
+}
+
+// A drag-anywhere bar: the whole 48px-tall surface is the control, so a thumb
+// on a phone never has to find a tiny handle.
+function TouchBar({ label, value, min, max, step, format, onCommit, ariaLabel, track, showValue = "always" }: BarProps) {
+  const bar = useRef<HTMLDivElement>(null);
+  const [live, setLive] = useState(value);
+  const [active, setActive] = useState(false);
+  const dragging = useRef(false);
+  useEffect(() => { if (!dragging.current) setLive(value); }, [value]);
+
+  const read = (clientX: number) => {
+    const rect = bar.current?.getBoundingClientRect();
+    return rect ? valueFromPointer(clientX, rect, min, max, step) : live;
+  };
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    dragging.current = true;
+    setActive(true);
+    bar.current?.setPointerCapture(e.pointerId);
+    setLive(read(e.clientX));
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragging.current) setLive(read(e.clientX));
+  };
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    dragging.current = false;
+    setActive(false);
+    const next = read(e.clientX);
+    setLive(next);
+    if (next !== value) onCommit(next);
+  };
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const delta = e.key === "ArrowRight" || e.key === "ArrowUp" ? step
+      : e.key === "ArrowLeft" || e.key === "ArrowDown" ? -step : 0;
+    if (!delta) return;
+    e.preventDefault();
+    const next = Math.max(min, Math.min(max, live + delta));
+    setLive(next);
+    onCommit(next);
+  };
+  const fraction = fractionOf(live, min, max);
+  return (
+    <div ref={bar} className="tbar" role="slider" tabIndex={0} aria-label={ariaLabel}
+      data-active={active} data-track={Boolean(track)}
+      aria-valuemin={min} aria-valuemax={max} aria-valuenow={live} aria-valuetext={format(live)}
+      onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onKeyDown={onKeyDown}>
+      {track && <div className="tbar-track" style={{ background: track }} />}
+      <div className="tbar-fill" style={{ width: `${fraction * 100}%` }} />
+      <span className="tbar-label">{label}</span>
+      <span className="tbar-value" data-visible={showValue === "always" || active}>{format(live)}</span>
     </div>
   );
 }
 
-function ClimateControl({ card, sendControl }) {
-  const target = card.attrs.temperature;
-  const step = (delta) =>
-    sendControl({
-      type: "control",
-      domain: "climate",
-      service: "set_temperature",
-      entity_id: card.entity_id,
-      data: { temperature: Math.round((target + delta) * 2) / 2 },
-    });
+function ColorChips({ card, sendControl }) {
+  const active = nearestSwatch(card.attrs.rgb_color);
   return (
-    <div className="flex items-end justify-between">
-      <span className="font-serif text-3xl font-light leading-none text-zinc-100">
-        {card.attrs.current_temperature ?? "–"}
-        <span className="text-lg text-zinc-500">°</span>
-      </span>
-      {target != null && (
-        <span className="flex items-center gap-2 font-mono text-[0.75rem] text-aurora-ice/80">
-          <button
-            onClick={() => step(-0.5)}
-            aria-label="Lower target"
-            className="grid h-7 w-7 place-items-center rounded-full border border-white/15 text-zinc-400 transition-colors duration-300 hover:border-aurora-ice/50 hover:text-aurora-ice"
-          >
-            −
-          </button>
-          {target}°
-          <button
-            onClick={() => step(0.5)}
-            aria-label="Raise target"
-            className="grid h-7 w-7 place-items-center rounded-full border border-white/15 text-zinc-400 transition-colors duration-300 hover:border-aurora-ice/50 hover:text-aurora-ice"
-          >
-            +
-          </button>
-        </span>
-      )}
+    <div className="chips" role="group" aria-label={`${card.name} color`}>
+      {SWATCHES.map(([r, g, b], i) => (
+        <button type="button" key={i} className="chip" data-active={active === i}
+          aria-label={`Set ${card.name} color to rgb(${r}, ${g}, ${b})`}
+          aria-pressed={active === i}
+          style={{ background: `rgb(${r}, ${g}, ${b})` }}
+          onClick={() => sendControl({
+            type: "control", domain: "light", service: "turn_on",
+            entity_id: card.entity_id, data: { rgb_color: [r, g, b] },
+          })} />
+      ))}
     </div>
   );
+}
+
+function LightControls({ card, sendControl }) {
+  const pct = card.attrs.brightness != null ? Math.max(1, Math.round((card.attrs.brightness / 255) * 100)) : 100;
+  const modes: string[] = card.attrs.supported_color_modes || [];
+  const hasTemp = modes.includes("color_temp");
+  const hasColor = modes.some((m) => COLOR_MODES.includes(m));
+  const minK = card.attrs.min_color_temp_kelvin ?? 2000;
+  const maxK = card.attrs.max_color_temp_kelvin ?? 6500;
+  const turnOn = (data: Record<string, unknown>) => sendControl({
+    type: "control", domain: "light", service: "turn_on", entity_id: card.entity_id, data,
+  });
+  return (
+    <>
+      <TouchBar label="Brightness" value={pct} min={1} max={100} step={1}
+        format={(v) => `${v}%`} ariaLabel={`${card.name} brightness`} showValue="drag"
+        onCommit={(v) => turnOn({ brightness_pct: v })} />
+      {hasTemp && (
+        <TouchBar label="Warmth" value={card.attrs.color_temp_kelvin ?? Math.round((minK + maxK) / 2)}
+          min={minK} max={maxK} step={50} format={(v) => `${v} K`}
+          ariaLabel={`${card.name} color temperature`}
+          track="linear-gradient(to right, #e6b58a, #f3e9dc 55%, #b0cddd)"
+          onCommit={(v) => turnOn({ color_temp_kelvin: v })} />
+      )}
+      {hasColor && <ColorChips card={card} sendControl={sendControl} />}
+    </>
+  );
+}
+
+function ClimateControls({ card, sendControl }) {
+  const target = card.attrs.temperature;
+  if (target == null) return null;
+  const step = (delta: number) => sendControl({
+    type: "control", domain: "climate", service: "set_temperature",
+    entity_id: card.entity_id, data: { temperature: Math.round((target + delta) * 2) / 2 },
+  });
+  return (
+    <div className="stepper" role="group" aria-label={`${card.name} target temperature`}>
+      <button type="button" className="stepper-button" aria-label="Lower target" onClick={() => step(-0.5)}>−</button>
+      <span className="stepper-value"><span className="stepper-caption">Target</span>{target}°</span>
+      <button type="button" className="stepper-button" aria-label="Raise target" onClick={() => step(0.5)}>+</button>
+    </div>
+  );
+}
+
+function reading(card) {
+  const on = card.state === "on";
+  switch (card.domain) {
+    case "light":
+      if (!on) return { value: "Off" };
+      return { value: card.attrs.brightness != null ? Math.max(1, Math.round((card.attrs.brightness / 255) * 100)) : 100, unit: "%" };
+    case "switch":
+    case "media_player":
+      return { value: on ? "On" : card.state === "off" ? "Off" : card.state };
+    case "climate":
+      return { value: card.attrs.current_temperature ?? "–", unit: "°" };
+    default:
+      return { value: card.state, unit: card.attrs.unit_of_measurement || "" };
+  }
 }
 
 export default function EntityCard({ card, sendControl }) {
   const toggleable = ["light", "switch", "media_player"].includes(card.domain);
-  const accent = ACCENTS[card.domain] || FALLBACK;
-  const lit = toggleable && card.state === "on";
+  const on = card.state === "on";
+  const accent = ACCENTS[card.domain] ?? "var(--color-zinc-500)";
+  const { value, unit } = reading(card);
   return (
-    <div
-      className="entity-card flex flex-col gap-3 rounded-2xl border bg-ink-900/70 p-4 backdrop-blur-md transition-[border-color,box-shadow] duration-500"
-      style={{
-        borderColor: lit ? accent.edge : "rgba(255,255,255,0.10)",
-        boxShadow: lit ? accent.glow : "none",
-      }}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate text-[0.95rem] text-zinc-100">{card.name}</p>
-          <p
-            className={`font-mono text-[0.6rem] uppercase tracking-[0.2em] ${accent.label}`}
-          >
-            {card.area || card.domain}
-          </p>
+    <div className="entity-card ecard" data-on={toggleable ? on : undefined}
+      style={{ "--card-accent": accent } as React.CSSProperties}>
+      <div className="ecard-head">
+        <div className="ecard-title">
+          <p className="ecard-name">{card.name}</p>
+          <p className="ecard-eyebrow">{card.area || card.domain.replace("_", " ")}</p>
         </div>
         {toggleable && (
-          <Toggle card={card} accent={accent} sendControl={sendControl} />
+          <Switch on={on} label={`Turn ${on ? "off" : "on"} ${card.name}`}
+            onChange={() => sendControl({
+              type: "control", domain: card.domain,
+              service: on ? "turn_off" : "turn_on", entity_id: card.entity_id,
+            })} />
         )}
       </div>
-      {card.domain === "light" && card.state === "on" && (
-        <>
-          <Brightness card={card} accent={accent} sendControl={sendControl} />
-          <ColorControls card={card} sendControl={sendControl} />
-        </>
-      )}
-      {card.domain === "climate" && (
-        <ClimateControl card={card} sendControl={sendControl} />
-      )}
-      {!toggleable && card.domain !== "climate" && (
-        <p className="font-serif text-2xl font-light leading-none text-zinc-100">
-          {card.state}{" "}
-          <span className="font-mono text-[0.7rem] tracking-[0.12em] text-zinc-500">
-            {UNIT(card)}
-          </span>
-        </p>
-      )}
+      <p className="ecard-reading">
+        {value}
+        {unit && <span className="ecard-unit">{unit}</span>}
+      </p>
+      {card.domain === "light" && on && <LightControls card={card} sendControl={sendControl} />}
+      {card.domain === "climate" && <ClimateControls card={card} sendControl={sendControl} />}
     </div>
   );
 }

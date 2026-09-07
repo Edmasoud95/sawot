@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { useDebugStore } from "./debugStore";
+import { useVoiceStore } from "./store";
 import {
   listConversations,
   createConversation,
@@ -117,12 +119,17 @@ export const useChatStore = create<any>()((set, get) => ({
     });
 
     let doneFired = false;
+    const debug = () => (useVoiceStore.getState().debugEnabled ? useDebugStore.getState() : null);
+    debug()?.beginTurn("chat", { event: "user", data: { text: content, attachments: pendingAttachments.length } });
 
     const abort = streamMessage(
       activeId,
       { content, attachments: pendingAttachments },
       (event) => {
-        if (event.type === "thinking") {
+        if (event.type !== "content" && event.type !== "thinking") debug()?.logMessage("in", event);
+        if (event.type === "debug") {
+          debug()?.addEvent(event);
+        } else if (event.type === "thinking") {
           set((s) => ({ streamThinking: s.streamThinking + event.delta }));
         } else if (event.type === "content") {
           set((s) => ({ streamText: s.streamText + event.delta }));

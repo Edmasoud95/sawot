@@ -4,6 +4,7 @@ import PushToTalk from "./components/PushToTalk";
 import HistoryDrawer from "./components/HistoryDrawer";
 import SettingsPanel from "./components/SettingsPanel";
 import CardGrid from "./components/cards/CardGrid";
+import DebugBar from "./components/DebugBar";
 import ModeSwitch from "./components/ModeSwitch";
 import ChatView from "./components/chat/ChatView";
 import { useVoice } from "./hooks/useVoice";
@@ -12,9 +13,10 @@ import { useVoiceStore } from "./store";
 export default function App() {
   const { startTalking, stopTalking, sendControl } = useVoice();
   const mode = useVoiceStore((s) => s.mode);
+  const debugEnabled = useVoiceStore((s) => s.debugEnabled);
   const hasCaptions = useVoiceStore((s) => !!(s.userCaption || s.assistantCaption));
   return (
-    <main className="app-shell" data-mode={mode}>
+    <main className="app-shell" data-mode={mode} data-debug={debugEnabled}>
       <header className="app-header">
         <h1 className="brand" aria-label="SAWOT">sawot<span aria-hidden="true">•</span></h1>
         <div className="header-actions">
@@ -43,6 +45,7 @@ export default function App() {
           <PushToTalk onStart={startTalking} onStop={stopTalking} />
         </div>
       )}
+      <DebugBar />
     </main>
   );
 }

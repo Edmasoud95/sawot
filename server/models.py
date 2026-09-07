@@ -61,11 +61,29 @@ _KOKORO_FILES = ("config.json", "kokoro-v1_0.pth") + tuple(
     f"voices/{v}.pt" for v in KOKORO_VOICES
 )
 
+# Chatterbox Turbo and Nano share one architecture; each repo also ships a
+# legacy decoder (s3gen.safetensors) that the loader never reads, so it is
+# skipped. conds.pt is the built-in voice used when no reference clip is set.
+_CHATTERBOX_COMMON = ("ve.safetensors", "s3gen_meanflow.safetensors", "conds.pt",
+                      "tokenizer_config.json", "vocab.json", "merges.txt",
+                      "added_tokens.json", "special_tokens_map.json")
+
 TTS_MODELS = [
     ModelSpec("tts", "kokoro", "Kokoro-82M", "hexgrad/Kokoro-82M", 327,
               recommended=True, description="Recommended local TTS",
               files=_KOKORO_FILES),
+    ModelSpec("tts", "chatterbox-turbo", "Chatterbox Turbo", "ResembleAI/chatterbox-turbo", 3050,
+              description="Expressive, low latency; supports [laugh] tags and voice clips; GPU",
+              files=_CHATTERBOX_COMMON + ("t3_turbo_v1.safetensors", "t3_turbo_v1.yaml")),
+    ModelSpec("tts", "chatterbox-nano", "Chatterbox Nano", "ResembleAI/chatterbox-nano", 2050,
+              description="Small Chatterbox for CPU or GPU; same tags and voice clips",
+              files=_CHATTERBOX_COMMON + ("t3_nano_v1.safetensors", "t3_nano_v1.yaml")),
 ]
+
+
+def tts_dir(spec: ModelSpec) -> Path:
+    """Kokoro keeps its historical flat layout; other TTS models get a folder."""
+    return MODELS_DIR / "tts" if spec.id == "kokoro" else MODELS_DIR / "tts" / spec.id
 
 
 def all_models() -> list[ModelSpec]:
@@ -83,7 +101,11 @@ def is_downloaded(spec: ModelSpec) -> bool:
     if spec.kind == "stt":
         return any((MODELS_DIR / "stt" / spec.id).glob("*.gguf"))
     if spec.kind == "tts":
-        return (MODELS_DIR / "tts" / "kokoro-v1_0.pth").exists()
+        if spec.id == "kokoro":
+            return (MODELS_DIR / "tts" / "kokoro-v1_0.pth").exists()
+        folder = tts_dir(spec)
+        weights = [f for f in spec.files if f.endswith(".safetensors")]
+        return all((folder / f).exists() for f in weights)
     return False
 
 
@@ -108,7 +130,7 @@ def _make_tqdm(on_update: Callable[[int, int], None] | None):
 def download(spec: ModelSpec, on_update: Callable[[int, int], None] | None = None) -> None:
     """Download a model into the local `models/` directory (blocking)."""
     tqdm_cls = _make_tqdm(on_update) if on_update is not None else None
-    target = MODELS_DIR / ("tts" if spec.kind == "tts" else f"stt/{spec.id}")
+    target = tts_dir(spec) if spec.kind == "tts" else MODELS_DIR / f"stt/{spec.id}"
     try:
         if spec.files:
             # Specific files only — e.g. one GGUF quant out of a repo of many.

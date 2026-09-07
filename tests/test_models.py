@@ -157,7 +157,7 @@ def test_select_rejects_bad_requests(monkeypatch, tmp_path):
     client = TestClient(app)
 
     assert client.post("/api/models/stt/nope/select").status_code == 404
-    assert client.post("/api/models/tts/kokoro/select").status_code == 400
+    assert client.post("/api/models/tts/kokoro/select").status_code == 501  # no TTS factory wired
     assert client.post("/api/models/stt/canary-180m-flash/select").status_code == 409  # not downloaded
 
 
@@ -167,3 +167,105 @@ def test_select_disabled_without_factory(monkeypatch, tmp_path):
     app = _select_app(monkeypatch, tmp_path)
     client = TestClient(app)
     assert client.post("/api/models/stt/parakeet-unified-en/select").status_code == 501
+
+
+def _fake_download(root, spec):
+    folder = root / "tts" / spec.id
+    folder.mkdir(parents=True, exist_ok=True)
+    for f in spec.files:
+        (folder / f).write_bytes(b"x")
+
+
+def test_registry_includes_chatterbox_turbo_and_nano():
+    turbo = get_model("tts", "chatterbox-turbo")
+    nano = get_model("tts", "chatterbox-nano")
+    assert turbo and nano
+    assert "t3_turbo_v1.safetensors" in turbo.files and "t3_nano_v1.safetensors" in nano.files
+    for spec in (turbo, nano):
+        assert "s3gen_meanflow.safetensors" in spec.files
+        assert "conds.pt" in spec.files and "ve.safetensors" in spec.files
+        assert "s3gen.safetensors" not in spec.files, "the legacy decoder is never loaded"
+        assert spec.size_mb > 1000
+    assert nano.size_mb < turbo.size_mb
+
+
+def test_is_downloaded_chatterbox_checks_its_own_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(models, "MODELS_DIR", tmp_path)
+    nano = get_model("tts", "chatterbox-nano")
+    assert is_downloaded(nano) is False
+    (tmp_path / "tts" / "chatterbox-nano").mkdir(parents=True)
+    (tmp_path / "tts" / "chatterbox-nano" / "t3_nano_v1.safetensors").write_bytes(b"x")
+    (tmp_path / "tts" / "chatterbox-nano" / "s3gen_meanflow.safetensors").write_bytes(b"x")
+    assert is_downloaded(nano) is False, "a partial download is not downloaded"
+    _fake_download(tmp_path, nano)
+    assert is_downloaded(nano) is True
+    assert is_downloaded(get_model("tts", "chatterbox-turbo")) is False
+    assert is_downloaded(get_model("tts", "kokoro")) is False
+
+
+def test_download_chatterbox_targets_its_own_folder(monkeypatch, tmp_path):
+    monkeypatch.setattr(models, "MODELS_DIR", tmp_path)
+    targets = []
+
+    def fake_hf(repo_id, filename, local_dir, **kw):
+        targets.append((repo_id, filename, local_dir))
+
+    monkeypatch.setattr(models, "hf_hub_download", fake_hf)
+    download(get_model("tts", "chatterbox-turbo"))
+    assert all(t[0] == "ResembleAI/chatterbox-turbo" for t in targets)
+    assert all(t[2].endswith("tts/chatterbox-turbo") for t in targets)
+    download(get_model("tts", "kokoro"))
+    assert targets[-1][2].endswith("tts")
+
+
+def _tts_select_app(monkeypatch, tmp_path, factory=None, persist=None):
+    from sidecar.app import create_sidecar_app
+
+    monkeypatch.setattr(models, "MODELS_DIR", tmp_path)
+    _fake_download(tmp_path, get_model("tts", "chatterbox-nano"))
+
+    class Engine:
+        def __init__(self, name):
+            self.name = name
+        def voices(self):
+            return ["default", "alice"] if self.name.startswith("chatterbox") else ["af_heart", "am_adam"]
+        @property
+        def default_voice(self):
+            return self.voices()[0]
+
+    return create_sidecar_app(
+        None, Engine("kokoro"), tts_model="kokoro",
+        tts_factory=(lambda mid: factory(mid) or Engine(mid)) if factory else None, persist_tts=persist,
+    )
+
+
+def test_select_tts_swaps_engine_persists_and_updates_voices(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    loaded, persisted = [], []
+    app = _tts_select_app(monkeypatch, tmp_path, factory=loaded.append, persist=persisted.append)
+    client = TestClient(app)
+    assert client.get("/api/voices").json() == {"engine": "kokoro", "voices": ["af_heart", "am_adam"], "default": "af_heart"}
+
+    resp = client.post("/api/models/tts/chatterbox-nano/select")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["active"] == "chatterbox-nano"
+    assert loaded == ["chatterbox-nano"] and persisted == ["chatterbox-nano"]
+    by_id = {m["id"]: m for m in client.get("/api/models").json()["models"] if m["kind"] == "tts"}
+    assert by_id["chatterbox-nano"]["active"] is True and by_id["kokoro"]["active"] is False
+    assert by_id["chatterbox-nano"]["selectable"] is False and by_id["kokoro"]["selectable"] is False  # kokoro not downloaded here
+    assert client.get("/api/voices").json() == {"engine": "chatterbox-nano", "voices": ["default", "alice"], "default": "default"}
+    assert client.post("/api/models/tts/chatterbox-turbo/select").status_code == 409  # not downloaded
+
+
+def test_select_tts_reports_missing_package_clearly(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    def broken(mid):
+        raise ImportError("No module named 'chatterbox'")
+
+    app = _tts_select_app(monkeypatch, tmp_path, factory=broken)
+    client = TestClient(app)
+    resp = client.post("/api/models/tts/chatterbox-nano/select")
+    assert resp.status_code == 501
+    assert "chatterbox" in resp.json()["detail"]

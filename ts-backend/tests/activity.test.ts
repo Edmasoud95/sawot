@@ -40,12 +40,14 @@ test("invalid tool arguments do not create an expression", async () => {
 });
 
 for (const [content, expected] of [
-  ['<expression:happy> Congratulations!', 'happy'],
-  ['<expression:sad> I’m sorry to hear that.', 'sad'],
-  ['<expression:neutral> It is Tuesday.', 'neutral'],
-  ['It is Tuesday.', 'neutral'],
-  ['<expression:angry> Let’s work through it.', 'neutral'],
-]) {
+  ['<expression:happy> Congratulations!', { kind: 'shape', name: 'happy' }],
+  ['<expression:sad> I’m sorry to hear that.', { kind: 'shape', name: 'sad' }],
+  ['<expression:neutral> It is Tuesday.', { kind: 'none' }],
+  ['It is Tuesday.', { kind: 'none' }],
+  ['<expression:angry> Let’s work through it.', { kind: 'none' }],
+  ['<readout:42%> Battery is at 42 percent.', { kind: 'readout', text: '42%' }],
+  ['<sketch:0,0 1,1> A line.', { kind: 'sketch', strokes: [[0, 0, 1, 1]] }],
+] as const) {
   test(`voice expression metadata stays out of speech: ${content}`, async () => {
     const events: any[] = [];
     const spoken: string[] = [];
@@ -54,12 +56,27 @@ for (const [content, expected] of [
     const agent = new Agent(client as never, 'test', [], 'Assistant');
     const inference = { transcribe: async () => 'Some news', synthesize: async (text: string) => { spoken.push(text); return Buffer.from('wav'); } };
     await runVoiceTurn(inference as never, agent, Buffer.from('audio'), history, (type, data) => { events.push({ type, ...data }); }, 'test');
-    assert.equal(events.find(e => e.type === 'expression')?.sentiment, expected);
+    const { type: _type, ...payload } = events.find(e => e.type === 'expression');
+    assert.deepEqual(payload, expected);
     assert.ok(events.findIndex(e => e.type === 'expression') > events.findIndex(e => e.type === 'assistant_text'), 'face should wait until synthesized speech is ready');
     assert.ok(events.findIndex(e => e.type === 'expression') < events.findIndex(e => e.type === 'wav'));
-    const clean = content.replace(/^<expression:[a-z]+>\s*/, '');
+    const clean = content.replace(/^<(expression|readout|sketch):[^>]+>\s*/, '');
     assert.deepEqual(spoken, [clean]);
     assert.equal(events.find(e => e.type === 'assistant_text').text, clean);
     assert.equal(history.at(-1).content, clean);
   });
 }
+
+test("the final reply is traced with its raw text and parsed expression", async () => {
+  const events: any[] = [];
+  const client = { chat: { completions: { create: async () => ({ choices: [{ message: { content: "<expression:star> Nice!" } }] }) } } };
+  const agent = new Agent(client as never, "test", [], "Assistant");
+  const inference = { transcribe: async () => "hi", synthesize: async () => Buffer.from("wav") };
+  await runVoiceTurn(inference as never, agent, Buffer.from("audio"), [], (type, data) => { events.push({ type, ...data }); }, "test");
+  const reply = events.find((e) => e.type === "debug" && e.event === "reply");
+  assert.ok(reply, "a reply debug event is sent");
+  assert.equal(reply.data.raw, "<expression:star> Nice!");
+  assert.equal(reply.data.text, "Nice!");
+  assert.deepEqual(reply.data.expression, { kind: "shape", name: "star" });
+  assert.equal(typeof reply.data.latency_ms, "number");
+});

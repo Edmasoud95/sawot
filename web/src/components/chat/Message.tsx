@@ -106,7 +106,7 @@ export function ToolChips({ tools }) {
 export function CardGrid({ cards, sendControl }) {
   if (!cards?.length) return null;
   return (
-    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <div className="mt-3 grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
       {cards.map((card) => (
         <EntityCard key={card.entity_id} card={card} sendControl={sendControl} />
       ))}

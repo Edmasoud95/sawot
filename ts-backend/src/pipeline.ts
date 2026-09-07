@@ -34,7 +34,7 @@ export async function runVoiceTurn(
 
   const touched: string[] = [];
   let reading: TemperatureReading | null = null;
-  let expression: { sentiment: string } | null = null;
+  let expression: Record<string, unknown> | null = null;
   let activity: { tool: string; domain: string; service?: string } | null = null;
   const onAgentEvent = async (event: string, data: any) => {
     if (event === "reading") {

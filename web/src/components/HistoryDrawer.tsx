@@ -116,11 +116,11 @@ export default function HistoryDrawer() {
                 : "border-white/10 text-zinc-600 hover:border-white/25 hover:text-zinc-400"
             }`}
           >
-            Show diagnostics
+            Debug bar
           </button>
         </div>
         {history.length === 0 && (
-          <p className="font-serif text-lg italic text-zinc-600">
+          <p className="text-[0.95rem] text-zinc-600">
             Nothing yet — hold the button and speak.
           </p>
         )}
@@ -138,7 +138,7 @@ export default function HistoryDrawer() {
                 className={`leading-snug ${
                   turn.role === "user"
                     ? "font-mono text-[0.82rem] font-light text-zinc-400"
-                    : "font-serif text-[1.05rem] text-zinc-100"
+                    : "text-[0.95rem] text-zinc-100"
                 }`}
               >
                 {turn.text}

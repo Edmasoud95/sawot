@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { VoiceSocket } from "../lib/socket";
 import { playWav } from "../lib/audio";
 import { useRecorder } from "./useRecorder";
+import { useDebugStore } from "../debugStore";
 import { useVoiceStore } from "../store";
 import { useChatStore } from "../chatStore";
 
@@ -14,10 +15,15 @@ export function useVoice() {
       onClose: () => useVoiceStore.getState().setStatus("connecting"),
       onEvent: (msg) => {
         const s = useVoiceStore.getState();
+        if (s.debugEnabled) {
+          const d = useDebugStore.getState();
+          d.logMessage("in", msg);
+          if (msg.type === "debug") msg.event === "stt" ? d.beginTurn("voice", msg) : d.addEvent(msg);
+        }
         if (msg.type === "reading") {
           s.showReading(msg);
         } else if (msg.type === "expression") {
-          s.showSentiment(msg.sentiment);
+          s.showExpression(msg);
         } else if (msg.type === "activity") {
           s.showActivity(msg);
         } else if (msg.type === "debug") {
@@ -41,6 +47,7 @@ export function useVoice() {
         }
       },
       onAudio: (buf) => {
+        if (useVoiceStore.getState().debugEnabled) useDebugStore.getState().logMessage("in", `audio ${buf.byteLength} bytes`);
         useVoiceStore.getState().setStatus("speaking");
         playWav(buf, () => useVoiceStore.getState().setStatus("idle")).catch(() => {
           useVoiceStore.getState().clearExpression();
@@ -75,6 +82,9 @@ export function useVoice() {
       const s = useVoiceStore.getState();
       if (s.status === "recording") s.setStatus("idle");
     },
-    sendControl: (message) => socketRef.current?.sendControl(message),
+    sendControl: (message) => {
+      if (useVoiceStore.getState().debugEnabled) useDebugStore.getState().logMessage("out", message);
+      socketRef.current?.sendControl(message);
+    },
   };
 }

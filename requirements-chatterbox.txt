@@ -1,0 +1,19 @@
+# Optional: Resemble AI Chatterbox Turbo / Nano text-to-speech.
+#
+# The PyPI release pins torch 2.6 and lacks the Nano model, so install the
+# package from GitHub WITHOUT its dependencies and add the light ones here.
+# Keep your existing torch (Blackwell GPUs need a newer build than the pin).
+#
+#   .venv/bin/pip install --no-deps "chatterbox-tts @ git+https://github.com/resemble-ai/chatterbox.git"
+#   .venv/bin/pip install -r requirements-chatterbox.txt
+#
+# torchaudio must match your torch's CUDA build; if pip wants to replace torch,
+# install torchaudio alone with --no-deps from the matching PyTorch index, e.g.
+#   .venv/bin/pip install --no-deps torchaudio --index-url https://download.pytorch.org/whl/cu130
+librosa
+s3tokenizer
+conformer
+pyloudnorm
+omegaconf
+diffusers
+resemble-perth @ git+https://github.com/resemble-ai/Perth.git

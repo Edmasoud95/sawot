@@ -84,7 +84,7 @@ function ModelCard({ m, onDownload, onSelect, switching }) {
   );
 }
 
-export default function ModelsSection({ active = true }) {
+export default function ModelsSection({ active = true, onSwitched = null }) {
   const [models, setModels] = useState([]);
   const [switching, setSwitching] = useState(null);
   const [selectError, setSelectError] = useState("");
@@ -119,6 +119,8 @@ export default function ModelsSection({ active = true }) {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         setSelectError(body.detail || "Couldn't switch the model — try again.");
+      } else if (onSwitched) {
+        onSwitched(m);
       }
     } catch {
       setSelectError("Couldn't reach the server.");

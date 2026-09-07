@@ -136,9 +136,9 @@ def test_transcription_empty_file_400():
 
 def test_models_lists_stt_and_tts():
     app = create_sidecar_app(
-        FakeSTT(), FakeTTS(), openai_stt_model="whisper-small", openai_tts_model="af_heart"
+        FakeSTT(), FakeTTS(), openai_stt_model="whisper-small", tts_model="kokoro"
     )
     resp = TestClient(app).get("/v1/models")
     assert resp.status_code == 200
     ids = [m["id"] for m in resp.json()["data"]]
-    assert ids == ["whisper-small", "af_heart"]
+    assert ids == ["whisper-small", "kokoro"]  # the TTS entry is the model, not a voice

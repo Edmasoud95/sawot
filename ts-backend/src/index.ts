@@ -126,6 +126,7 @@ async function main() {
     summary,
     name: config.assistantName,
     setSystemPrompt,
+    inference,
   });
 
   const chatCtx: ChatCtx = {

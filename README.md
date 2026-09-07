@@ -25,8 +25,11 @@ speech-to-text, an LM Studio LLM with Home Assistant tool calling, and
   (extracted text is sent inline to the model).
 - **Personality** — "Rita" ships with a sassy, teasing persona that you can
   switch off from Settings for a plain, friendly assistant.
-- **Live settings** — switch the LLM model and Kokoro voice at runtime;
-  choices apply instantly and persist to `settings.json`.
+- **Live settings** — switch the LLM model and voice at runtime; choices
+  apply instantly and persist to `settings.json`.
+- **Choice of speech engines** — Kokoro by default, or Resemble AI's
+  Chatterbox Turbo and Nano (expressive, `[laugh]`-style tags, voice cloning
+  from a short WAV). Download and switch from Settings.
 - **Custom providers** — add any OpenAI-compatible endpoint (OpenRouter,
   Ollama, vLLM, OpenAI, …) with its API key from Settings; models from every
   provider appear in the model pickers alongside LM Studio's.
@@ -114,7 +117,8 @@ Speech-to-text and text-to-speech models are downloaded on demand into a local
 `models/` directory (gitignored). Two ways to fetch them:
 
 - **Settings** → a download button next to each STT/TTS model, with a progress
-  bar. The recommended model for each kind is flagged.
+  bar. The recommended model for each kind is flagged. Downloaded TTS and STT
+  models can be switched with one click.
 - **Setup wizard** → `.venv/bin/python scripts/setup.py`.
 
 The STT catalog mirrors [Handy](https://github.com/cjpais/Handy)'s: quantized
@@ -123,6 +127,17 @@ on CPU by [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) —
 no CUDA or Hugging Face account needed. Recommended defaults: Cohere
 Transcribe (STT — top of the Open ASR Leaderboard, 14 languages, 1.6 GB) and
 Kokoro-82M (TTS). Once downloaded, the server runs fully offline.
+
+### Chatterbox Turbo and Nano (optional)
+
+Two extra TTS engines from Resemble AI. Turbo (350M) is expressive and low
+latency on a GPU; Nano (110M) also runs well on CPU. Both understand tags such
+as `[laugh]` or `[chuckle]` in the text and can clone a voice: drop a short WAV
+into `models/tts/voices/` and it appears in the voice picker under its file
+name. They need an optional package installed first, see
+`requirements-chatterbox.txt` for the exact commands, then download either
+model from Settings and click it to switch.
+
 
 ## Run
 

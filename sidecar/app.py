@@ -14,8 +14,8 @@ from server.openai_api import register_openai_api
 
 
 class EngineState:
-    """Mutable holder for the live engines, so the STT model can be swapped
-    at runtime without rebuilding the app."""
+    """Mutable holder for the live engines, so STT and TTS models can be
+    swapped at runtime without rebuilding the app."""
 
     def __init__(self, stt, tts, stt_model: str, tts_model: str):
         self.stt = stt
@@ -28,12 +28,14 @@ def create_sidecar_app(
     stt,
     tts,
     openai_stt_model: str = "whisper-1",
-    openai_tts_model: str = "tts-1",
+    tts_model: str = "kokoro",
     stt_factory: Callable | None = None,
     persist_stt: Callable[[str], None] | None = None,
+    tts_factory: Callable | None = None,
+    persist_tts: Callable[[str], None] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="SAWOT inference sidecar")
-    state = EngineState(stt, tts, openai_stt_model, openai_tts_model)
+    state = EngineState(stt, tts, openai_stt_model, tts_model)
 
     @app.get("/health")
     async def health():
@@ -43,5 +45,6 @@ def create_sidecar_app(
     register_openai_api(app, state)
     # Model registry + download manager + STT switching:
     # GET /api/models, POST /api/models/{kind}/{id}/download, POST .../select
-    register_model_routes(app, state, stt_factory=stt_factory, persist_stt=persist_stt)
+    register_model_routes(app, state, stt_factory=stt_factory, persist_stt=persist_stt,
+                          tts_factory=tts_factory, persist_tts=persist_tts)
     return app

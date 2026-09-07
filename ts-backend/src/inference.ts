@@ -20,6 +20,13 @@ export class InferenceClient {
     return data.text ?? "";
   }
 
+  /** Voices the sidecar's active TTS engine offers, with its default. */
+  async voices(): Promise<{ engine: string | null; voices: string[]; default: string | null }> {
+    const resp = await fetch(this.baseUrl + "/api/voices");
+    if (!resp.ok) throw new Error("voices failed: " + resp.status);
+    return resp.json();
+  }
+
   async synthesize(text: string, voice?: string): Promise<Buffer> {
     const resp = await fetch(this.baseUrl + "/v1/audio/speech", {
       method: "POST",

@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 
 import { buildSystemPrompt, type Agent } from "./agent.js";
+import type { InferenceClient } from "./inference.js";
 import { probeEndpoint, qualifyModel, type ProviderRegistry } from "./providers.js";
 
 export const KOKORO_VOICES = [
@@ -9,6 +10,22 @@ export const KOKORO_VOICES = [
   "am_adam", "am_michael", "am_onyx",
   "bf_emma", "bf_isabella", "bm_george", "bm_lewis",
 ];
+
+/** The voice to use given what the active TTS engine offers. An empty list
+ *  means the sidecar could not be asked, so the current setting stands. */
+export function resolveVoice(voices: string[], current: string, fallback: string | null): string {
+  if (!voices.length || voices.includes(current)) return current;
+  return fallback ?? voices[0];
+}
+
+/** Live voice list from the sidecar, or Kokoro's curated list when it is down. */
+async function activeVoices(ctx: SettingsCtx): Promise<{ voices: string[]; default: string | null }> {
+  try {
+    const live = await ctx.inference.voices();
+    if (live.voices.length) return { voices: live.voices, default: live.default };
+  } catch { /* sidecar offline */ }
+  return { voices: KOKORO_VOICES, default: KOKORO_VOICES[0] };
+}
 
 export class SettingsStore {
   constructor(private path: string) {}
@@ -45,6 +62,7 @@ export interface SettingsCtx {
   summary: string;
   name: string;
   setSystemPrompt: (prompt: string) => void;
+  inference: InferenceClient;
 }
 
 function persist(ctx: SettingsCtx): void {
@@ -61,13 +79,18 @@ function persist(ctx: SettingsCtx): void {
 async function settingsPayload(ctx: SettingsCtx): Promise<Record<string, any>> {
   const providers = await ctx.registry.listAllModels();
   const models = providers.flatMap((p) => p.models.map((m) => qualifyModel(p.id, m)));
+  // Switching the TTS engine in Settings can leave a voice the new engine
+  // does not know; fall back to its default and remember that.
+  const active = await activeVoices(ctx);
+  const voice = resolveVoice(active.voices, ctx.state.voice, active.default);
+  if (voice !== ctx.state.voice) { ctx.state.voice = voice; persist(ctx); }
   const data: Record<string, any> = {
     model: ctx.state.model,
     voice: ctx.state.voice,
     sassy: ctx.state.sassy,
     models,
     providers,
-    voices: KOKORO_VOICES,
+    voices: active.voices,
   };
   const builtin = providers.find((p) => p.builtin);
   if (builtin?.error) data.models_error = builtin.error;
@@ -83,7 +106,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
     const voice = body.voice;
     const sassy = body.sassy;
 
-    if (voice !== undefined && !KOKORO_VOICES.includes(voice)) {
+    if (voice !== undefined && !(await activeVoices(ctx)).voices.includes(voice)) {
       return reply.code(400).send({ detail: "unknown voice: " + voice });
     }
 

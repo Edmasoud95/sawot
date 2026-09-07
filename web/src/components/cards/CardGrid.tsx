@@ -39,7 +39,7 @@ export default function CardGrid({ sendControl }) {
   return (
     <div
       ref={grid}
-      className="grid w-full max-w-[920px] grid-cols-1 gap-4 sm:grid-cols-2"
+      className="grid w-full max-w-[920px] grid-cols-1 items-start gap-4 sm:grid-cols-2"
     >
       {cards.map((card) => (
         <EntityCard key={card.entity_id} card={card} sendControl={sendControl} />

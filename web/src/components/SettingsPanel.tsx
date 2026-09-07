@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import gsap from "gsap";
 import ModelsSection from "./ModelsSection";
 import { useDialogFocus } from "../hooks/useDialogFocus";
+import { useVoiceStore } from "../store";
 
 function SectionTitle({ children }) {
   return (
@@ -221,6 +222,8 @@ export default function SettingsPanel() {
   const [saved, setSaved] = useState(false);
   const panel = useRef(null);
   const scrim = useRef(null);
+  const debugEnabled = useVoiceStore((s) => s.debugEnabled);
+  const toggleDebug = useVoiceStore((s) => s.toggleDebug);
   const trigger = useRef(null);
   const closeBtn = useRef(null);
 
@@ -326,7 +329,7 @@ export default function SettingsPanel() {
         >
           <header className="settings-header flex items-center justify-between gap-3">
             <div className="flex items-baseline gap-4">
-              <h2 className="font-serif text-2xl italic text-zinc-100">Settings</h2>
+              <h2 className="text-xl font-medium text-zinc-100">Settings</h2>
               <span
                 role="status"
                 className={`flex items-center gap-1.5 text-[0.75rem] text-aurora-teal transition-opacity duration-300 ${
@@ -377,6 +380,12 @@ export default function SettingsPanel() {
                     onChange={(voice) => update({ voice })}
                   />
                   <Toggle
+                    label="Debug bar"
+                    hint="A diagnostics strip along the bottom: turn timings, events, raw traffic, and live state."
+                    checked={debugEnabled}
+                    onChange={() => toggleDebug()}
+                  />
+                  <Toggle
                     label="Sassy personality"
                     hint="Rita gets witty and teases you. Off is plain and friendly."
                     checked={!!data.sassy}
@@ -393,7 +402,13 @@ export default function SettingsPanel() {
               )}
             </section>
             <section className="flex min-w-0 flex-col gap-5 border-t border-white/10 pt-6 sm:border-t-0 sm:pt-0">
-              <ModelsSection active={open} />
+              <ModelsSection
+                active={open}
+                onSwitched={() => {
+                  // A new speech engine brings its own voice list.
+                  fetch("/api/settings").then((r) => r.json()).then(setData).catch(() => {});
+                }}
+              />
             </section>
           </div>
         </div>

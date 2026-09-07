@@ -10,6 +10,7 @@ import {
 import { extname, join } from "node:path";
 
 import { executeTool, toOpenAiTools, touchedIdsFor, type Tool } from "./tools.js";
+import { createChatCompletion } from "./reasoningFallback.js";
 
 export const SAFE_ID = /^[0-9a-f]{12}$/;
 const HISTORY_LIMIT = 30;
@@ -199,13 +200,15 @@ export async function* runChat(
   const fullContent: string[] = [];
   const fullThinking: string[] = [];
 
+  const turnStart = performance.now();
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const parser = new ThinkTagParser();
     const contentParts: string[] = [];
     const thinkingParts: string[] = [];
     const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
 
-    const stream = await client.chat.completions.create({
+    const roundStart = performance.now();
+    const stream = await createChatCompletion<any>(client, {
       model,
       messages: convo,
       tools: toOpenAiTools(tools),
@@ -254,9 +257,14 @@ export async function* runChat(
     }
 
     const content = contentParts.join("");
+    yield ["debug", { event: "llm_round", data: { round: round + 1, latency_ms: Math.round(performance.now() - roundStart),
+      tool_calls: toolCalls.size ? [...toolCalls.values()].map((c) => c.name) : null } }];
     if (toolCalls.size === 0) {
+      const finalContent = fullContent.join("").trim();
+      yield ["debug", { event: "reply", data: { raw: content, text: finalContent, rounds: round + 1,
+        latency_ms: Math.round(performance.now() - turnStart) } }];
       yield ["final", {
-        content: fullContent.join("").trim(),
+        content: finalContent,
         thinking: fullThinking.join("").trim(),
       }];
       finished = true;
@@ -279,15 +287,19 @@ export async function* runChat(
     for (const c of calls) {
       let args: any = {};
       let result: any = undefined;
+      const toolStart = performance.now();
       try {
         args = JSON.parse(c.arguments || "{}");
       } catch (e: any) {
         result = { error: "invalid tool arguments: " + (e?.message ?? e) };
       }
+      yield ["debug", { event: "tool_call", data: { name: c.name, args } }];
       if (result === undefined) {
         result = await executeTool(tools, c.name, args);
       }
       const resultJson = JSON.stringify(result);
+      yield ["debug", { event: "tool_result", data: { name: c.name, ok: !(result && typeof result === "object" && "error" in result),
+        latency_ms: Math.round(performance.now() - toolStart), size_chars: resultJson.length, result: resultJson.slice(0, 600) } }];
       yield ["tool", { name: c.name, args, result: resultJson.slice(0, 300) }];
       for (const eid of touchedIdsFor(tools, c.name, args, result)) {
         if (!touched.includes(eid)) touched.push(eid);
