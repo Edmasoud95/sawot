@@ -24,7 +24,9 @@ you ask about the heating, a smile when it is pleased with itself.
   sphere. The particles gather into a torus knot while the model thinks, ripple
   with the reply as it is spoken, and form whatever the model chooses to show:
   one of 28 catalogue shapes (faces, home symbols, statuses, weather), a short
-  text or number readout, or a free-hand sketch it draws itself. Shapes are
+  text or number readout, or anything at all as a free-hand sketch. The model
+  is free to draw whatever it likes in any reply, and asking it to draw
+  something (a cat, your house, a mood) always gets a drawing. Shapes are
   formed by moving the existing ink, never by swapping in an icon.
 - **Home Assistant control** — the model uses tools (`get_entities`,
   `call_service`) to list and control your devices, then shows touch-first
@@ -210,7 +212,10 @@ The model may start a spoken reply with a hidden marker, or call the
 - a **catalogue shape** such as `bulb`, `thermometer`, `lock`, `happy`, `rain`
   (the full list with meanings is in `ts-backend/src/expressions.ts`);
 - a **readout** of up to twelve characters, on one or two lines;
-- a **sketch** of free polylines in a unit square. Turn on **Detailed
+- a **sketch** of free polylines in a unit square. The prompt tells the
+  model it can draw anything it wants, whenever it wants, and never to refuse
+  a drawing request: people become stick figures, faces a circle with
+  features, feelings and abstract ideas a symbol. Turn on **Detailed
   drawings** in Settings to let it use filled primitives (circles, ellipses,
   rectangles, polygons, arcs) and more strokes.
 
