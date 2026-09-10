@@ -5,6 +5,13 @@ import soundfile as sf
 
 from server.tts import KokoroTTS
 
+import importlib.util
+
+import pytest
+
+# Chatterbox tests build tensors; CI installs no torch (it skips kokoro).
+needs_torch = pytest.mark.skipif(importlib.util.find_spec("torch") is None, reason="torch not installed")
+
 
 class FakePipeline:
     def __call__(self, text, voice):
@@ -47,6 +54,7 @@ def _chatterbox(tmp_path):
     return tts
 
 
+@needs_torch
 def test_chatterbox_synthesize_uses_builtin_voice_by_default(tmp_path):
     tts = _chatterbox(tmp_path)
     data, samplerate = sf.read(io.BytesIO(tts.synthesize("hello")))
@@ -54,6 +62,7 @@ def test_chatterbox_synthesize_uses_builtin_voice_by_default(tmp_path):
     assert tts._model.calls == [("hello", None)]
 
 
+@needs_torch
 def test_chatterbox_voices_are_reference_clips_plus_default(tmp_path):
     tts = _chatterbox(tmp_path)
     assert tts.voices() == ["default"]
@@ -90,6 +99,7 @@ def test_make_tts_engine_routes_by_model_id(monkeypatch):
         mod.make_tts_engine("nope", voice="x", lang_code="a")
 
 
+@needs_torch
 def test_chatterbox_warms_up_once_at_load(monkeypatch, tmp_path):
     import server.tts as mod
     import server.models as models
