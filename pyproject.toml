@@ -24,6 +24,7 @@ dependencies = [
   "soundfile",
   "numpy",
   "pypdf",
+  "huggingface-hub",
 ]
 
 [project.optional-dependencies]
