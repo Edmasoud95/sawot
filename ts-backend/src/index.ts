@@ -91,17 +91,22 @@ async function main() {
     { id: "lm-studio", name: "LM Studio", baseUrl: config.lmstudioUrl, builtin: true },
     Array.isArray(overrides.providers) ? overrides.providers : [],
   );
+  // Warm every provider's model list in the background so pickers have
+  // something at once; a sleeping provider only delays its own entry.
+  void registry.listAllModels().catch(() => {});
   const fallbackModel = qualifyModel(registry.defaultId, config.lmstudioModel);
   const initial = registry.resolve(overrides.model ?? fallbackModel);
   const state: SettingsState = {
     model: qualifyModel(initial.providerId, initial.model),
     voice: overrides.voice ?? config.ttsVoice,
     sassy: overrides.sassy ?? config.assistantSassy,
+    detailedDrawings: Boolean(overrides.detailedDrawings ?? false),
   };
 
   let summary = "";
   let systemPrompt = buildSystemPrompt(summary, state.sassy, config.assistantName);
   const agent = new Agent(initial.client, initial.model, tools, systemPrompt);
+  agent.setDetailedDrawings(state.detailedDrawings);
 
   const setSystemPrompt = (prompt: string) => {
     systemPrompt = prompt;

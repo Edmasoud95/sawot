@@ -33,6 +33,9 @@ speech-to-text, an LM Studio LLM with Home Assistant tool calling, and
 - **Custom providers** — add any OpenAI-compatible endpoint (OpenRouter,
   Ollama, vLLM, OpenAI, …) with its API key from Settings; models from every
   provider appear in the model pickers alongside LM Studio's.
+  Requests use chat completions; models that only take tools through the
+  Responses API (OpenAI's gpt-6 family) are detected from the provider's
+  first error and switched over automatically, thinking included.
 - **OpenAI-compatible audio API** — `POST /v1/audio/speech` (TTS) and
   `POST /v1/audio/transcriptions` (STT) let any OpenAI SDK client use the
   local engines as a drop-in speech backend.

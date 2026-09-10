@@ -109,26 +109,92 @@ export function readoutDestinations(text: string, count: number): Float32Array |
 }
 
 // Free sketches from the model: polylines in a unit square (y up), mapped to
-// the vessel. Validation happened upstream; this only clamps and lays out.
-export function sketchDestinations(strokes: number[][], count: number): Float32Array | null {
+// the vessel, plus optional fill polygons whose interiors are inked.
+// Validation happened upstream; this only clamps and lays out.
+export function sketchDestinations(strokes: number[][], count: number, fills: number[][] = []): Float32Array | null {
+  const map = (v: number) => (Math.max(0, Math.min(1, v)) - .5) * 1.0;
   const segments: Stroke[] = [];
   for (const s of strokes) {
     for (let i = 0; i + 3 < s.length; i += 2) {
-      const map = (v: number) => (Math.max(0, Math.min(1, v)) - .5) * 1.0;
       segments.push([map(s[i]), map(s[i + 1]), map(s[i + 2]), map(s[i + 3])]);
     }
   }
-  if (!segments.length) return null;
-  return strokeDestinations(segments, count);
+  const polygons = fills
+    .map((f) => f.map(map))
+    .filter((f) => f.length >= 6 && Math.abs(polygonArea(f)) > 1e-5);
+  if (!segments.length && !polygons.length) return null;
+  // Ink is shared by "how much drawing" each part is: a stroke by its length,
+  // a fill by its area over a nominal stroke width, so a filled shape is
+  // solid rather than a sprinkle.
+  const strokeLength = segments.reduce((n, [x, y, x2, y2]) => n + Math.hypot(x2 - x, y2 - y), 0);
+  const fillLength = polygons.reduce((n, f) => n + Math.abs(polygonArea(f)) / FILL_STROKE_WIDTH, 0);
+  const total = strokeLength + fillLength;
+  const fillCount = total > 0 ? Math.round(count * fillLength / total) : 0;
+  const points = [
+    ...(segments.length ? strokePoints(segments, count - fillCount) : []),
+    ...(polygons.length ? fillPoints(polygons, fillCount) : []),
+  ];
+  return finish(points);
+}
+
+const FILL_STROKE_WIDTH = .04;
+
+function polygonArea(f: number[]): number {
+  let a = 0;
+  for (let i = 0, n = f.length / 2; i < n; i++) {
+    const j = (i + 1) % n;
+    a += f[i * 2] * f[j * 2 + 1] - f[j * 2] * f[i * 2 + 1];
+  }
+  return a / 2;
+}
+
+function insidePolygon(x: number, y: number, f: number[]): boolean {
+  let inside = false;
+  for (let i = 0, n = f.length / 2, j = n - 1; i < n; j = i++) {
+    const xi = f[i * 2], yi = f[i * 2 + 1], xj = f[j * 2], yj = f[j * 2 + 1];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// Deterministic low-discrepancy samples (Halton 2,3) rejected against each
+// polygon, shared by area, with a random-looking flow direction per point.
+function fillPoints(polygons: number[][], count: number): [number, number, number][] {
+  const areas = polygons.map((f) => Math.abs(polygonArea(f)));
+  const totalArea = areas.reduce((a, b) => a + b, 0);
+  const out: [number, number, number][] = [];
+  polygons.forEach((f, p) => {
+    const want = p === polygons.length - 1 ? count - out.length : Math.round(count * areas[p] / totalArea);
+    let minX = 1, maxX = -1, minY = 1, maxY = -1;
+    for (let i = 0; i < f.length; i += 2) {
+      minX = Math.min(minX, f[i]); maxX = Math.max(maxX, f[i]);
+      minY = Math.min(minY, f[i + 1]); maxY = Math.max(maxY, f[i + 1]);
+    }
+    let placed = 0;
+    for (let k = 1; placed < want && k < want * 40 + 200; k++) {
+      const x = minX + halton(k, 2) * (maxX - minX);
+      const y = minY + halton(k, 3) * (maxY - minY);
+      if (!insidePolygon(x, y, f)) continue;
+      out.push([x, y, halton(k, 5) * Math.PI * 2]);
+      placed++;
+    }
+  });
+  return out;
+}
+
+function halton(index: number, base: number): number {
+  let result = 0, f = 1 / base, i = index;
+  while (i > 0) { result += f * (i % base); i = Math.floor(i / base); f /= base; }
+  return result;
 }
 
 // Spread `count` points along the strokes proportionally to length, with a
 // ragged inked edge. The third slot carries the stroke direction so formed ink
 // can flow along the line.
-function strokeDestinations(strokes: Stroke[], count: number): Float32Array | null {
+function strokePoints(strokes: Stroke[], count: number): [number, number, number][] {
   const lengths = strokes.map(([x, y, x2, y2]) => Math.hypot(x2 - x, y2 - y));
   const length = lengths.reduce((a, b) => a + b, 0);
-  if (!(length > 0)) return null;
+  if (!(length > 0)) return [];
   const points: [number, number, number][] = [];
   let segment = 0, passed = 0;
   for (let i = 0; i < count; i++) {
@@ -141,6 +207,18 @@ function strokeDestinations(strokes: Stroke[], count: number): Float32Array | nu
     const jitter = Math.sin(i * 2.399963) * .014 + Math.sin(i * .7548777) * .007;
     points.push([x + (x2 - x) * t - (y2 - y) / l * jitter, y + (y2 - y) * t + (x2 - x) / l * jitter, Math.atan2(y2 - y, x2 - x)]);
   }
+  return points;
+}
+
+function strokeDestinations(strokes: Stroke[], count: number): Float32Array | null {
+  const points = strokePoints(strokes, count);
+  return points.length ? finish(points) : null;
+}
+
+// Sorted by angle around the centre so neighbouring particles (which the
+// simulation picks in order) land near each other.
+function finish(points: [number, number, number][]): Float32Array | null {
+  if (!points.length) return null;
   points.sort((a, b) => Math.atan2(a[1], a[0]) - Math.atan2(b[1], b[0]));
   return new Float32Array(points.flatMap(([x, y, a]) => [x, y, a]));
 }

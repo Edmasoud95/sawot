@@ -4,6 +4,7 @@ export const INK_VERTEX = /* glsl */ `
 attribute float aTone;
 attribute float aSize;
 attribute float aWeight;
+attribute float aDepth;
 attribute vec3 aVelocity;
 uniform float uPointScale;
 varying float vTone;
@@ -14,7 +15,10 @@ varying float vStretch;
 void main() {
   vTone = aTone;
   vSize = aSize;
-  vWeight = aWeight;
+  // Depth is only non-zero on the thinking knot: the near side reads bigger
+  // and denser, the far side smaller and fainter, so the loops stack in 3D.
+  float near = clamp(aDepth * 3.0 + 0.5, 0.0, 1.0);
+  vWeight = aWeight * (0.3 + 0.8 * near);
   // Resting ink still streaks along its current; moving ink streaks along
   // its velocity, so strands read as flow rather than a field of dots.
   float speed = length(aVelocity.xy);
@@ -25,7 +29,7 @@ void main() {
   gl_Position = vec4(position.xy, 0.0, 1.0);
   // Point size follows the density texture resolution so strands stay crisp
   // on large orbs; each particle carries its own tier (body, strand, filament).
-  gl_PointSize = uPointScale * aSize;
+  gl_PointSize = uPointScale * aSize * (0.85 + 0.3 * near);
 }
 `;
 

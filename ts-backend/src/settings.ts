@@ -50,6 +50,7 @@ export interface SettingsState {
   model: string; // provider-qualified ("lm-studio::qwen3-8b")
   voice: string;
   sassy: boolean;
+  detailedDrawings: boolean;
 }
 
 export interface SettingsCtx {
@@ -70,14 +71,17 @@ function persist(ctx: SettingsCtx): void {
     model: ctx.state.model,
     voice: ctx.state.voice,
     sassy: ctx.state.sassy,
+    detailedDrawings: ctx.state.detailedDrawings,
     providers: ctx.registry.customSpecs(),
   });
 }
 
-/** Settings payload: current values plus every provider with its live model
- *  list. `models` is the flat provider-qualified list the pickers consume. */
+/** Settings payload: current values plus every provider with its last known
+ *  model list, answered without waiting on any provider; the panel loads each
+ *  provider's models on its own through /api/providers/:id/models. `models`
+ *  is the flat provider-qualified list the pickers consume. */
 async function settingsPayload(ctx: SettingsCtx): Promise<Record<string, any>> {
-  const providers = await ctx.registry.listAllModels();
+  const providers = ctx.registry.listing();
   const models = providers.flatMap((p) => p.models.map((m) => qualifyModel(p.id, m)));
   // Switching the TTS engine in Settings can leave a voice the new engine
   // does not know; fall back to its default and remember that.
@@ -88,6 +92,7 @@ async function settingsPayload(ctx: SettingsCtx): Promise<Record<string, any>> {
     model: ctx.state.model,
     voice: ctx.state.voice,
     sassy: ctx.state.sassy,
+    detailedDrawings: ctx.state.detailedDrawings,
     models,
     providers,
     voices: active.voices,
@@ -100,11 +105,22 @@ async function settingsPayload(ctx: SettingsCtx): Promise<Record<string, any>> {
 export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): void {
   app.get("/api/settings", async () => settingsPayload(ctx));
 
+  // One provider's models, fetched now with the registry's timeout. Slow or
+  // unreachable providers answer with an error field so the others are never
+  // held back.
+  app.get("/api/providers/:pid/models", async (req: any, reply: any) => {
+    const pid = req.params.pid;
+    if (!ctx.registry.get(pid)) return reply.code(404).send({ detail: "unknown provider: " + pid });
+    const listing = await ctx.registry.refresh(pid);
+    return { id: pid, models: listing.models, ...(listing.error ? { error: listing.error } : {}) };
+  });
+
   app.post("/api/settings", async (req: any, reply: any) => {
     const body = req.body ?? {};
     const model = body.model;
     const voice = body.voice;
     const sassy = body.sassy;
+    const detailedDrawings = body.detailedDrawings;
 
     if (voice !== undefined && !(await activeVoices(ctx)).voices.includes(voice)) {
       return reply.code(400).send({ detail: "unknown voice: " + voice });
@@ -130,6 +146,10 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
       ctx.state.sassy = Boolean(sassy);
       ctx.setSystemPrompt(buildSystemPrompt(ctx.summary, ctx.state.sassy, ctx.name));
     }
+    if (detailedDrawings !== undefined) {
+      ctx.state.detailedDrawings = Boolean(detailedDrawings);
+      ctx.agent.setDetailedDrawings(ctx.state.detailedDrawings);
+    }
 
     persist(ctx);
     return settingsPayload(ctx);
@@ -148,15 +168,17 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
 
     // Reject endpoints we can't list models from — a working /models is the
     // contract every other part of the app relies on.
+    let probed: string[];
     try {
-      await probeEndpoint(baseUrl, apiKey);
+      probed = await probeEndpoint(baseUrl, apiKey);
     } catch (e: any) {
       return reply.code(502).send({
         detail: "couldn't list models at " + baseUrl + "/models — " + String(e?.message ?? e),
       });
     }
 
-    ctx.registry.add(name, baseUrl, apiKey);
+    const added = ctx.registry.add(name, baseUrl, apiKey);
+    ctx.registry.setModels(added.id, probed);
     persist(ctx);
     return settingsPayload(ctx);
   });

@@ -23,6 +23,14 @@ export interface ProviderInfo {
  *  Model ids themselves often contain "/" so a slash won't do. */
 export const MODEL_SEP = "::";
 
+/** A provider's last known model list. `state` is what the UI shows while
+ *  it loads each provider on its own. */
+export interface ProviderListing extends ProviderInfo {
+  models: string[];
+  error?: string;
+  state: "pending" | "ready" | "error";
+}
+
 export function qualifyModel(providerId: string, model: string): string {
   return providerId + MODEL_SEP + model;
 }
@@ -31,10 +39,20 @@ function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "provider";
 }
 
-async function fetchModelIds(baseUrl: string, apiKey?: string): Promise<string[]> {
+/** How long to wait for a provider's model list. A sleeping LM Studio host
+ *  otherwise blocks the whole settings payload for the TCP connect timeout. */
+export const MODEL_LIST_TIMEOUT_MS = 5000;
+
+async function fetchModelIds(baseUrl: string, apiKey?: string, timeoutMs = MODEL_LIST_TIMEOUT_MS): Promise<string[]> {
   const headers: Record<string, string> = {};
   if (apiKey) headers.Authorization = "Bearer " + apiKey;
-  const resp = await fetch(baseUrl + "/models", { headers });
+  let resp: Response;
+  try {
+    resp = await fetch(baseUrl + "/models", { headers, signal: AbortSignal.timeout(timeoutMs) });
+  } catch (e: any) {
+    if (e?.name === "TimeoutError" || e?.name === "AbortError") throw new Error(`timed out after ${timeoutMs} ms`);
+    throw e;
+  }
   if (!resp.ok) throw new Error("endpoint returned " + resp.status);
   const data: any = await resp.json();
   const ids = (data.data ?? []).map((m: any) => m.id).filter(Boolean);
@@ -44,8 +62,8 @@ async function fetchModelIds(baseUrl: string, apiKey?: string): Promise<string[]
 
 /** List models on an endpoint before it becomes a provider — used by the
  *  add-provider route to reject unreachable or non-OpenAI-compatible URLs. */
-export async function probeEndpoint(baseUrl: string, apiKey?: string): Promise<string[]> {
-  return fetchModelIds(baseUrl.replace(/\/+$/, ""), apiKey);
+export async function probeEndpoint(baseUrl: string, apiKey?: string, timeoutMs = MODEL_LIST_TIMEOUT_MS): Promise<string[]> {
+  return fetchModelIds(baseUrl.replace(/\/+$/, ""), apiKey, timeoutMs);
 }
 
 export class ProviderRegistry {
@@ -53,7 +71,13 @@ export class ProviderRegistry {
   private clients = new Map<string, OpenAI>();
   readonly defaultId: string;
 
-  constructor(builtin: ProviderSpec, custom: ProviderSpec[] = []) {
+  private readonly timeoutMs: number;
+  // Last known model list per provider, so settings can answer at once and
+  // a slow or sleeping provider never holds the others back.
+  private readonly cache = new Map<string, { models: string[]; error?: string }>();
+
+  constructor(builtin: ProviderSpec, custom: ProviderSpec[] = [], options: { timeoutMs?: number } = {}) {
+    this.timeoutMs = options.timeoutMs ?? MODEL_LIST_TIMEOUT_MS;
     this.defaultId = builtin.id;
     this.providers.set(builtin.id, { ...builtin, builtin: true });
     for (const p of custom) {
@@ -135,20 +159,43 @@ export class ProviderRegistry {
   async modelsFor(id: string): Promise<string[]> {
     const p = this.providers.get(id);
     if (!p) throw new Error("unknown provider: " + id);
-    return fetchModelIds(p.baseUrl, p.apiKey);
+    try {
+      const models = await fetchModelIds(p.baseUrl, p.apiKey, this.timeoutMs);
+      this.cache.set(id, { models });
+      return models;
+    } catch (e: any) {
+      const previous = this.cache.get(id);
+      this.cache.set(id, { models: previous?.models ?? [], error: String(e?.message ?? e) });
+      throw e;
+    }
+  }
+
+  /** Record a list obtained elsewhere (the add-provider probe). */
+  setModels(id: string, models: string[]): void {
+    if (this.providers.has(id)) this.cache.set(id, { models });
+  }
+
+  /** Every provider with its last known models, without any network call. */
+  listing(): ProviderListing[] {
+    return this.list().map((info) => {
+      const known = this.cache.get(info.id);
+      if (!known) return { ...info, models: [], state: "pending" };
+      return { ...info, models: known.models, ...(known.error ? { error: known.error, state: "error" as const } : { state: "ready" as const }) };
+    });
+  }
+
+  /** Refresh one provider and return its listing; an unreachable provider
+   *  is a result with an error, not a failure. */
+  async refresh(id: string): Promise<ProviderListing> {
+    if (!this.providers.has(id)) throw new Error("unknown provider: " + id);
+    try { await this.modelsFor(id); } catch { /* recorded in the cache */ }
+    return this.listing().find((p) => p.id === id)!;
   }
 
   /** Every provider with its live model list; failures become per-provider
    *  errors instead of failing the whole listing. */
-  async listAllModels(): Promise<Array<ProviderInfo & { models: string[]; error?: string }>> {
-    return Promise.all(
-      this.list().map(async (info) => {
-        try {
-          return { ...info, models: await this.modelsFor(info.id) };
-        } catch (e: any) {
-          return { ...info, models: [], error: String(e?.message ?? e) };
-        }
-      }),
-    );
+  async listAllModels(): Promise<ProviderListing[]> {
+    await Promise.all(this.list().map((info) => this.refresh(info.id)));
+    return this.listing();
   }
 }

@@ -26,11 +26,18 @@ export class InkSimulation {
   // Per-particle ink weight the renderer multiplies into mass. Ambient ink
   // fades toward a haze while a symbol is shown so the shape stays legible.
   readonly weights: Float32Array;
-  // Thinking: 0..1 share of each particle acting as a wandering spark, and
-  // the smoothed level of the churn itself.
-  readonly sparks: Float32Array;
+  // Thinking: the symbol share of the ink gathers into a torus knot with a
+  // lump of ink travelling along it. depths carries each particle's z so the
+  // renderer can fade the far side of the knot.
+  readonly depths: Float32Array;
+  private readonly depthTargets: Float32Array;
   private thinkingTarget = 0;
   private thinking = 0;
+  private lumps = 1;
+  // Per symbol particle: position along the knot (0..1) and a fixed offset
+  // inside the tube, so the strand reads as a soft rope rather than a line.
+  private readonly knotU: Float32Array;
+  private readonly knotOffset: Float32Array;
   readonly targets: Float32Array;
   private readonly seeds: Float32Array;
   private readonly shapes = new Map<string, Float32Array>();
@@ -42,6 +49,7 @@ export class InkSimulation {
   private shape = "";
   private readout = "";
   private sketch: number[][] | null = null;
+  private sketchFills: number[][] | null = null;
   private previousAudio = 0;
 
   constructor(readonly count = 6144) {
@@ -51,7 +59,10 @@ export class InkSimulation {
     this.tones = new Float32Array(count);
     this.sizes = new Float32Array(count);
     this.weights = new Float32Array(count).fill(1);
-    this.sparks = new Float32Array(count);
+    this.depths = new Float32Array(count);
+    this.depthTargets = new Float32Array(count);
+    this.knotU = new Float32Array(count);
+    this.knotOffset = new Float32Array(count * 3);
     this.seeds = new Float32Array(count * 4);
     let seed = 18371;
     const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
@@ -72,6 +83,16 @@ export class InkSimulation {
     const symbolList: number[] = [];
     for (let i = 0; i < count; i++) if (i % 20 < 9) { this.isSymbol[i] = 1; symbolList.push(i); }
     this.symbolIndex = Int32Array.from(symbolList);
+    // Spread symbol particles evenly along the knot, in an order that keeps
+    // neighbours on the path near each other in index space.
+    for (let n = 0; n < symbolList.length; n++) {
+      const i = symbolList[n];
+      this.knotU[i] = (n + .5) / symbolList.length;
+      const a = this.seeds[i * 4 + 3], rr = Math.sqrt(Math.abs(this.seeds[i * 4 + 2]) * 2);
+      this.knotOffset[i * 3] = Math.cos(a) * rr;
+      this.knotOffset[i * 3 + 1] = Math.sin(a) * rr;
+      this.knotOffset[i * 3 + 2] = (this.seeds[i * 4 + 2] + this.seeds[i * 4]) * .7 - .35;
+    }
     this.updateTargets(0, 0, true);
     this.positions.set(this.targets);
   }
@@ -141,10 +162,11 @@ export class InkSimulation {
     this.flows.set("readout", flow);
   }
 
-  setSketch(strokes: number[][] | null) {
-    if (strokes === this.sketch) return;
+  setSketch(strokes: number[][] | null, fills: number[][] | null = null) {
+    if (strokes === this.sketch && fills === this.sketchFills) return;
     this.sketch = strokes;
-    const sorted = strokes ? sketchDestinations(strokes, this.symbolIndex.length) : null;
+    this.sketchFills = fills;
+    const sorted = strokes || fills ? sketchDestinations(strokes ?? [], this.symbolIndex.length, fills ?? []) : null;
     if (!sorted) { this.shapes.delete("sketch"); this.flows.delete("sketch"); return; }
     const order = this.symbolOrder();
     const target = new Float32Array(this.count * 3);
@@ -160,8 +182,9 @@ export class InkSimulation {
     this.flows.set("sketch", flow);
   }
 
-  /** 0..1: how hard the model is thinking. Ramps in over ~1 s. */
-  setThinking(level: number) { this.thinkingTarget = clamp(level, 0, 1); }
+  /** 0..1: how hard the model is thinking, and how many lumps travel the
+   *  knot (a busy turn can show two). Ramps in over ~1 s. */
+  setThinking(level: number, lumps = 1) { this.thinkingTarget = clamp(level, 0, 1); this.lumps = Math.max(1, Math.min(3, Math.round(lumps))); }
 
   // Catalogue names build lazily; "readout" and "sketch" need their data set
   // first; anything else releases the ink back into free flow.
@@ -175,8 +198,35 @@ export class InkSimulation {
     const flow = this.flows.get(this.shape);
     const pulse = still ? 1 : 1 + audio * .12;
     for (let i = 0; i < this.count; i++) {
-      const j = i * 3, k = i * 4;
-      const phase = this.seeds[k + 3];
+      const j = i * 3;
+      const phase = this.seeds[i * 4 + 3];
+      if (!destination && this.isSymbol[i] && this.thinking > .001) {
+        // Torus knot (2,3): three loops around the tube for two around the
+        // ring, so the strand crosses over itself. Tilted so the loops stack,
+        // precessing slowly so the crossings drift across the front.
+        const u = this.knotU[i];
+        const theta = u * TAU;
+        // Drawn as a crisp thin strand, like the readout digits, so the
+        // crossings stay legible in soft ink; the lump swells it as it passes.
+        const tube = .022 + this.lumpAt(u, time) * .05;
+        const ox = this.knotOffset[i * 3] * tube, oy = this.knotOffset[i * 3 + 1] * tube, oz = this.knotOffset[i * 3 + 2] * tube;
+        const ring = .40 + .11 * Math.cos(3 * theta) + ox;
+        let x = ring * Math.cos(2 * theta), y = ring * Math.sin(2 * theta), z = .11 * Math.sin(3 * theta) + oz;
+        y += oy;
+        // Flat to the screen, like a trefoil drawn on a flag: no tilt and no
+        // turning in depth. z only decides which strand is on top at a
+        // crossing, and the whole knot rotates slowly in the plane.
+        const spin = time * .1, cs = Math.cos(spin), ss = Math.sin(spin);
+        const x2 = x * cs - y * ss, y1 = x * ss + y * cs, z2 = z;
+        // Blend from the free-flow target so the knot gathers rather than snaps.
+        const k = this.thinking;
+        const [fx, fy] = this.freeTarget(i, time, 1);
+        this.targets[j] = (fx * (1 - k) + x2 * k) * pulse;
+        this.targets[j + 1] = (fy * (1 - k) + y1 * k) * pulse;
+        this.depthTargets[i] = z2 * k;
+        continue;
+      }
+      this.depthTargets[i] = 0;
       if (destination && flow && this.isSymbol[i]) {
         // Formed ink keeps living: it slides back and forth along the contour
         // and breathes a little across it, so the symbol never sets rigid.
@@ -186,82 +236,69 @@ export class InkSimulation {
         this.targets[j] = destination[j] * pulse + tx * along - ty * across;
         this.targets[j + 1] = destination[j + 1] * pulse + ty * along + tx * across;
       } else {
-        const t = this.seeds[k];
-        // Broad overlapping currents fill the vessel, with a diffuse portion
-        // of the same ink reaching between them and through the centre. A
-        // large-scale curl field then folds the whole body into organic
-        // masses and dark voids rather than regular rings.
-        const diffuse = i % 5 < 2;
-        // The innermost particles would otherwise share one structured angle
-        // and line up into a spoke at the centre, so their angle is random.
-        // Strands ride three spiral arms; the gaps between them are the dark
-        // voids. Angular scatter grows toward the centre so the arms blur where
-        // they would otherwise converge into one dense ridge.
-        const inner = Math.min(1, t / .08);
-        const scatter = (phase / TAU - .5) * (1.6 - 1.2 * t);
-        const angle = (diffuse ? phase : (t * 5.2 + this.seeds[k + 1] + scatter) * inner + phase * (1 - inner))
-          + time * .13 + Math.sin(time * .18 + t * TAU) * .3;
-        let radius = clamp(.05 + .60 * Math.sqrt(t)
-          + Math.sin(angle * 2 + time * .3) * .04
-          + this.seeds[k + 2] * (diffuse ? .10 : .27), .015, .68);
-        // While a symbol is shown, ambient ink withdraws into a thin current
-        // near the rim so the vessel stays alive without crowding the shape.
-        const withdraw = destination ? 1 : 0;
-        radius = radius + (.52 + radius * .46 - radius) * withdraw;
-        const bx = Math.cos(angle) * radius + Math.sin(angle * 3 - time * .22) * .045;
-        const by = Math.sin(angle) * radius * .94 + Math.cos(angle * 2 + time * .18) * .04;
-        // A divergence-free curl field bends the currents into drifting
-        // vortices, so strands fold and eddy rather than circle in rings.
-        const [cx, cy] = curl(bx, by, time);
-        const swirl = .22 - .14 * withdraw;
-        let tx = (bx + cx * swirl) * pulse;
-        let ty = (by + cy * swirl) * pulse;
-        const think = this.thinking * (1 - withdraw);
-        if (think > 0) {
-          // A slow stir: the whole body turns about the centre, faster near
-          // the middle, so the ink reads as being worked rather than idling.
-          const r = Math.hypot(tx, ty) || 1;
-          const turn = time * .55 * think * (1.15 - r * .6);
-          const c = Math.cos(turn), sn = Math.sin(turn);
-          const rx = tx * c - ty * sn, ry = tx * sn + ty * c;
-          tx = rx; ty = ry;
-          // Wandering sparks: a few filaments leave the strands and drift in
-          // slow loops through the voids, then settle back when thinking ends.
-          const spark = this.sparks[i];
-          if (spark > 0) {
-            const loop = time * .9 + phase * 3;
-            const sx = Math.cos(loop) * .28 + Math.sin(loop * .37 + phase) * .18;
-            const sy = Math.sin(loop * 1.3 + phase) * .28 + Math.cos(loop * .41) * .18;
-            tx += (sx - tx) * spark;
-            ty += (sy - ty) * spark;
-          }
-        }
-        this.targets[j] = tx;
-        this.targets[j + 1] = ty;
+        const [tx, ty] = this.freeTarget(i, time, destination ? 1 : this.thinking);
+        this.targets[j] = tx * pulse;
+        this.targets[j + 1] = ty * pulse;
       }
     }
   }
 
+  // Free-flowing current for one particle. `withdraw` (0..1) pulls it into a
+  // thin ring near the rim while a symbol or the knot occupies the centre.
+  private freeTarget(i: number, time: number, withdraw: number): [number, number] {
+    const k = i * 4;
+    const phase = this.seeds[k + 3];
+    const t = this.seeds[k];
+    const diffuse = i % 5 < 2;
+    const inner = Math.min(1, t / .08);
+    const scatter = (phase / TAU - .5) * (1.6 - 1.2 * t);
+    const angle = (diffuse ? phase : (t * 5.2 + this.seeds[k + 1] + scatter) * inner + phase * (1 - inner))
+      + time * .13 + Math.sin(time * .18 + t * TAU) * .3;
+    let radius = clamp(.05 + .60 * Math.sqrt(t)
+      + Math.sin(angle * 2 + time * .3) * .04
+      + this.seeds[k + 2] * (diffuse ? .10 : .27), .015, .68);
+    radius = radius + (.52 + radius * .46 - radius) * withdraw;
+    const bx = Math.cos(angle) * radius + Math.sin(angle * 3 - time * .22) * .045;
+    const by = Math.sin(angle) * radius * .94 + Math.cos(angle * 2 + time * .18) * .04;
+    const [cx, cy] = curl(bx, by, time);
+    const swirl = .22 - .14 * withdraw;
+    return [bx + cx * swirl, by + cy * swirl];
+  }
+
+  // 0..1 strength of the travelling lump at path position u: a soft head with
+  // a tail trailing behind it, one lap every four seconds.
+  private lumpAt(u: number, time: number): number {
+    let best = 0;
+    for (let n = 0; n < this.lumps; n++) {
+      const head = (time * .25 + n / this.lumps) % 1;
+      const behind = (head - u + 1) % 1;
+      const front = Math.exp(-((behind / .05) ** 2));
+      const tail = behind < .22 ? (1 - behind / .22) ** 2 * .7 : 0;
+      best = Math.max(best, front, tail);
+    }
+    return best;
+  }
+
   step(delta: number, time: number, audio: number, reducedMotion = false) {
     const dt = Math.min(Math.max(delta, 0), .05);
+    // Reduced motion still forms the knot (instantly, still, no lump). The
+    // level is settled before targets are placed so a frame never lags it.
+    this.thinking += (this.thinkingTarget - this.thinking) * (reducedMotion ? 1 : 1 - Math.exp(-dt * 2.5));
     this.updateTargets(reducedMotion ? 0 : time, reducedMotion ? 0 : audio, reducedMotion);
     const showing = this.shape !== "" && this.shapes.has(this.shape);
     const fade = reducedMotion ? 1 : 1 - Math.exp(-dt * 3.5);
-    // Reduced motion keeps the palette but never stirs or scatters the ink.
-    const thinkGoal = reducedMotion ? 0 : this.thinkingTarget;
-    this.thinking += (thinkGoal - this.thinking) * (1 - Math.exp(-dt * 2.5));
+    const knot = !showing && this.thinking > .001;
+    const lumpFade = reducedMotion ? 1 : 1 - Math.exp(-dt * 10);
     for (let i = 0; i < this.count; i++) {
-      // Fine filaments only (roles 2-4), about 8% of the ink overall.
-      const eligible = i % 5 >= 2 && i % 12 === 0 ? 1 : 0;
-      const goal = eligible * (this.thinking > .5 ? 1 : 0);
-      this.sparks[i] += (goal - this.sparks[i]) * (1 - Math.exp(-dt * 1.8));
-    }
-    for (let i = 0; i < this.count; i++) {
-      // Thinking thins the body a little and lights the sparks, so the
-      // wandering filaments read against the churn.
-      const spark = this.sparks[i];
-      const goal = showing && !this.isSymbol[i] ? .28 : 1 - this.thinking * .3 + spark * 1.6;
-      this.weights[i] += (goal - this.weights[i]) * fade;
+      let goal = 1;
+      if (this.isSymbol[i]) {
+        // The strand sits a little lighter than free ink so its soft edge
+        // survives, and the lump rides over it with extra weight.
+        if (knot) goal = 1 + (reducedMotion ? 0 : 2 * this.lumpAt(this.knotU[i], time) * this.thinking);
+      } else if (showing) goal = .28;
+      else goal = 1 - .72 * this.thinking;
+      this.weights[i] += (goal - this.weights[i]) * (this.isSymbol[i] && knot ? lumpFade : fade);
+      this.depths[i] += (this.depthTargets[i] - this.depths[i]) * (reducedMotion ? 1 : 1 - Math.exp(-dt * 6));
     }
     if (reducedMotion) {
       this.positions.set(this.targets);

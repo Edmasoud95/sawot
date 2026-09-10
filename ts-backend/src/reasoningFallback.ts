@@ -1,11 +1,18 @@
 import type OpenAI from "openai";
+import { createViaResponses } from "./responsesTransport.js";
 
-// Some hosted reasoning models (OpenAI's gpt-6 family, for one) reject
-// function tools on /chat/completions unless reasoning_effort is "none".
-// No models endpoint advertises this, so learn it from the first 400 and
-// remember the answer per endpoint and model for the life of the process.
+// Which request shape a model accepts, learned from provider errors.
+//
+// Chat completions is the default and what every local server speaks. Some
+// hosted reasoning models (OpenAI's gpt-6 family, for one) reject function
+// tools on /chat/completions unless reasoning_effort is "none", and some of
+// those reject "none" too: they only take tools on the Responses API. No
+// models endpoint advertises any of this, so it is learned from the first
+// failures and remembered per endpoint and model for the life of the process.
 
-const reasoningOff = new Set<string>();
+export type Transport = "chat" | "chat-no-reasoning" | "responses";
+
+const transports = new Map<string, Transport>();
 
 function key(client: OpenAI, model: string): string {
   return ((client as any).baseURL ?? "") + "::" + model;
@@ -31,37 +38,51 @@ export function isNoneUnsupported(err: unknown): boolean {
   return /reasoning[_ ]effort/i.test(text) && /['"]none['"]/i.test(text) && /not support|unsupported/i.test(text);
 }
 
-/** Models known to need reasoning turned off, for diagnostics and tests. */
-export function reasoningDisabledModels(): string[] {
-  return [...reasoningOff];
+/** Transports learned so far, for diagnostics and tests. */
+export function learnedTransports(): Record<string, Transport> {
+  return Object.fromEntries(transports);
+}
+
+/** Pin a transport ahead of time (a provider known to need the Responses API). */
+export function setTransport(client: OpenAI, model: string, transport: Transport): void {
+  transports.set(key(client, model), transport);
 }
 
 export function resetReasoningFallback(): void {
-  reasoningOff.clear();
+  transports.clear();
 }
 
-/** chat.completions.create with an automatic one-time retry that switches
- *  reasoning_effort to "none" when the provider demands it, then keeps it
- *  that way for later requests to the same model. */
+/** chat.completions.create through whichever transport the model accepts.
+ *  Tries chat completions, then chat completions with reasoning off, then
+ *  the Responses API, and remembers the first shape that works. */
 export async function createChatCompletion<T = any>(client: OpenAI, params: Record<string, any>): Promise<T> {
   const k = key(client, params.model);
+  const viaChat = (body: Record<string, any>) => client.chat.completions.create(body as any) as unknown as Promise<T>;
   const withoutReasoning = { ...params, reasoning_effort: "none" };
-  const create = (body: Record<string, any>) => client.chat.completions.create(body as any) as unknown as Promise<T>;
-  if (reasoningOff.has(k)) return create(withoutReasoning);
+
+  switch (transports.get(k)) {
+    case "chat-no-reasoning": return viaChat(withoutReasoning);
+    case "responses": return createViaResponses<T>(client, params);
+  }
+
   try {
-    return await create(params);
+    return await viaChat(params);
   } catch (err) {
     if (!isReasoningToolConflict(err)) throw err;
     try {
-      const result = await create(withoutReasoning);
-      reasoningOff.add(k);
+      const result = await viaChat(withoutReasoning);
+      transports.set(k, "chat-no-reasoning");
       return result;
     } catch (retryErr) {
       if (!isNoneUnsupported(retryErr)) throw retryErr;
+    }
+    try {
+      const result = await createViaResponses<T>(client, params);
+      transports.set(k, "responses");
+      return result;
+    } catch (responsesErr) {
       throw new Error(
-        `${params.model} cannot use tools on the chat completions endpoint: the provider requires reasoning_effort "none" ` +
-        `for function tools but this model does not accept it. It needs the Responses API, which this backend does not support yet. ` +
-        `Pick another model. (${errorText(retryErr).trim()})`,
+        `${params.model} cannot use tools on chat completions and the Responses API failed too: ${errorText(responsesErr).trim() || String(responsesErr)}`,
       );
     }
   }

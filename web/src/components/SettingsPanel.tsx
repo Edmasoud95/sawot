@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import ModelsSection from "./ModelsSection";
+import ModelPicker from "./ModelPicker";
+import { loadProviderModels } from "./chat/useModels";
 import { useDialogFocus } from "../hooks/useDialogFocus";
 import { useVoiceStore } from "../store";
 
@@ -43,38 +45,6 @@ function Toggle({ label, hint, checked, onChange }) {
 const FIELD_CLS =
   "w-full min-w-0 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[0.85rem] text-zinc-200 outline-none backdrop-blur transition-colors duration-300 hover:border-white/25 focus:border-aurora-teal/50 disabled:opacity-50";
 
-function ModelSelect({ label, value, providers, onChange }) {
-  const groups = providers.filter((p) => p.models.length);
-  const known = groups.some((p) => p.models.some((m) => `${p.id}::${m}` === value));
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-[0.85rem] font-medium text-zinc-200">{label}</span>
-      <select
-        aria-label={label}
-        value={value}
-        disabled={!groups.length}
-        onChange={(e) => onChange(e.target.value)}
-        className={FIELD_CLS}
-      >
-        {!known && (
-          <option value={value} className="bg-ink-900">
-            {value.includes("::") ? value.split("::")[1] : value}
-          </option>
-        )}
-        {groups.map((p) => (
-          <optgroup key={p.id} label={p.name} className="bg-ink-900">
-            {p.models.map((m) => (
-              <option key={m} value={`${p.id}::${m}`} className="bg-ink-900">
-                {m}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
-    </label>
-  );
-}
-
 function ProviderRow({ p, onRemove }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5">
@@ -88,8 +58,8 @@ function ProviderRow({ p, onRemove }) {
           )}
         </span>
         <span className="truncate text-[0.72rem] text-zinc-500">{p.baseUrl}</span>
-        <span className={`text-[0.72rem] ${p.error ? "text-red-400/90" : "text-zinc-500"}`}>
-          {p.error ? "Unreachable — check the URL and key" : `${p.models.length} models`}
+        <span className={`text-[0.72rem] ${p.state === "error" || p.error ? "text-red-400/90" : "text-zinc-500"}`}>
+          {p.state === "pending" ? "Loading models…" : p.error ? "Unreachable — check the URL and key" : `${p.models.length} models`}
         </span>
       </div>
       {!p.builtin && (
@@ -248,14 +218,39 @@ export default function SettingsPanel() {
     });
   }, [open]);
 
+  // Settings answer at once with each provider's last known models; then
+  // every provider loads on its own so a slow one never blocks the picker.
+  // Responses to saves carry the server's cached lists; keep whatever this
+  // panel has already loaded so nothing flips back to "loading".
+  const mergeSettings = useCallback((body) => setData((prev) => {
+    const providers = (body.providers ?? []).map((p) => {
+      const known = prev?.providers?.find((q) => q.id === p.id);
+      return p.state === "ready" ? p : known && known.state !== "pending" ? { ...p, models: known.models, state: known.state, ...(known.error ? { error: known.error } : {}) } : { ...p, state: "pending" };
+    });
+    return { ...body, providers };
+  }), []);
+  const loadToken = useRef(0);
+  const refreshProviders = useCallback((providers) => {
+    const token = ++loadToken.current;
+    for (const p of providers) {
+      loadProviderModels(p.id).then((result) => {
+        if (token !== loadToken.current) return;
+        setData((d) => d && ({ ...d, providers: d.providers.map((q) => (q.id === p.id ? { ...q, ...result } : q)) }));
+      });
+    }
+  }, []);
   useEffect(() => {
     if (!open) return;
     setError("");
     fetch("/api/settings")
       .then((r) => r.json())
-      .then(setData)
+      .then((d) => {
+        const providers = (d.providers ?? []).map((p) => ({ ...p, state: p.state === "ready" ? "ready" : "pending" }));
+        setData({ ...d, providers });
+        refreshProviders(providers);
+      })
       .catch(() => setError("Couldn't load settings — is the server running?"));
-  }, [open]);
+  }, [open, refreshProviders]);
 
   const close = useCallback(() => setOpen(false), []);
   useDialogFocus(open, panel, trigger, close);
@@ -269,7 +264,7 @@ export default function SettingsPanel() {
         setError(body.detail || "Couldn't remove the provider — try again.");
         return;
       }
-      setData(body);
+      mergeSettings(body);
     } catch {
       setError("Couldn't reach the server.");
     }
@@ -289,7 +284,7 @@ export default function SettingsPanel() {
         setError(body.detail || "Couldn't save that change — try again.");
         return;
       }
-      setData(body);
+      mergeSettings(body);
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
     } catch {
@@ -362,7 +357,7 @@ export default function SettingsPanel() {
               {!data && !error && <Skeleton />}
               {data && (
                 <>
-                  <ModelSelect
+                  <ModelPicker
                     label="Model"
                     value={data.model}
                     providers={data.providers ?? []}
@@ -391,12 +386,18 @@ export default function SettingsPanel() {
                     checked={!!data.sassy}
                     onChange={(sassy) => update({ sassy })}
                   />
+                  <Toggle
+                    label="Detailed drawings"
+                    hint="Lets the model draw with filled shapes (circles, ellipses, rectangles, polygons, arcs) and more strokes. Off keeps simple outlines."
+                    checked={!!data.detailedDrawings}
+                    onChange={(detailedDrawings) => update({ detailedDrawings })}
+                  />
                   <div className="mt-3 flex flex-col gap-3">
                     <SectionTitle>Providers</SectionTitle>
                     {(data.providers ?? []).map((p) => (
                       <ProviderRow key={p.id} p={p} onRemove={removeProvider} />
                     ))}
-                    <AddProviderForm apply={setData} />
+                    <AddProviderForm apply={(body) => { mergeSettings(body); refreshProviders(body.providers ?? []); }} />
                   </div>
                 </>
               )}

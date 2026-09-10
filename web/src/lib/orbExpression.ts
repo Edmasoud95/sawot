@@ -4,6 +4,7 @@ export interface OrbExpression {
   shape: string;          // catalogue name, "readout", or "sketch"
   text?: string;          // readout text
   strokes?: number[][];   // sketch polylines in a unit square
+  fills?: number[][];     // sketch fill polygons (closed) in a unit square
   domain: string;
   tool: string;
   startedAt: number;
@@ -37,6 +38,9 @@ export function expressionFromActivity(current: OrbExpression | null, activity: 
   return current;
 }
 
+// Matches the backend's detailed limit; the basic one is lower.
+const SKETCH_MAX = 24;
+
 const hasOwn = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
@@ -52,11 +56,17 @@ export function expressionFromPayload(current: OrbExpression | null, payload: un
       next = { shape: p.name, domain: "conversation", tool: "reply", startedAt: now, expiresAt: now + SHAPE_HOLD_MS };
     } else if (p.kind === "readout" && typeof p.text === "string" && p.text.trim() && p.text.length <= READOUT_MAX) {
       next = { shape: "readout", text: p.text.trim().toUpperCase(), domain: "conversation", tool: "reply", startedAt: now, expiresAt: now + TEXT_HOLD_MS };
-    } else if (p.kind === "sketch" && Array.isArray(p.strokes) && p.strokes.length &&
-      p.strokes.every((s: unknown) => Array.isArray(s) && s.length >= 4 && s.length % 2 === 0 && s.every(finite))) {
-      // Over-long drawings are trimmed to the cap rather than thrown away.
-      next = { shape: "sketch", strokes: p.strokes.slice(0, 16).map((s: number[]) => s.map((v) => Math.max(0, Math.min(1, v)))),
-        domain: "conversation", tool: "reply", startedAt: now, expiresAt: now + TEXT_HOLD_MS };
+    } else if (p.kind === "sketch") {
+      const polylines = (raw: unknown, min: number) => Array.isArray(raw) &&
+        raw.every((s: unknown) => Array.isArray(s) && s.length >= min && s.length % 2 === 0 && s.every(finite)) ? raw as number[][] : null;
+      const strokes = p.strokes === undefined ? [] : polylines(p.strokes, 4);
+      const fills = p.fills === undefined ? [] : polylines(p.fills, 6);
+      if (strokes && fills && strokes.length + fills.length) {
+        // Over-long drawings are trimmed to the cap rather than thrown away.
+        const clamp = (list: number[][]) => list.slice(0, SKETCH_MAX).map((s) => s.map((v) => Math.max(0, Math.min(1, v))));
+        next = { shape: "sketch", strokes: clamp(strokes), domain: "conversation", tool: "reply", startedAt: now, expiresAt: now + TEXT_HOLD_MS };
+        if (fills.length) next.fills = clamp(fills);
+      }
     }
   }
   if (active && active.domain === "temperature") return active;

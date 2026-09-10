@@ -1,4 +1,4 @@
-import { parseExpressionMarkers, expressionPrompt, expressionFromToolArgs, ORB_TOOL, ORB_TOOL_NAME, type ExpressionPayload } from "./expressions.js";
+import { parseExpressionMarkers, expressionPrompt, expressionFromToolArgs, orbTool, ORB_TOOL_NAME, type ExpressionPayload } from "./expressions.js";
 import { appendFileSync, mkdirSync, statSync, truncateSync } from "node:fs";
 import { dirname } from "node:path";
 import { temperatureReading, type TemperatureReading } from "./temperature.js";
@@ -88,6 +88,12 @@ export class Agent {
     this.system = system;
   }
 
+  /** "Detailed drawings": primitives, fills and higher sketch limits. */
+  private detailedDrawings = false;
+  setDetailedDrawings(on: boolean): void {
+    this.detailedDrawings = on;
+  }
+
   async run(
     history: HistoryMessage[],
     userText: string,
@@ -105,7 +111,8 @@ export class Agent {
 
     const readings = new Map<string, TemperatureReading>();
     let toolExpression: ExpressionPayload = { kind: "none" };
-    const modelTools = options.expressions ? [...this.tools, ORB_TOOL as unknown as Tool] : this.tools;
+    const drawing = { detailed: this.detailedDrawings };
+    const modelTools = options.expressions ? [...this.tools, orbTool(drawing) as unknown as Tool] : this.tools;
     history.push({ role: "user", content: userText });
 
     const turnStart = performance.now();
@@ -113,7 +120,7 @@ export class Agent {
       const t0 = performance.now();
       const response = await createChatCompletion<any>(this.client, {
         model: this.model,
-        messages: [{ role: "system", content: this.system + (options.expressions ? expressionPrompt() : "") }, ...history] as any,
+        messages: [{ role: "system", content: this.system + (options.expressions ? expressionPrompt(drawing) : "") }, ...history] as any,
         tools: toOpenAiTools(modelTools) as any,
       });
       const msg = response.choices[0].message;
@@ -160,7 +167,7 @@ export class Agent {
           args = JSON.parse(tc.function.arguments || "{}");
           await emit("tool_call", { name: tc.function.name, args });
           if (options.expressions && tc.function.name === ORB_TOOL_NAME) {
-            const chosen = expressionFromToolArgs(args);
+            const chosen = expressionFromToolArgs(args, drawing);
             if (chosen.kind === "none") result = { error: "nothing shown: give kind plus a catalogue name, a short text, or sketch strokes" };
             else { toolExpression = chosen; result = { ok: true, shown: chosen.kind }; }
           } else {

@@ -1,4 +1,5 @@
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { createChatCompletion } from "./reasoningFallback.js";
 import { extname, join } from "node:path";
 import type { FastifyInstance } from "fastify";
 
@@ -45,7 +46,7 @@ async function maybeTitle(ctx: ChatCtx, conv: any): Promise<void> {
   if (conv.title !== "New chat") return;
   try {
     const { client, model } = ctx.resolve(conv.model);
-    const resp = await client.chat.completions.create({
+    const resp = await createChatCompletion<any>(client, {
       model,
       messages: [{
         role: "user",

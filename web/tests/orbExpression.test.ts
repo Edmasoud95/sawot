@@ -104,10 +104,18 @@ test('readouts and sketches carry their payload and hold longer', () => {
   s.showExpression({ kind: 'sketch', strokes: 'nope' });
   assert.equal(useVoiceStore.getState().expression, null);
   // Over-long drawings are trimmed to the cap rather than thrown away.
-  const many = Array.from({ length: 20 }, (_, i) => [0, i / 20, 1, i / 20]);
+  const many = Array.from({ length: 30 }, (_, i) => [0, i / 30, 1, i / 30]);
   s.showExpression({ kind: 'sketch', strokes: many });
   assert.equal(useVoiceStore.getState().expression.shape, 'sketch');
-  assert.equal(useVoiceStore.getState().expression.strokes.length, 16);
+  assert.equal(useVoiceStore.getState().expression.strokes.length, 24);
+  // Fills ride along; a fill needs at least three corners, and a sketch of fills alone is fine.
+  s.showExpression({ kind: 'sketch', strokes: [[0, 0, 1, 1]], fills: [[0, 0, 1, 0, 1, 1, 0, 0]] });
+  assert.deepEqual(useVoiceStore.getState().expression.fills, [[0, 0, 1, 0, 1, 1, 0, 0]]);
+  s.showExpression({ kind: 'sketch', fills: [[0.2, 0.2, 0.8, 0.2, 0.5, 0.9]] });
+  assert.equal(useVoiceStore.getState().expression.shape, 'sketch');
+  assert.deepEqual(useVoiceStore.getState().expression.strokes, []);
+  s.showExpression({ kind: 'sketch', strokes: [[0, 0, 1, 1]], fills: [[0, 0, 1, 1]] });
+  assert.equal(useVoiceStore.getState().expression, null, 'a bad fill voids the drawing');
 });
 
 test('every catalogue name the backend offers resolves to a shape', async () => {

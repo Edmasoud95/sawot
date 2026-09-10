@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createChatCompletion, isReasoningToolConflict, reasoningDisabledModels, resetReasoningFallback } from "../src/reasoningFallback.js";
+import { createChatCompletion, isReasoningToolConflict, learnedTransports, resetReasoningFallback, setTransport } from "../src/reasoningFallback.js";
 
 const NONE_REJECTED = "400 Unsupported value: 'reasoning_effort' does not support 'none' with this model. Supported values are: 'low', 'medium', 'high', and 'xhigh'.";
 const CONFLICT = "400 Function tools with reasoning_effort are not supported for gpt-6-astra in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.";
@@ -42,7 +42,7 @@ test("retries once with reasoning_effort none and remembers the model", async ()
   await createChatCompletion(client, { model: "gpt-6-astra", messages: [], tools: [] });
   assert.equal(requests.length, 3, "second turn goes straight to the working shape");
   assert.equal(requests[2].reasoning_effort, "none");
-  assert.deepEqual(reasoningDisabledModels(), ["https://api.example/v1::gpt-6-astra"]);
+  assert.deepEqual(learnedTransports(), { "https://api.example/v1::gpt-6-astra": "chat-no-reasoning" });
 });
 
 test("other models on the same endpoint are untouched", async () => {
@@ -59,16 +59,50 @@ test("unrelated errors are rethrown without a retry", async () => {
   const client: any = { baseURL: "x", chat: { completions: { create: async () => { calls++; throw Object.assign(new Error("rate limited"), { status: 429 }); } } } };
   await assert.rejects(createChatCompletion(client, { model: "m", messages: [] }), /rate limited/);
   assert.equal(calls, 1);
-  assert.deepEqual(reasoningDisabledModels(), []);
+  assert.deepEqual(learnedTransports(), {});
 });
 
-test("a model that rejects both shapes fails with a clear message and is not remembered", async () => {
-  const requests: any[] = [];
-  const client: any = { baseURL: "https://api.example/v1", chat: { completions: { create: async (req: any) => {
-    requests.push(req);
-    throw Object.assign(new Error(req.reasoning_effort === "none" ? NONE_REJECTED : CONFLICT), { status: 400 });
-  } } } };
-  await assert.rejects(createChatCompletion(client, { model: "gpt-6-astra", messages: [], tools: [] }), /Responses API/);
-  assert.equal(requests.length, 2);
-  assert.deepEqual(reasoningDisabledModels(), [], "a failed retry must not poison later requests");
+function astraClient(responsesOk = true) {
+  const chat: any[] = [];
+  const responses: any[] = [];
+  const client: any = {
+    baseURL: "https://api.example/v1",
+    chat: { completions: { create: async (req: any) => {
+      chat.push(req);
+      throw Object.assign(new Error(req.reasoning_effort === "none" ? NONE_REJECTED : CONFLICT), { status: 400 });
+    } } },
+    responses: { create: async (req: any) => {
+      responses.push(req);
+      if (!responsesOk) throw Object.assign(new Error("responses unavailable"), { status: 404 });
+      return { output: [{ type: "message", content: [{ type: "output_text", text: "via responses" }] }] };
+    } },
+  };
+  return { client, chat, responses };
+}
+
+test("a model that rejects both chat shapes escalates to the Responses API and remembers it", async () => {
+  const { client, chat, responses } = astraClient();
+  const out = await createChatCompletion(client, { model: "gpt-6-astra", messages: [{ role: "user", content: "hi" }], tools: [] });
+  assert.equal(out.choices[0].message.content, "via responses");
+  assert.equal(chat.length, 2);
+  assert.equal(responses.length, 1);
+  assert.deepEqual(learnedTransports(), { "https://api.example/v1::gpt-6-astra": "responses" });
+
+  await createChatCompletion(client, { model: "gpt-6-astra", messages: [{ role: "user", content: "again" }] });
+  assert.equal(chat.length, 2, "later turns skip chat completions entirely");
+  assert.equal(responses.length, 2);
+});
+
+test("when the Responses API fails too the error explains both and nothing is remembered", async () => {
+  const { client } = astraClient(false);
+  await assert.rejects(createChatCompletion(client, { model: "gpt-6-astra", messages: [] }), /Responses API failed too.*responses unavailable/);
+  assert.deepEqual(learnedTransports(), {});
+});
+
+test("a pinned transport is used without probing", async () => {
+  const { client, chat, responses } = astraClient();
+  setTransport(client, "gpt-6-astra", "responses");
+  await createChatCompletion(client, { model: "gpt-6-astra", messages: [] });
+  assert.equal(chat.length, 0);
+  assert.equal(responses.length, 1);
 });

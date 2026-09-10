@@ -160,43 +160,57 @@ test("catalogue shapes and sketches form by name and unknown names release the i
   assert.ok(Array.from(ink.weights).every((w) => w > .5), "unknown names release ambient ink");
 });
 
-// Mean angular momentum of the ink about the centre: positive means the body
-// turns counter-clockwise as a whole. Random currents average near zero.
-const spin = (ink: InkSimulation) => {
-  let total = 0;
-  for (let i = 0; i < ink.count; i++) {
-    const x = ink.positions[i * 3], y = ink.positions[i * 3 + 1];
-    total += x * ink.velocities[i * 3 + 1] - y * ink.velocities[i * 3];
-  }
-  return total / ink.count;
-};
-
-test("thinking stirs the whole body into a slow coherent rotation that unwinds afterwards", () => {
+test("thinking gathers part of the ink into a torus knot and releases it afterwards", () => {
   const ink = new InkSimulation(1024);
   for (let i = 0; i < 240; i++) ink.step(1 / 60, i / 60, 0);
-  const idle = Math.abs(spin(ink));
+  const free = ink.positions.slice();
   ink.setThinking(1);
   const identity = ink.tones.slice();
-  for (let i = 0; i < 180; i++) ink.step(1 / 60, 4 + i / 60, 0);
-  const churn = spin(ink);
-  assert.ok(churn > idle + .01, `thinking must rotate the ink (churn ${churn.toFixed(4)}, idle ${idle.toFixed(4)})`);
+  for (let i = 0; i < 240; i++) ink.step(1 / 60, 4 + i / 60, 0);
+  assert.ok(distance(ink.positions, ink.targets) < .05, "ink converges on the knot");
+  assert.ok(distance(free, ink.positions) > .12, "ink visibly travels into the knot");
+  // Knot particles sit on a tube around a ring of radius ~0.3: never at the centre, never at the rim.
+  let onKnot = 0;
+  for (let i = 0; i < ink.count; i++) {
+    const r = Math.hypot(ink.positions[i * 3], ink.positions[i * 3 + 1]);
+    if (r > .1 && r < .5) onKnot++;
+  }
+  assert.ok(onKnot / ink.count > .35 && onKnot / ink.count < .7, `knot share ${onKnot / ink.count}`);
   assert.deepEqual(ink.tones, identity, "the same particles keep their identity");
+  assert.equal(ink.depths.length, ink.count);
+  assert.ok(Array.from(ink.depths).some((d) => d > .08) && Array.from(ink.depths).some((d) => d < -.08), "crossings have an over and an under strand");
   ink.setThinking(0);
-  for (let i = 0; i < 240; i++) ink.step(1 / 60, 7 + i / 60, 0);
-  assert.ok(Math.abs(spin(ink)) < churn * .35, "rotation releases once the reply starts");
+  for (let i = 0; i < 240; i++) ink.step(1 / 60, 8 + i / 60, 0);
+  assert.ok(Array.from(ink.weights).every((w) => w > .8), "ambient ink recovers");
+  assert.ok(Array.from(ink.depths).every((d) => Math.abs(d) < .05), "depth flattens once released");
   assert.ok(ink.positions.every(Number.isFinite));
 });
 
-test("thinking sends a few filaments wandering through the voids and calls them back", () => {
-  const ink = new InkSimulation(1000);
-  for (let i = 0; i < 120; i++) ink.step(1 / 60, i / 60, 0);
-  assert.equal(ink.sparks.length, 1000);
-  assert.ok(Array.from(ink.sparks).every((s) => s === 0), "no sparks while idle");
+test("a lump of ink travels along the knot and is not stationary", () => {
+  const ink = new InkSimulation(1024);
   ink.setThinking(1);
-  for (let i = 0; i < 120; i++) ink.step(1 / 60, 2 + i / 60, 0);
-  const lit = Array.from(ink.sparks).filter((s) => s > .5).length;
-  assert.ok(lit > 40 && lit < 160, `about 8% of the ink sparks (${lit})`);
+  for (let i = 0; i < 240; i++) ink.step(1 / 60, i / 60, 0);
+  const lumpCentre = () => {
+    let x = 0, y = 0, n = 0;
+    for (let i = 0; i < ink.count; i++) if (ink.weights[i] > 1.5) { x += ink.positions[i * 3]; y += ink.positions[i * 3 + 1]; n++; }
+    return { x: x / n, y: y / n, n };
+  };
+  const a = lumpCentre();
+  assert.ok(a.n > 40 && a.n < 200, `a lump of about a fifth of the knot carries extra weight (${a.n})`);
+  for (let i = 0; i < 60; i++) ink.step(1 / 60, 4 + i / 60, 0);
+  const b = lumpCentre();
+  assert.ok(Math.hypot(a.x - b.x, a.y - b.y) > .08, "the lump moves along the path in a second");
   ink.setThinking(0);
-  for (let i = 0; i < 120; i++) ink.step(1 / 60, 4 + i / 60, 0);
-  assert.ok(Array.from(ink.sparks).every((s) => s < .1), "sparks fade when thinking ends");
+  for (let i = 0; i < 120; i++) ink.step(1 / 60, 5 + i / 60, 0);
+  assert.ok(Array.from(ink.weights).every((w) => w < 1.2), "the lump dissolves when thinking ends");
+});
+
+test("reduced motion shows a still knot with no lump", () => {
+  const ink = new InkSimulation(512);
+  ink.setThinking(1);
+  ink.step(1 / 60, 1, 0, true);
+  const still = ink.positions.slice();
+  ink.step(1 / 60, 3, 0, true);
+  assert.deepEqual(ink.positions, still);
+  assert.ok(Array.from(ink.weights).every((w) => w <= 1.05), "no lump under reduced motion");
 });

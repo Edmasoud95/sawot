@@ -42,6 +42,7 @@ function Ink({ reducedMotion }: { reducedMotion: boolean }) {
     geometry.setAttribute("aTone", new THREE.BufferAttribute(simulation.tones, 1));
     geometry.setAttribute("aSize", new THREE.BufferAttribute(simulation.sizes, 1));
     geometry.setAttribute("aWeight", new THREE.BufferAttribute(simulation.weights, 1).setUsage(THREE.DynamicDrawUsage));
+    geometry.setAttribute("aDepth", new THREE.BufferAttribute(simulation.depths, 1).setUsage(THREE.DynamicDrawUsage));
     const material = new THREE.ShaderMaterial({
       vertexShader: INK_VERTEX, fragmentShader: INK_FRAGMENT,
       uniforms: { uPointScale: { value: INK_RESOLUTION.min * POINT_SCALE } },
@@ -88,7 +89,7 @@ function Ink({ reducedMotion }: { reducedMotion: boolean }) {
   }), [fluid]);
 
   // A static canvas still needs one frame when state or motion preference changes.
-  useEffect(() => { invalidate(); }, [target, reducedMotion, symbol, expression?.text, expression?.strokes, invalidate]);
+  useEffect(() => { invalidate(); }, [target, reducedMotion, symbol, expression?.text, expression?.strokes, expression?.fills, invalidate]);
   useEffect(() => {
     if (!expression) return;
     const timer = window.setTimeout(() => {
@@ -114,20 +115,21 @@ function Ink({ reducedMotion }: { reducedMotion: boolean }) {
     // Integrating speed avoids a phase jump when listening/thinking changes.
     if (!reducedMotion) live.uTime.value += dt * speed.current;
     live.uEnergy.value = THREE.MathUtils.lerp(live.uEnergy.value, target.energy, blend);
-    const thinking = status === "thinking" && !reducedMotion ? 1 : 0;
-    live.uThinking.value = THREE.MathUtils.lerp(live.uThinking.value, thinking, 1 - Math.exp(-dt * 2.5));
+    const thinking = status === "thinking" ? 1 : 0;
+    live.uThinking.value = reducedMotion ? 0 : THREE.MathUtils.lerp(live.uThinking.value, thinking, 1 - Math.exp(-dt * 2.5));
     fluid.simulation.setThinking(thinking);
     live.uColorA.value.lerp(target.colors[0], blend);
     live.uColorB.value.lerp(target.colors[1], blend);
     live.uColorC.value.lerp(target.colors[2], blend);
 
     fluid.simulation.setReadout(symbol === "readout" ? expression?.text ?? "" : "");
-    fluid.simulation.setSketch(symbol === "sketch" ? expression?.strokes ?? null : null);
+    fluid.simulation.setSketch(symbol === "sketch" ? expression?.strokes ?? null : null, symbol === "sketch" ? expression?.fills ?? null : null);
     fluid.simulation.setShape(symbol);
     fluid.simulation.step(dt, live.uTime.value, live.uLevel.value, reducedMotion);
     fluid.geometry.attributes.position.needsUpdate = true;
     fluid.geometry.attributes.aVelocity.needsUpdate = true;
     fluid.geometry.attributes.aWeight.needsUpdate = true;
+    fluid.geometry.attributes.aDepth.needsUpdate = true;
     const previousTarget = gl.getRenderTarget();
     const previousAlpha = gl.getClearAlpha();
     gl.getClearColor(fluid.clearColor);
