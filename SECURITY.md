@@ -2,8 +2,8 @@
 
 ## No authentication
 
-SAWOT intentionally ships with **no authentication or authorization**. The
-server:
+SAWOT currently ships with **no authentication or authorization**.
+Authentication is planned but not yet implemented. The server:
 
 - binds to `0.0.0.0` by default (configurable via `server.host` in
   `config.yaml`)

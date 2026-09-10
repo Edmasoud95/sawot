@@ -11,7 +11,8 @@ the ink forms: a light bulb when it switches a lamp, a thermometer reading when
 you ask about the heating, a smile when it is pleased with itself.
 
 > **Security note:** this server has **no authentication** and can control
-> your devices over the network. Run it only on a trusted LAN, or bind
+> your devices over the network. Authentication is planned but not yet
+> implemented. Until then, run it only on a trusted LAN, or bind
 > `server.host` to `127.0.0.1`. See [SECURITY.md](SECURITY.md).
 
 ![Voice mode — the resting ink orb](screenshots/voice.png)
