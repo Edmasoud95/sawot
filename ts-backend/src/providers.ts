@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 
-/** An OpenAI-compatible chat endpoint: the built-in LM Studio from
+/** An OpenAI-compatible chat endpoint: the built-in local server from
  *  config.yaml, or a user-added provider persisted in settings.json. */
 export interface ProviderSpec {
   id: string;
@@ -39,7 +39,7 @@ function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "provider";
 }
 
-/** How long to wait for a provider's model list. A sleeping LM Studio host
+/** How long to wait for a provider's model list. A sleeping local model host
  *  otherwise blocks the whole settings payload for the TCP connect timeout. */
 export const MODEL_LIST_TIMEOUT_MS = 5000;
 

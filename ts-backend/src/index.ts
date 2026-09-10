@@ -91,7 +91,7 @@ async function main() {
   const store = new SettingsStore(join(dataDir, "settings.json"));
   const overrides = store.load();
   const registry = new ProviderRegistry(
-    { id: "lm-studio", name: "LM Studio", baseUrl: config.lmstudioUrl, builtin: true },
+    { id: "lm-studio", name: "Local server", baseUrl: config.lmstudioUrl, builtin: true },
     Array.isArray(overrides.providers) ? overrides.providers : [],
   );
   // Warm every provider's model list in the background so pickers have

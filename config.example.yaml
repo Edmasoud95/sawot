@@ -1,9 +1,9 @@
 # Copy to config.yaml and fill in your values.
 home_assistant:
   url: "http://192.168.1.10:8123"     # Home Assistant URL
-lm_studio:
-  url: "http://192.168.1.11:1234/v1"  # LM Studio server (LAN IP of the host)
-  model: "qwen3-8b"                    # any tool-calling model you have loaded
+lm_studio:                            # built-in model server (key name is historical)
+  url: "http://192.168.1.11:1234/v1"  # any OpenAI-compatible /v1 endpoint
+  model: "gemma-4"                     # any tool-calling model it serves
 stt:
   model: "cohere-transcribe"           # STT model id (see Settings for the list)
   language: "en"                      # transcription language

@@ -6,9 +6,14 @@
 
 Fully local voice and chat assistant for Home Assistant: push-to-talk in the
 browser, CPU speech-to-text via
-[transcribe.cpp](https://github.com/handy-computer/transcribe.cpp), an LM
-Studio (or any OpenAI-compatible) LLM with Home Assistant tool calling, and
+[transcribe.cpp](https://github.com/handy-computer/transcribe.cpp), any
+OpenAI-compatible LLM with Home Assistant tool calling, and
 [Kokoro](https://github.com/hexgrad/kokoro) text-to-speech — no cloud required.
+
+It is built and tested with local models: a tool-calling model on your own
+machine (Ollama, vLLM, llama.cpp or any other OpenAI-style server) is all it
+needs, and Gemma 4 works particularly well. Hosted providers such as
+OpenRouter or OpenAI can be added alongside from Settings.
 
 The assistant lives in a glass orb full of moving ink. The model chooses what
 the ink forms: a light bulb when it switches a lamp, a thermometer reading when
@@ -48,10 +53,11 @@ you ask about the heating, a smile when it is pleased with itself.
   (extracted text is sent inline to the model).
 - **Personality** — "Rita" ships with a sassy, teasing persona that you can
   switch off from Settings for a plain, friendly assistant.
-- **Custom providers** — add any OpenAI-compatible endpoint (OpenRouter,
-  Ollama, vLLM, OpenAI, …) with its API key from Settings. Every provider's
-  models appear in one searchable, fuzzy-filtered picker, each provider
-  loading on its own so a sleeping LM Studio never blocks the rest. Models
+- **Any OpenAI-compatible model server** — one built-in local endpoint plus
+  any number of extra providers (OpenRouter, OpenAI, another local server, …)
+  added with their API keys from Settings. Every provider's models appear in
+  one searchable, fuzzy-filtered picker, each provider loading on its own so
+  a sleeping server never blocks the rest. Models
   that only take tools through the Responses API (OpenAI's gpt-6 family) are
   detected from the provider's first error and switched over automatically,
   thinking included.
@@ -116,9 +122,9 @@ detail, and speech model downloads:
   uses an NVIDIA GPU when present and falls back to CPU.
 - `sudo apt install espeak-ng ffmpeg`
 - Node.js 20+ and npm (TypeScript backend + frontend)
-- [LM Studio](https://lmstudio.ai/) running with a tool-calling model loaded
-  (recommended: Qwen3-8B Q4) and its local server enabled — or any other
-  OpenAI-compatible provider added from Settings
+- An OpenAI-compatible model server with a tool-calling model loaded.
+  Local servers such as Ollama, vLLM or llama.cpp work well; Gemma 4 is the
+  model it is tested with most. Hosted providers can be added from Settings.
 - A Home Assistant
   [long-lived access token](https://www.home-assistant.io/docs/authentication/#your-account-profile)
   (HA → Profile → Security → Long-lived access tokens)
@@ -126,8 +132,8 @@ detail, and speech model downloads:
 ## Quick start with Docker
 
 The fastest way to run SAWOT is the prebuilt CPU image. You need Docker, a
-Home Assistant long-lived access token, and LM Studio (or any
-OpenAI-compatible server) running on the same machine or LAN.
+Home Assistant long-lived access token, and an OpenAI-compatible model
+server running on the same machine or LAN.
 
 ```bash
 git clone https://github.com/Edmasoud95/sawot.git && cd sawot
@@ -142,8 +148,9 @@ settings, chat history — lands in `./data`, so `docker compose pull && docker
 compose up -d` upgrades without losing anything.
 
 Inside the container, `host.docker.internal` is the machine running Docker,
-which is where the LM Studio default points. Set `LM_STUDIO_URL` in `.env`
-if it runs elsewhere.
+which is where the built-in model server URL points by default (port 1234).
+Set `LM_STUDIO_URL` in `.env` if your server listens elsewhere, for example
+`http://host.docker.internal:11434/v1` for Ollama.
 
 The image is CPU-only and **x86_64 only**: the transcribe.cpp native wheel
 has no ARM build yet, so Raspberry Pi and Apple Silicon Docker hosts are not
@@ -156,7 +163,7 @@ the UI behind Home Assistant's own login through ingress.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-cp config.example.yaml config.yaml   # HA URL, LM Studio URL, model name
+cp config.example.yaml config.yaml   # HA URL, model server URL, model name
 cp .env.example .env                 # paste your HA token
 (cd ts-backend && npm install && npm run build)   # TypeScript backend
 (cd web && npm install && npm run build)          # UI into web/dist
@@ -165,7 +172,7 @@ cp .env.example .env                 # paste your HA token
 > **Tip — setup wizard:** `.venv/bin/python scripts/setup.py` walks through
 > configuration and downloads the STT + TTS models in one go.
 
-If LM Studio runs on the Windows host under WSL2, find its IP with
+If your model server runs on the Windows host under WSL2, find its IP with
 `ip route show | grep default`.
 
 ## Configuration
@@ -175,8 +182,8 @@ Edit `config.yaml`:
 | Key | Description |
 | --- | --- |
 | `home_assistant.url` | Your Home Assistant URL |
-| `lm_studio.url` | LM Studio server URL (LAN IP of the host) |
-| `lm_studio.model` | The tool-calling model loaded in LM Studio |
+| `lm_studio.url` | Built-in model server: any OpenAI-compatible `/v1` URL (the key name is historical) |
+| `lm_studio.model` | The tool-calling model to use on it (or pick one from Settings) |
 | `stt.model` | STT model id (default `cohere-transcribe`; see Settings for the list) |
 | `stt.language` | Transcription language (default `en`) |
 | `tts.voice` | Kokoro voice (see the Settings panel for the list) |

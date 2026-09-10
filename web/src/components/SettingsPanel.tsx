@@ -365,7 +365,7 @@ export default function SettingsPanel() {
                   />
                   {data.models_error && (
                     <p className="-mt-3 text-[0.75rem] leading-snug text-red-400/90">
-                      Can't reach LM Studio — showing the last saved model.
+                      Can't reach the local model server — showing the last saved model.
                     </p>
                   )}
                   <Select

@@ -10,7 +10,7 @@ orb-centered interface and fluid ink animation. The GitHub repository is
 
 - `web/`: React, TypeScript, Vite, Zustand, Three.js/React Three Fiber.
 - `ts-backend/`: Fastify, voice WebSocket pipeline, chat streaming, Home Assistant
-  tools, provider registry, and settings.
+  tools, provider registry (built-in local server plus custom OpenAI-compatible providers), and settings.
 - `sidecar/`: Python FastAPI speech service.
 - `server/`: shared Python speech engines, model management, configuration, and
   OpenAI-compatible audio routes. Current STT uses `transcribe-cpp`; TTS uses Kokoro.

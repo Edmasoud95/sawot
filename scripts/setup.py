@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """SAWOT setup wizard: configure and download models.
 
-Walks through configuration (Home Assistant, LM Studio) and downloads the
+Walks through configuration (Home Assistant, model server) and downloads the
 speech-to-text and text-to-speech models, then writes config.yaml and .env.
 
 Usage:
@@ -100,8 +100,8 @@ def main():
     print("\n--- Configuration ---")
     ha_url = ask("Home Assistant URL", "http://192.168.1.10:8123")
     ha_token = ask("Home Assistant long-lived access token")
-    lm_url = ask("LM Studio URL", "http://192.168.1.11:1234/v1")
-    lm_model = ask("LM Studio model name", "qwen3-8b")
+    lm_url = ask("Model server URL (any OpenAI-compatible /v1 endpoint)", "http://192.168.1.11:1234/v1")
+    lm_model = ask("Model name", "gemma-4")
 
     print("\n--- Models ---")
     ok_stt = is_downloaded(stt) or download_model(stt)
