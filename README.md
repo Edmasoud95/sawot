@@ -22,12 +22,13 @@ you ask about the heating, a smile when it is pleased with itself.
   TTS pipeline with live per-turn latency traces.
 - **Expressive orb** — 6,144 persistent ink particles inside a lensed glass
   sphere. The particles gather into a torus knot while the model thinks, ripple
-  with the reply as it is spoken, and form whatever the model chooses to show:
-  one of 28 catalogue shapes (faces, home symbols, statuses, weather), a short
-  text or number readout, or anything at all as a free-hand sketch. The model
-  is free to draw whatever it likes in any reply, and asking it to draw
-  something (a cat, your house, a mood) always gets a drawing. Shapes are
-  formed by moving the existing ink, never by swapping in an icon.
+  with the reply as it is spoken, and form what the model chooses to show.
+  With every reply the model can either pick one of 28 predefined shapes
+  (faces, home symbols, statuses, weather), show a short text or number
+  readout, or free-hand sketch whatever it wants. Sketch quality scales with
+  the model: a large model draws a recognisable cat or house, a small one
+  should stick to the predefined shapes. Shapes are formed by moving the
+  existing ink, never by swapping in an icon.
 - **Home Assistant control** — the model uses tools (`get_entities`,
   `call_service`) to list and control your devices, then shows touch-first
   control cards for anything it touched. Verified temperature readings from
@@ -206,24 +207,31 @@ access (accept the certificate warning once per device).
 
 ### How the orb draws
 
-The model may start a spoken reply with a hidden marker, or call the
-`show_on_orb` tool, to pick what the ink forms:
+With every reply the model decides what the ink forms, either through a
+hidden marker at the start of the spoken text or by calling the
+`show_on_orb` tool. It has three options:
 
-- a **catalogue shape** such as `bulb`, `thermometer`, `lock`, `happy`, `rain`
-  (the full list with meanings is in `ts-backend/src/expressions.ts`);
+- a **predefined shape** from the catalogue of 28, such as `bulb`,
+  `thermometer`, `lock`, `happy`, `rain` (the full list with meanings is in
+  `ts-backend/src/expressions.ts`). These always look right because the
+  outlines are built in;
 - a **readout** of up to twelve characters, on one or two lines;
-- a **sketch** of free polylines in a unit square. The prompt tells the
-  model it can draw anything it wants, whenever it wants, and never to refuse
-  a drawing request: people become stick figures, faces a circle with
-  features, feelings and abstract ideas a symbol. Turn on **Detailed
-  drawings** in Settings to let it use filled primitives (circles, ellipses,
-  rectangles, polygons, arcs) and more strokes.
+- a **free-hand sketch** of anything it wants, as polylines in a unit square.
+  The prompt tells the model never to refuse a drawing request: people become
+  stick figures, faces a circle with features, feelings and abstract ideas a
+  symbol. Turn on **Detailed drawings** in Settings to let it use filled
+  primitives (circles, ellipses, rectangles, polygons, arcs) and more strokes.
+
+How good the sketches are depends entirely on the model. Large models
+(Qwen3-32B, DeepSeek, GPT-class) produce recognisable drawings; small models
+(8B and under) tend to produce scribbles, so with those it is better to rely
+on the predefined shapes and readouts.
 
 The backend validates and strips the markers, so nothing reaches speech,
 captions, or history. Device actions form their own symbols while a tool runs,
 and a verified temperature reading outranks everything else. Every final reply
 is appended to `data/orb-replies.log` with its parsed expression so a missing
-drawing can be diagnosed. Sketch quality depends on the model.
+drawing can be diagnosed.
 
 ### Devices (grid icon)
 
