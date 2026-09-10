@@ -1,0 +1,35 @@
+name: Release
+
+# Push a tag like v0.2.0 to cut a release. The Docker workflow builds the
+# matching image tag from the same push; this one publishes the GitHub
+# release with notes generated from the merged pull requests and commits.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          cat > notes.md <<EOF
+          Docker image: \`ghcr.io/${GITHUB_REPOSITORY,,}:${version}\`
+
+          \`\`\`bash
+          docker compose pull && docker compose up -d
+          \`\`\`
+          EOF
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes-file notes.md \
+            --generate-notes \
+            $([[ "$version" == 0.* ]] && echo --prerelease)

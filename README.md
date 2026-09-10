@@ -152,6 +152,11 @@ which is where the built-in model server URL points by default (port 1234).
 Set `LLM_URL` in `.env` if your server listens elsewhere, for example
 `http://host.docker.internal:11434/v1` for Ollama.
 
+`latest` follows the main branch. To stay on a fixed version, pin a release
+tag such as `ghcr.io/edmasoud95/sawot:0.1.0` in `docker-compose.yml`; every
+[release](https://github.com/Edmasoud95/sawot/releases) publishes a matching
+image tag.
+
 The image is CPU-only and **x86_64 only**: the transcribe.cpp native wheel
 has no ARM build yet, so Raspberry Pi and Apple Silicon Docker hosts are not
 supported for now. Speech runs well on a modern CPU; a GPU image is planned.
