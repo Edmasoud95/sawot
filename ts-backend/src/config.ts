@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parse } from "yaml";
 import { config as loadEnv } from "dotenv";
 
@@ -20,6 +20,9 @@ export interface Config {
   sslCertfile?: string;
   sslKeyfile?: string;
   sidecarUrl: string;
+  /** Where settings.json, data/ and models/ live (SAWOT_DATA_DIR, else
+   *  beside config.yaml). */
+  dataDir: string;
 }
 
 function resolveUp(path: string): string {
@@ -29,31 +32,83 @@ function resolveUp(path: string): string {
   return path;
 }
 
-export function loadConfig(path = "config.yaml"): Config {
+// Environment variable -> path into the YAML document; the environment wins,
+// so a container can run with no config.yaml at all.
+const ENV_KEYS: Record<string, string[]> = {
+  HA_URL: ["home_assistant", "url"],
+  LM_STUDIO_URL: ["lm_studio", "url"],
+  LM_STUDIO_MODEL: ["lm_studio", "model"],
+  STT_MODEL: ["stt", "model"],
+  STT_LANGUAGE: ["stt", "language"],
+  TTS_VOICE: ["tts", "voice"],
+  TTS_LANG_CODE: ["tts", "lang_code"],
+  ASSISTANT_NAME: ["assistant", "name"],
+  ASSISTANT_PERSONALITY: ["assistant", "personality"],
+  SERVER_HOST: ["server", "host"],
+  SERVER_PORT: ["server", "port"],
+  TLS_CERTFILE: ["tls", "certfile"],
+  TLS_KEYFILE: ["tls", "keyfile"],
+};
+
+const DEFAULTS: Record<string, string | number> = {
+  "lm_studio.url": "http://localhost:1234/v1",
+  "lm_studio.model": "",
+  "stt.model": "cohere-transcribe",
+  "stt.language": "en",
+  "tts.voice": "af_heart",
+  "tts.lang_code": "a",
+  "assistant.name": "Rita",
+  "assistant.personality": "sassy",
+  "server.host": "0.0.0.0",
+  "server.port": 8765,
+};
+
+function lookup(raw: any, path: string[]): unknown {
+  let node = raw;
+  for (const key of path) {
+    if (!node || typeof node !== "object" || !(key in node)) return undefined;
+    node = node[key];
+  }
+  return node;
+}
+
+export function loadConfig(path = "config.yaml", env: NodeJS.ProcessEnv = process.env): Config {
   const cfgPath = resolveUp(path);
-  loadEnv({ path: join(dirname(cfgPath), ".env") });
-  const raw: any = parse(readFileSync(cfgPath, "utf8"));
+  const cfgDir = dirname(cfgPath);
+  // .env beside the config file fills in unset variables only.
+  if (env === process.env) loadEnv({ path: join(cfgDir, ".env"), quiet: true });
+  const raw: any = existsSync(cfgPath) ? parse(readFileSync(cfgPath, "utf8")) ?? {} : {};
 
-  const token = process.env.HA_TOKEN;
-  if (!token) throw new Error("HA_TOKEN is not set (put it in .env)");
+  const get = (...p: string[]): unknown => {
+    for (const [envKey, envPath] of Object.entries(ENV_KEYS)) {
+      if (envPath.join(".") === p.join(".") && env[envKey]) return env[envKey];
+    }
+    const value = lookup(raw, p);
+    return value === undefined || value === null ? DEFAULTS[p.join(".")] : value;
+  };
 
-  const assistant = raw.assistant ?? {};
+  const token = env.HA_TOKEN;
+  if (!token) throw new Error("HA_TOKEN is not set (put it in .env or the environment)");
+  const haUrl = get("home_assistant", "url");
+  if (!haUrl) throw new Error("HA_URL is not set (home_assistant.url in config.yaml or the HA_URL environment variable)");
+
   return {
-    haUrl: String(raw.home_assistant.url).replace(/\/+$/, ""),
+    haUrl: String(haUrl).replace(/\/+$/, ""),
     haToken: token,
-    lmstudioUrl: String(raw.lm_studio.url).replace(/\/+$/, ""),
-    lmstudioModel: raw.lm_studio.model,
-    sttModel: raw.stt.model,
-    sttLanguage: raw.stt.language ?? "en",
-    ttsVoice: raw.tts.voice,
-    ttsLangCode: raw.tts.lang_code ?? "a",
-    assistantName: assistant.name ?? "Rita",
-    assistantSassy: (assistant.personality ?? "sassy") !== "plain",
-    host: raw.server?.host ?? "0.0.0.0",
-    port: Number(raw.server?.port ?? 8765),
+    lmstudioUrl: String(get("lm_studio", "url")).replace(/\/+$/, ""),
+    lmstudioModel: String(get("lm_studio", "model")),
+    sttModel: String(get("stt", "model")),
+    sttLanguage: String(get("stt", "language")),
+    ttsVoice: String(get("tts", "voice")),
+    ttsLangCode: String(get("tts", "lang_code")),
+    assistantName: String(get("assistant", "name")),
+    assistantSassy: get("assistant", "personality") !== "plain",
+    host: String(get("server", "host")),
+    port: Number(get("server", "port")),
     allowedControls: raw.controls,
-    sslCertfile: raw.tls?.certfile,
-    sslKeyfile: raw.tls?.keyfile,
-    sidecarUrl: process.env.SAWOT_SIDECAR_URL ?? "http://127.0.0.1:8766",
+    sslCertfile: get("tls", "certfile") as string | undefined,
+    sslKeyfile: get("tls", "keyfile") as string | undefined,
+    sidecarUrl: env.SAWOT_SIDECAR_URL ?? "http://127.0.0.1:8766",
+    dataDir: env.SAWOT_DATA_DIR ?? resolve(cfgDir),
   };
 }

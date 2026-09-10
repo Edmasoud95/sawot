@@ -1,3 +1,20 @@
+/** A failed sidecar call, carrying the sidecar's own explanation when it gave
+ *  one (for example "model not downloaded yet"). */
+export class InferenceError extends Error {
+  constructor(public readonly status: number, public readonly detail: string | null, what: string) {
+    super(`${what} failed: ${status}${detail ? " — " + detail : ""}`);
+  }
+}
+
+async function fail(resp: Response, what: string): Promise<never> {
+  let detail: string | null = null;
+  try {
+    const body: any = await resp.json();
+    if (typeof body?.detail === "string") detail = body.detail;
+  } catch { /* not JSON */ }
+  throw new InferenceError(resp.status, detail, what);
+}
+
 export class InferenceClient {
   constructor(private baseUrl: string) {}
 
@@ -15,7 +32,7 @@ export class InferenceClient {
       method: "POST",
       body: form,
     });
-    if (!resp.ok) throw new Error("transcribe failed: " + resp.status);
+    if (!resp.ok) await fail(resp, "transcribe");
     const data = await resp.json();
     return data.text ?? "";
   }
@@ -33,7 +50,7 @@ export class InferenceClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ input: text, voice, response_format: "wav" }),
     });
-    if (!resp.ok) throw new Error("synthesize failed: " + resp.status);
+    if (!resp.ok) await fail(resp, "synthesize");
     return Buffer.from(await resp.arrayBuffer());
   }
 }

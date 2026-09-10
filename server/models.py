@@ -5,6 +5,7 @@ directory. The registry lists each model with its HuggingFace source and an
 approximate size; the recommended model for each kind is flagged for the UI.
 """
 
+import os
 import asyncio
 import logging
 from dataclasses import dataclass
@@ -17,7 +18,8 @@ from server.settings import KOKORO_VOICES
 
 logger = logging.getLogger("voice.models")
 
-MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
+# Models live under SAWOT_DATA_DIR when set (the Docker volume), else the repo.
+MODELS_DIR = Path(os.environ.get("SAWOT_DATA_DIR") or Path(__file__).resolve().parent.parent) / "models"
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,24 @@
+# Quick start:
+#   cp .env.example .env      # set HA_URL and HA_TOKEN
+#   docker compose up -d
+# then open http://localhost:8765 and download the speech models from Settings.
+#
+# LM Studio (or any OpenAI-compatible server) runs outside the container;
+# host.docker.internal points at the machine running Docker.
+services:
+  sawot:
+    image: ghcr.io/edmasoud95/sawot:latest
+    build: .
+    ports:
+      - "8765:8765"
+    environment:
+      HA_URL: ${HA_URL:?set HA_URL in .env}
+      HA_TOKEN: ${HA_TOKEN:?set HA_TOKEN in .env}
+      LM_STUDIO_URL: ${LM_STUDIO_URL:-http://host.docker.internal:1234/v1}
+      LM_STUDIO_MODEL: ${LM_STUDIO_MODEL:-}
+      ASSISTANT_PERSONALITY: ${ASSISTANT_PERSONALITY:-sassy}
+    volumes:
+      - ./data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

@@ -107,6 +107,8 @@ detail, and speech model downloads:
   `web/dist/`. The ink simulation, shape fields, stroke font, and shader live
   under `web/src/lib/` and `web/src/shaders/`.
 - `config.yaml` + `.env` — runtime configuration and the HA token.
+- `Dockerfile` + `docker-compose.yml` — one CPU image running both processes,
+  published to `ghcr.io/edmasoud95/sawot` on every push to main.
 
 ## Prerequisites
 
@@ -121,7 +123,30 @@ detail, and speech model downloads:
   [long-lived access token](https://www.home-assistant.io/docs/authentication/#your-account-profile)
   (HA → Profile → Security → Long-lived access tokens)
 
-## Setup
+## Quick start with Docker
+
+The fastest way to run SAWOT is the prebuilt CPU image. You need Docker, a
+Home Assistant long-lived access token, and LM Studio (or any
+OpenAI-compatible server) running on the same machine or LAN.
+
+```bash
+git clone https://github.com/Edmasoud95/sawot.git && cd sawot
+cp .env.example .env      # set HA_URL and HA_TOKEN
+docker compose up -d
+```
+
+Open <http://localhost:8765>, then download the speech models from Settings
+(Cohere Transcribe and Kokoro are the recommended defaults) and pick a model
+from your provider. Everything the container writes — downloaded models,
+settings, chat history — lands in `./data`, so `docker compose pull && docker
+compose up -d` upgrades without losing anything.
+
+Inside the container, `host.docker.internal` is the machine running Docker,
+which is where the LM Studio default points. Set `LM_STUDIO_URL` in `.env`
+if it runs elsewhere. The image is CPU-only (x86_64); speech works well on a
+modern CPU, and a GPU image is planned.
+
+## Setup (native)
 
 ```bash
 python3 -m venv .venv
@@ -158,6 +183,21 @@ Edit `config.yaml`:
 | `tls.certfile` / `tls.keyfile` | Optional — required for phone mic access over https |
 
 Put your Home Assistant token in `.env` as `HA_TOKEN=...`.
+
+Every key can also come from the environment, which wins over the file, so a
+container needs no `config.yaml` at all. Only `HA_URL` and `HA_TOKEN` are
+required; the rest default to the values above.
+
+| Environment variable | `config.yaml` key |
+| --- | --- |
+| `HA_URL` | `home_assistant.url` |
+| `LM_STUDIO_URL` / `LM_STUDIO_MODEL` | `lm_studio.url` / `lm_studio.model` |
+| `STT_MODEL` / `STT_LANGUAGE` | `stt.model` / `stt.language` |
+| `TTS_VOICE` / `TTS_LANG_CODE` | `tts.voice` / `tts.lang_code` |
+| `ASSISTANT_NAME` / `ASSISTANT_PERSONALITY` | `assistant.name` / `assistant.personality` |
+| `SERVER_HOST` / `SERVER_PORT` | `server.host` / `server.port` |
+| `TLS_CERTFILE` / `TLS_KEYFILE` | `tls.certfile` / `tls.keyfile` |
+| `SAWOT_DATA_DIR` | where `settings.json`, `data/` and `models/` live (default: beside `config.yaml`; `/data` in Docker) |
 
 Custom LLM providers and their API keys are added from Settings and stored in
 `settings.json` (gitignored). Keys are never returned by the API.

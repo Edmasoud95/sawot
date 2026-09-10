@@ -44,3 +44,11 @@ def test_decode_to_pcm_rejects_garbage():
 
     with pytest.raises(RuntimeError, match="ffmpeg"):
         stt_mod.decode_to_pcm(b"not audio at all")
+
+
+def test_missing_stt_reports_which_model_to_download():
+    import pytest
+
+    engine = stt_mod.MissingSTT("cohere-transcribe")
+    with pytest.raises(stt_mod.ModelNotDownloaded, match="cohere-transcribe.*Settings"):
+        engine.transcribe(b"audio")

@@ -9,6 +9,8 @@ import asyncio
 import subprocess
 
 from fastapi import File, Form, HTTPException, UploadFile
+
+from server.stt import ModelNotDownloaded
 from fastapi.responses import Response
 
 # response_format -> (ffmpeg output format, media type). "wav" is native.
@@ -53,10 +55,13 @@ def register_openai_api(app, state) -> None:
         if fmt not in _FFMPEG_FMTS:
             raise HTTPException(400, f"unsupported response_format: {fmt}")
 
-        if voice is not None:
-            wav = await asyncio.to_thread(state.tts.synthesize, text, voice)
-        else:
-            wav = await asyncio.to_thread(state.tts.synthesize, text)
+        try:
+            if voice is not None:
+                wav = await asyncio.to_thread(state.tts.synthesize, text, voice)
+            else:
+                wav = await asyncio.to_thread(state.tts.synthesize, text)
+        except ModelNotDownloaded as exc:
+            raise HTTPException(503, str(exc))
 
         if fmt == "wav" and speed == 1.0:
             return Response(content=wav, media_type="audio/wav")
@@ -76,7 +81,10 @@ def register_openai_api(app, state) -> None:
         data = await file.read()
         if not data:
             raise HTTPException(400, "empty audio file")
-        text = await asyncio.to_thread(state.stt.transcribe, data, language=language)
+        try:
+            text = await asyncio.to_thread(state.stt.transcribe, data, language=language)
+        except ModelNotDownloaded as exc:
+            raise HTTPException(503, str(exc))
         if response_format == "text":
             return Response(content=text, media_type="text/plain")
         if response_format == "verbose_json":

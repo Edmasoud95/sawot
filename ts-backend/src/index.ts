@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import Fastify from "fastify";
@@ -66,10 +66,13 @@ async function handleControl(
 async function main() {
   const config = loadConfig();
   const root = repoRoot();
+  const dataDir = config.dataDir;
+  mkdirSync(join(dataDir, "data"), { recursive: true });
+  Agent.replyLogPath = join(dataDir, "data", "orb-replies.log");
   const https = config.sslCertfile && config.sslKeyfile
     ? {
-        key: readFileSync(join(root, config.sslKeyfile)),
-        cert: readFileSync(join(root, config.sslCertfile)),
+        key: readFileSync(resolve(dataDir, config.sslKeyfile)),
+        cert: readFileSync(resolve(dataDir, config.sslCertfile)),
       }
     : undefined;
   // Fastify serves HTTPS when `https` is passed at construction; its types
@@ -85,7 +88,7 @@ async function main() {
   const ha = new HomeAssistant(config.haUrl, config.haToken);
   const tools = buildHaTools(ha);
 
-  const store = new SettingsStore(join(root, "settings.json"));
+  const store = new SettingsStore(join(dataDir, "settings.json"));
   const overrides = store.load();
   const registry = new ProviderRegistry(
     { id: "lm-studio", name: "LM Studio", baseUrl: config.lmstudioUrl, builtin: true },
@@ -135,11 +138,11 @@ async function main() {
   });
 
   const chatCtx: ChatCtx = {
-    store: new ChatStore(join(root, "data", "conversations")),
+    store: new ChatStore(join(dataDir, "data", "conversations")),
     resolve: (model) => registry.resolve(model),
     tools,
     ha,
-    uploadDir: join(root, "data", "uploads"),
+    uploadDir: join(dataDir, "data", "uploads"),
     getSystemPrompt: () => systemPrompt,
     getDefaultModel: () => state.model,
   };

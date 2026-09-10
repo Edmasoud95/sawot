@@ -142,3 +142,12 @@ def test_models_lists_stt_and_tts():
     assert resp.status_code == 200
     ids = [m["id"] for m in resp.json()["data"]]
     assert ids == ["whisper-small", "kokoro"]  # the TTS entry is the model, not a voice
+
+
+def test_transcription_without_a_model_is_503_with_a_hint():
+    from server.stt import MissingSTT
+
+    client, _ = make_client(stt=MissingSTT("cohere-transcribe"))
+    resp = client.post("/v1/audio/transcriptions", files={"file": ("a.webm", b"audio", "audio/webm")})
+    assert resp.status_code == 503
+    assert "not downloaded" in resp.json()["detail"]

@@ -9,6 +9,24 @@ class STTEngine(Protocol):
     def transcribe(self, audio: bytes, language: str | None = None) -> str: ...
 
 
+class ModelNotDownloaded(RuntimeError):
+    """The configured speech model has not been downloaded yet."""
+
+
+class MissingSTT:
+    """Placeholder engine for a fresh install: the sidecar starts without a
+    model and answers every request with a clear message until one is
+    downloaded and selected from Settings."""
+
+    def __init__(self, model_id: str):
+        self.model_id = model_id
+
+    def transcribe(self, audio: bytes, language: str | None = None) -> str:
+        raise ModelNotDownloaded(
+            f"speech-to-text model '{self.model_id}' is not downloaded yet — open Settings and download it"
+        )
+
+
 def decode_to_pcm(audio: bytes, sample_rate: int = 16000):
     """Decode browser audio (webm/wav/ogg) to mono float32 PCM via ffmpeg."""
     import numpy as np

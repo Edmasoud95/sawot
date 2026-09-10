@@ -14,6 +14,8 @@ orb-centered interface and fluid ink animation. The GitHub repository is
 - `sidecar/`: Python FastAPI speech service.
 - `server/`: shared Python speech engines, model management, configuration, and
   OpenAI-compatible audio routes. Current STT uses `transcribe-cpp`; TTS uses Kokoro.
+- `Dockerfile`, `docker/entrypoint.sh`, `docker-compose.yml`: the CPU container; both config
+  loaders accept environment variables and `SAWOT_DATA_DIR` for the volume.
 - `tests/`: Python tests. `ts-backend/tests/` and `web/tests/`: TypeScript regression tests.
 - `screenshots/redesign/`: visual references and notes. Some screenshots represent
   earlier iterations; inspect current code and rendering before treating them as a specification.

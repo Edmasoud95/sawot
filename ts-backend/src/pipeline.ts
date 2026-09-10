@@ -1,6 +1,11 @@
 import type { TemperatureReading } from "./temperature.js";
 import type { Agent, HistoryMessage } from "./agent.js";
-import type { InferenceClient } from "./inference.js";
+import { InferenceError, type InferenceClient } from "./inference.js";
+
+/** The sidecar's own explanation when it gave one, else a generic message. */
+function speechError(e: unknown): string {
+  return e instanceof InferenceError && e.detail ? e.detail : "speech engine offline";
+}
 
 export type SendFn = (kind: string, payload: any) => void | Promise<void>;
 
@@ -18,8 +23,8 @@ export async function runVoiceTurn(
   let text: string;
   try {
     text = await inference.transcribe(audio);
-  } catch {
-    await send("error", { message: "speech engine offline" });
+  } catch (e) {
+    await send("error", { message: speechError(e) });
     return;
   }
   await send("debug", {
@@ -95,8 +100,8 @@ export async function runVoiceTurn(
   let wav: Buffer;
   try {
     wav = await inference.synthesize(reply, voice);
-  } catch {
-    await send("error", { message: "speech engine offline" });
+  } catch (e) {
+    await send("error", { message: speechError(e) });
     return;
   }
   await send("debug", {

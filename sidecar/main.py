@@ -18,10 +18,10 @@ from dotenv import load_dotenv
 from sidecar.app import create_sidecar_app
 from server.config import load_config
 from server.models import get_model, is_downloaded
-from server.stt import make_stt_engine
+from server.stt import MissingSTT, make_stt_engine
 from server.tts import make_tts_engine
 
-SETTINGS_PATH = Path("settings.json")
+SETTINGS_PATH = Path(os.environ.get("SAWOT_DATA_DIR", ".")) / "settings.json"
 
 
 def _override(kind: str) -> str | None:
@@ -67,8 +67,15 @@ async def _main() -> None:
         return make_stt_engine(model_id, language=config.stt_language)
 
     stt_model = _stt_override() or config.stt_model
-    logger.info("loading STT model %s", stt_model)
-    stt = stt_factory(stt_model)
+    stt_spec = get_model("stt", stt_model)
+    if stt_spec is not None and not is_downloaded(stt_spec):
+        # Fresh install: start anyway and let Settings download a model.
+        logger.warning("STT model %s is not downloaded; open Settings to download it", stt_model)
+        stt = MissingSTT(stt_model)
+        stt_model = ""  # nothing active, so selecting it after download loads it
+    else:
+        logger.info("loading STT model %s", stt_model)
+        stt = stt_factory(stt_model)
 
     def tts_factory(model_id: str):
         return make_tts_engine(model_id, voice=config.tts_voice, lang_code=config.tts_lang_code)

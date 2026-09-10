@@ -138,3 +138,60 @@ def test_load_config_tls_defaults_to_none(tmp_path, monkeypatch):
     cfg = load_config(str(cfg_file))
     assert cfg.ssl_certfile is None
     assert cfg.ssl_keyfile is None
+
+
+def test_load_config_from_environment_only(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # no config.yaml here
+    monkeypatch.setenv("HA_URL", "http://ha.local:8123/")
+    monkeypatch.setenv("HA_TOKEN", "t")
+    monkeypatch.setenv("LM_STUDIO_URL", "http://host.docker.internal:1234/v1/")
+    monkeypatch.setenv("LM_STUDIO_MODEL", "qwen3-8b")
+    monkeypatch.setenv("STT_LANGUAGE", "de")
+    monkeypatch.setenv("ASSISTANT_PERSONALITY", "plain")
+    monkeypatch.setenv("SERVER_PORT", "9000")
+
+    cfg = load_config()
+
+    assert cfg.ha_url == "http://ha.local:8123"
+    assert cfg.lmstudio_url == "http://host.docker.internal:1234/v1"
+    assert cfg.lmstudio_model == "qwen3-8b"
+    assert cfg.stt_language == "de"
+    assert cfg.assistant_sassy is False
+    assert cfg.port == 9000
+    # Defaults for everything not given
+    assert cfg.stt_model == "cohere-transcribe"
+    assert cfg.tts_voice == "af_heart"
+    assert cfg.host == "0.0.0.0"
+    assert cfg.assistant_name == "Rita"
+
+
+def test_environment_overrides_yaml(tmp_path, monkeypatch):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(textwrap.dedent("""
+        home_assistant:
+          url: "http://yaml.local:8123"
+        lm_studio:
+          url: "http://localhost:1234/v1"
+          model: "from-yaml"
+        stt:
+          model: "distil-small.en"
+        tts:
+          voice: "af_heart"
+        server: {}
+    """))
+    monkeypatch.setenv("HA_TOKEN", "t")
+    monkeypatch.setenv("HA_URL", "http://env.local:8123")
+    monkeypatch.delenv("LM_STUDIO_MODEL", raising=False)
+
+    cfg = load_config(str(cfg_file))
+
+    assert cfg.ha_url == "http://env.local:8123"
+    assert cfg.lmstudio_model == "from-yaml"
+
+
+def test_load_config_missing_ha_url_raises(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HA_TOKEN", "t")
+    monkeypatch.delenv("HA_URL", raising=False)
+    with pytest.raises(RuntimeError, match="HA_URL"):
+        load_config()
