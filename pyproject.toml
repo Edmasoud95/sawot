@@ -19,12 +19,10 @@ dependencies = [
   "openai",
   "pyyaml",
   "python-dotenv",
-  "faster-whisper",
+  "transcribe-cpp",
   "kokoro>=0.9",
   "soundfile",
   "numpy",
-  "nvidia-cublas-cu12; platform_system == 'Linux'",
-  "nvidia-cudnn-cu12>=9,<10; platform_system == 'Linux'",
   "pypdf",
 ]
 

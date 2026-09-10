@@ -2,7 +2,7 @@
 
 The TypeScript backend calls this small service for speech-to-text and
 text-to-speech. It isolates the only Python-native dependencies
-(faster-whisper, Kokoro) behind a tiny HTTP API on localhost.
+(transcribe.cpp, Kokoro) behind a tiny HTTP API on localhost.
 """
 
 from typing import Callable

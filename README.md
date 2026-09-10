@@ -1,77 +1,114 @@
 # SAWOT
 
 Fully local voice and chat assistant for Home Assistant: push-to-talk in the
-browser, [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
-speech-to-text, an LM Studio LLM with Home Assistant tool calling, and
+browser, CPU speech-to-text via
+[transcribe.cpp](https://github.com/handy-computer/transcribe.cpp), an LM
+Studio (or any OpenAI-compatible) LLM with Home Assistant tool calling, and
 [Kokoro](https://github.com/hexgrad/kokoro) text-to-speech — no cloud required.
+
+The assistant lives in a glass orb full of moving ink. The model chooses what
+the ink forms: a light bulb when it switches a lamp, a thermometer reading when
+you ask about the heating, a smile when it is pleased with itself.
 
 > **Security note:** this server has **no authentication** and can control
 > your devices over the network. Run it only on a trusted LAN, or bind
 > `server.host` to `127.0.0.1`. See [SECURITY.md](SECURITY.md).
 
+![Voice mode — the resting ink orb](screenshots/voice.png)
+
 ## Features
 
 - **Voice assistant** — hold the button, speak, release. Local STT → LLM →
   TTS pipeline with live per-turn latency traces.
+- **Expressive orb** — 6,144 persistent ink particles inside a lensed glass
+  sphere. The particles gather into a torus knot while the model thinks, ripple
+  with the reply as it is spoken, and form whatever the model chooses to show:
+  one of 28 catalogue shapes (faces, home symbols, statuses, weather), a short
+  text or number readout, or a free-hand sketch it draws itself. Shapes are
+  formed by moving the existing ink, never by swapping in an icon.
 - **Home Assistant control** — the model uses tools (`get_entities`,
-  `call_service`) to list and control your devices, then shows interactive
-  control cards for anything it touched.
-- **Advanced mode** — toggle lights and switches, set brightness and target
-  temperature directly from the cards.
+  `call_service`) to list and control your devices, then shows touch-first
+  control cards for anything it touched. Verified temperature readings from
+  your sensors and thermostats can be drawn as numeric ink.
+- **Devices view** — toggle lights and switches, drag brightness and colour
+  temperature bars, pick colours, and step thermostat targets directly from
+  the cards.
 - **Chat** — a ChatGPT-style interface with multiple server-stored
-  conversations, streaming replies, collapsible reasoning, and the same
-  Home Assistant tools.
+  conversations, streaming replies, collapsible reasoning, inline device
+  cards, and the same Home Assistant tools.
 - **Attachments** — upload images (vision models), text files, and PDFs
   (extracted text is sent inline to the model).
 - **Personality** — "Rita" ships with a sassy, teasing persona that you can
   switch off from Settings for a plain, friendly assistant.
-- **Live settings** — switch the LLM model and voice at runtime; choices
-  apply instantly and persist to `settings.json`.
+- **Custom providers** — add any OpenAI-compatible endpoint (OpenRouter,
+  Ollama, vLLM, OpenAI, …) with its API key from Settings. Every provider's
+  models appear in one searchable, fuzzy-filtered picker, each provider
+  loading on its own so a sleeping LM Studio never blocks the rest. Models
+  that only take tools through the Responses API (OpenAI's gpt-6 family) are
+  detected from the provider's first error and switched over automatically,
+  thinking included.
 - **Choice of speech engines** — Kokoro by default, or Resemble AI's
   Chatterbox Turbo and Nano (expressive, `[laugh]`-style tags, voice cloning
   from a short WAV). Download and switch from Settings.
-- **Custom providers** — add any OpenAI-compatible endpoint (OpenRouter,
-  Ollama, vLLM, OpenAI, …) with its API key from Settings; models from every
-  provider appear in the model pickers alongside LM Studio's.
-  Requests use chat completions; models that only take tools through the
-  Responses API (OpenAI's gpt-6 family) are detected from the provider's
-  first error and switched over automatically, thinking included.
+- **Live settings** — switch the model, voice, personality, and drawing detail
+  at runtime; choices apply instantly and persist to `settings.json`.
+- **Debug bar** — an optional diagnostics strip with a per-turn timeline
+  (STT, model, tools, TTS), every backend event, raw traffic in both
+  directions, and live state.
 - **OpenAI-compatible audio API** — `POST /v1/audio/speech` (TTS) and
   `POST /v1/audio/transcriptions` (STT) let any OpenAI SDK client use the
   local engines as a drop-in speech backend.
 
 ## Screenshots
 
-**Voice mode** — hold the button, speak, release:
+**The orb answers with ink** — a bulb after switching a light, and a
+thermometer reading on a phone:
 
-![Voice mode](screenshots/voice.png)
+![Bulb expression while speaking](screenshots/expression.png)
 
-**Chat mode** — text chat with tools and attachments:
+<img src="screenshots/readout-phone.png" alt="Temperature readout on a phone" width="390">
+
+**Devices** — control cards for everything the assistant touched:
+
+![Device cards](screenshots/devices.png)
+
+**Chat** — reasoning, streaming replies, and inline cards:
 
 ![Chat mode](screenshots/chat.png)
 
-**Settings** — model, voice, and personality:
+**Settings** — model picker across providers, voice, personality, drawing
+detail, and speech model downloads:
 
 ![Settings panel](screenshots/settings.png)
+
+<img src="screenshots/model-picker-phone.png" alt="Fuzzy model picker with one provider still loading" width="390">
+
+**Debug bar** — the turn timeline with the reply and its orb expression:
+
+![Debug bar](screenshots/debug.png)
 
 ## Architecture
 
 - `ts-backend/` — TypeScript (Fastify) backend: WebSocket voice pipeline, chat
-  (SSE), settings, Home Assistant client, and the LLM agent + tools. Proxies
-  STT/TTS to the Python sidecar.
-- `sidecar/` + `server/` — Python (FastAPI) inference sidecar: faster-whisper
-  STT, Kokoro TTS, and the model download manager.
-- `web/` — TypeScript (React + Vite) frontend, built into `web/dist/`.
+  (SSE), settings, provider registry, Home Assistant client, the LLM agent +
+  tools, and the orb expression catalogue. Proxies STT/TTS to the Python
+  sidecar.
+- `sidecar/` + `server/` — Python (FastAPI) inference sidecar: transcribe.cpp
+  STT, Kokoro / Chatterbox TTS, and the model download manager.
+- `web/` — TypeScript (React + Vite + Three.js) frontend, built into
+  `web/dist/`. The ink simulation, shape fields, stroke font, and shader live
+  under `web/src/lib/` and `web/src/shaders/`.
 - `config.yaml` + `.env` — runtime configuration and the HA token.
 
 ## Prerequisites
 
-- Linux (native or WSL2). Speech-to-text runs on CPU (ggml); text-to-speech
+- Linux (native or WSL2). Speech-to-text runs on CPU (GGUF); text-to-speech
   uses an NVIDIA GPU when present and falls back to CPU.
 - `sudo apt install espeak-ng ffmpeg`
 - Node.js 20+ and npm (TypeScript backend + frontend)
 - [LM Studio](https://lmstudio.ai/) running with a tool-calling model loaded
-  (recommended: Qwen3-8B Q4) and its local server enabled
+  (recommended: Qwen3-8B Q4) and its local server enabled — or any other
+  OpenAI-compatible provider added from Settings
 - A Home Assistant
   [long-lived access token](https://www.home-assistant.io/docs/authentication/#your-account-profile)
   (HA → Profile → Security → Long-lived access tokens)
@@ -114,6 +151,9 @@ Edit `config.yaml`:
 
 Put your Home Assistant token in `.env` as `HA_TOKEN=...`.
 
+Custom LLM providers and their API keys are added from Settings and stored in
+`settings.json` (gitignored). Keys are never returned by the API.
+
 ## Models
 
 Speech-to-text and text-to-speech models are downloaded on demand into a local
@@ -141,7 +181,6 @@ name. They need an optional package installed first, see
 `requirements-chatterbox.txt` for the exact commands, then download either
 model from Settings and click it to switch.
 
-
 ## Run
 
 ```bash
@@ -158,38 +197,72 @@ on your LAN (use `https://` when TLS is configured).
 
 ### Voice
 
-Hold the button, speak, release. With TLS configured (self-signed cert in
-`certs/`), use `https://` — required for phone microphone access (accept the
-certificate warning once per device).
+Hold the button, speak, release. Captions for what you said and what the
+assistant replied appear under the orb during a turn. With TLS configured
+(self-signed cert in `certs/`), use `https://` — required for phone microphone
+access (accept the certificate warning once per device).
 
-### Settings (gear, top-left)
+### How the orb draws
 
-Switch the LLM model (live list from LM Studio), the Kokoro voice, and the
-sassy personality — applied instantly and persisted.
+The model may start a spoken reply with a hidden marker, or call the
+`show_on_orb` tool, to pick what the ink forms:
 
-### Advanced mode (grid, top-right)
+- a **catalogue shape** such as `bulb`, `thermometer`, `lock`, `happy`, `rain`
+  (the full list with meanings is in `ts-backend/src/expressions.ts`);
+- a **readout** of up to twelve characters, on one or two lines;
+- a **sketch** of free polylines in a unit square. Turn on **Detailed
+  drawings** in Settings to let it use filled primitives (circles, ellipses,
+  rectangles, polygons, arcs) and more strokes.
 
-Replaces the orb with control cards for the devices each answer touched —
-toggle lights/switches, set brightness and target temperature.
+The backend validates and strips the markers, so nothing reaches speech,
+captions, or history. Device actions form their own symbols while a tool runs,
+and a verified temperature reading outranks everything else. Every final reply
+is appended to `data/orb-replies.log` with its parsed expression so a missing
+drawing can be diagnosed. Sketch quality depends on the model.
 
-### History & debug (dots, top-right)
+### Devices (grid icon)
 
-Conversation log; the **debug** toggle shows a per-turn pipeline trace
-(STT/LLM/tool/TTS timings and arguments).
+Control cards for the devices each answer touched — toggle lights and
+switches, drag brightness and warmth bars, pick colours, and step thermostat
+targets. Every target is at least 44 px for touch.
 
-### Chat (third position on the mode switch)
+### Chat (speech-bubble icon)
 
 Text chat with multiple server-stored conversations (`data/conversations/`),
 streaming replies with collapsible thinking, a per-conversation model picker,
 image/text/PDF uploads, the same Home Assistant tools, and inline device cards.
 
+### History (clock icon)
+
+The voice conversation log for this session, with a per-turn pipeline trace
+when the debug bar is on.
+
+### Settings (gear icon)
+
+Model (searchable across every provider), voice, sassy personality, detailed
+drawings, the debug bar, custom providers, and STT/TTS model downloads. Changes
+apply instantly and persist.
+
+### Debug bar
+
+Switch it on from Settings. Collapsed, it shows live tiles: status, last turn
+total, STT, model, and TTS latencies, tool call count, and server health.
+Expanded, it has four tabs — Timeline, Events, Messages, and State — a turn
+picker for the last twenty turns, and a Copy button that puts a turn's JSON on
+the clipboard. Chat mode emits the same events over its stream.
+
 ## Tests
 
 ```bash
-.venv/bin/pytest                     # Python sidecar (STT/TTS/models)
-(cd ts-backend && npm run typecheck) # TypeScript backend
-(cd web && npm run typecheck)        # frontend
+.venv/bin/pytest                                     # Python sidecar (STT/TTS/models)
+(cd ts-backend && npm run typecheck && npx tsx --test tests/*.test.ts)
+(cd web && npm run typecheck && npx vitest run)
 ```
+
+The TypeScript suites cover the provider registry and per-provider loading,
+the Responses API transport and reasoning fallback, expression parsing and the
+orb tool, temperature readings, the ink simulation, readout font, expression
+priority, fuzzy matching, and the debug store.
 
 ## Development
 
@@ -203,6 +276,13 @@ Backend dev: `cd ts-backend && npm run dev` (needs the sidecar running — see
   (`ts-backend/src/tools.ts`); Home Assistant tools are one provided set
   (`buildHaTools`). Add a `Tool` and pass it to `Agent` to teach the assistant
   new skills.
+- **Expressions** — add a name and meaning to the catalogue in
+  `ts-backend/src/expressions.ts` and a matching distance field in
+  `web/src/lib/inkShapes.ts`; the system prompt lists the catalogue
+  automatically.
+- **Providers** — `ts-backend/src/providers.ts` holds the registry; any
+  OpenAI-compatible endpoint works without code changes, and
+  `responsesTransport.ts` handles the Responses API for models that need it.
 - **Engines** — the Python sidecar exposes STT/TTS over HTTP
   (`server/stt.py`, `server/tts.py`); swap them for any backend without touching
   the TypeScript code.

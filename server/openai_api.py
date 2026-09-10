@@ -1,7 +1,7 @@
 """OpenAI-compatible audio endpoints over the local STT/TTS engines.
 
 Exposes POST /v1/audio/speech (Kokoro TTS) and POST /v1/audio/transcriptions
-(faster-whisper STT) plus GET /v1/models, so OpenAI SDK clients can point at
+(transcribe.cpp STT) plus GET /v1/models, so OpenAI SDK clients can point at
 SAWOT as a drop-in local speech backend.
 """
 

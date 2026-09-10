@@ -4,7 +4,7 @@
 
 SAWOT is a voice and chat assistant for Home Assistant. Preserve its minimal,
 orb-centered interface and fluid ink animation. The GitHub repository is
-`Edmasoud95/sawot`; keep its visibility private unless the user requests otherwise.
+`Edmasoud95/sawot` and is public.
 
 ## Architecture
 
@@ -18,9 +18,8 @@ orb-centered interface and fluid ink animation. The GitHub repository is
 - `screenshots/redesign/`: visual references and notes. Some screenshots represent
   earlier iterations; inspect current code and rendering before treating them as a specification.
 
-Read the affected code before changing it. Parts of README.md and pyproject.toml
-still refer to the earlier faster-whisper implementation; requirements.txt and
-server/stt.py reflect the current speech stack. Do not assume those manifests agree.
+Read the affected code before changing it. requirements.txt, pyproject.toml and
+server/stt.py all describe the current transcribe-cpp speech stack.
 
 ## Development and verification
 
@@ -74,8 +73,8 @@ For documentation-only edits, check accuracy and `git diff --check`; builds are 
   and momentum through transitions. Do not substitute a cutout mask or icon overlay.
 - `web/src/lib/inkSimulation.ts` transports particles; `inkReadout.ts` generates
   numeric stroke destinations; `shaders/orb.ts` renders the accumulated ink.
-- The renderer accepts particle destinations, but arbitrary LLM-generated drawings
-  are only a discussed idea, not an implemented feature.
+- The model chooses expressions through hidden markers or the `show_on_orb` tool:
+  catalogue shapes, readouts, and sketches (`ts-backend/src/expressions.ts`).
 - `orbExpression.ts` owns expression selection, priority, and expiry. Device shapes
   take priority over sentiment; validated temperature readouts take priority over both.
 - Hidden model markers must stay out of speech, captions, and conversational history.
