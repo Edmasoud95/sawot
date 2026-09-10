@@ -1,5 +1,9 @@
 # SAWOT
 
+> **Work in progress.** SAWOT is under active development. Expect rough
+> edges, breaking changes between commits, and features that are documented
+> before they are finished. Feedback and issues are welcome.
+
 Fully local voice and chat assistant for Home Assistant: push-to-talk in the
 browser, CPU speech-to-text via
 [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp), an LM
