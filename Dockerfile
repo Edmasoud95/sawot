@@ -24,7 +24,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     SAWOT_DATA_DIR=/data \
     HF_HOME=/data/hf-cache \
-    LM_STUDIO_URL=http://host.docker.internal:1234/v1 \
+    LLM_URL=http://host.docker.internal:1234/v1 \
     SERVER_HOST=0.0.0.0 \
     SERVER_PORT=8765
 

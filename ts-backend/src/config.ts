@@ -6,8 +6,8 @@ import { config as loadEnv } from "dotenv";
 export interface Config {
   haUrl: string;
   haToken: string;
-  lmstudioUrl: string;
-  lmstudioModel: string;
+  llmUrl: string;
+  llmModel: string;
   sttModel: string;
   sttLanguage: string;
   ttsVoice: string;
@@ -36,8 +36,8 @@ function resolveUp(path: string): string {
 // so a container can run with no config.yaml at all.
 const ENV_KEYS: Record<string, string[]> = {
   HA_URL: ["home_assistant", "url"],
-  LM_STUDIO_URL: ["lm_studio", "url"],
-  LM_STUDIO_MODEL: ["lm_studio", "model"],
+  LLM_URL: ["llm", "url"],
+  LLM_MODEL: ["llm", "model"],
   STT_MODEL: ["stt", "model"],
   STT_LANGUAGE: ["stt", "language"],
   TTS_VOICE: ["tts", "voice"],
@@ -51,8 +51,8 @@ const ENV_KEYS: Record<string, string[]> = {
 };
 
 const DEFAULTS: Record<string, string | number> = {
-  "lm_studio.url": "http://localhost:1234/v1",
-  "lm_studio.model": "",
+  "llm.url": "http://localhost:1234/v1",
+  "llm.model": "",
   "stt.model": "cohere-transcribe",
   "stt.language": "en",
   "tts.voice": "af_heart",
@@ -95,8 +95,8 @@ export function loadConfig(path = "config.yaml", env: NodeJS.ProcessEnv = proces
   return {
     haUrl: String(haUrl).replace(/\/+$/, ""),
     haToken: token,
-    lmstudioUrl: String(get("lm_studio", "url")).replace(/\/+$/, ""),
-    lmstudioModel: String(get("lm_studio", "model")),
+    llmUrl: String(get("llm", "url")).replace(/\/+$/, ""),
+    llmModel: String(get("llm", "model")),
     sttModel: String(get("stt", "model")),
     sttLanguage: String(get("stt", "language")),
     ttsVoice: String(get("tts", "voice")),

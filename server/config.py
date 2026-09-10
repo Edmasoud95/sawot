@@ -10,8 +10,8 @@ import yaml
 class Config:
     ha_url: str
     ha_token: str
-    lmstudio_url: str
-    lmstudio_model: str
+    llm_url: str
+    llm_model: str
     stt_model: str
     stt_language: str
     tts_voice: str
@@ -29,8 +29,8 @@ class Config:
 # over the file, so a container can run with no config.yaml at all.
 ENV_KEYS: dict[str, tuple[str, ...]] = {
     "HA_URL": ("home_assistant", "url"),
-    "LM_STUDIO_URL": ("lm_studio", "url"),
-    "LM_STUDIO_MODEL": ("lm_studio", "model"),
+    "LLM_URL": ("llm", "url"),
+    "LLM_MODEL": ("llm", "model"),
     "STT_MODEL": ("stt", "model"),
     "STT_LANGUAGE": ("stt", "language"),
     "TTS_VOICE": ("tts", "voice"),
@@ -44,8 +44,8 @@ ENV_KEYS: dict[str, tuple[str, ...]] = {
 }
 
 DEFAULTS = {
-    ("lm_studio", "url"): "http://localhost:1234/v1",
-    ("lm_studio", "model"): "",
+    ("llm", "url"): "http://localhost:1234/v1",
+    ("llm", "model"): "",
     ("stt", "model"): "cohere-transcribe",
     ("stt", "language"): "en",
     ("tts", "voice"): "af_heart",
@@ -110,8 +110,8 @@ def load_config(
     return Config(
         ha_url=str(ha_url).rstrip("/"),
         ha_token=token,
-        lmstudio_url=str(get(("lm_studio", "url"))).rstrip("/"),
-        lmstudio_model=str(get(("lm_studio", "model"))),
+        llm_url=str(get(("llm", "url"))).rstrip("/"),
+        llm_model=str(get(("llm", "model"))),
         stt_model=str(get(("stt", "model"))),
         stt_language=str(get(("stt", "language"))),
         tts_voice=str(get(("tts", "voice"))),

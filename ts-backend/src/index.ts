@@ -91,13 +91,13 @@ async function main() {
   const store = new SettingsStore(join(dataDir, "settings.json"));
   const overrides = store.load();
   const registry = new ProviderRegistry(
-    { id: "lm-studio", name: "Local server", baseUrl: config.lmstudioUrl, builtin: true },
+    { id: "local", name: "Local server", baseUrl: config.llmUrl, builtin: true },
     Array.isArray(overrides.providers) ? overrides.providers : [],
   );
   // Warm every provider's model list in the background so pickers have
   // something at once; a sleeping provider only delays its own entry.
   void registry.listAllModels().catch(() => {});
-  const fallbackModel = qualifyModel(registry.defaultId, config.lmstudioModel);
+  const fallbackModel = qualifyModel(registry.defaultId, config.llmModel);
   const initial = registry.resolve(overrides.model ?? fallbackModel);
   const state: SettingsState = {
     model: qualifyModel(initial.providerId, initial.model),

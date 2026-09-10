@@ -14,8 +14,8 @@ services:
     environment:
       HA_URL: ${HA_URL:?set HA_URL in .env}
       HA_TOKEN: ${HA_TOKEN:?set HA_TOKEN in .env}
-      LM_STUDIO_URL: ${LM_STUDIO_URL:-http://host.docker.internal:1234/v1}
-      LM_STUDIO_MODEL: ${LM_STUDIO_MODEL:-}
+      LLM_URL: ${LLM_URL:-http://host.docker.internal:1234/v1}
+      LLM_MODEL: ${LLM_MODEL:-}
       ASSISTANT_PERSONALITY: ${ASSISTANT_PERSONALITY:-sassy}
     volumes:
       - ./data:/data

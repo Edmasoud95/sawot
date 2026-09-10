@@ -37,7 +37,7 @@ class SettingsContext:
     store: SettingsStore
     agent: object
     tts: object
-    lmstudio_url: str
+    llm_url: str
     http: object  # httpx.AsyncClient
     summary: str = ""        # device list, needed to rebuild the system prompt
     chat_ctx: object = None  # ChatContext, so personality applies to chat too

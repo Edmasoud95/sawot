@@ -19,7 +19,7 @@ export interface ProviderInfo {
   hasKey: boolean;
 }
 
-/** Separator for provider-qualified model ids ("lm-studio::qwen3-8b").
+/** Separator for provider-qualified model ids ("local::qwen3-8b").
  *  Model ids themselves often contain "/" so a slash won't do. */
 export const MODEL_SEP = "::";
 

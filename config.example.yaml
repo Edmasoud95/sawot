@@ -1,7 +1,7 @@
 # Copy to config.yaml and fill in your values.
 home_assistant:
   url: "http://192.168.1.10:8123"     # Home Assistant URL
-lm_studio:                            # built-in model server (key name is historical)
+llm:                            # built-in model server
   url: "http://192.168.1.11:1234/v1"  # any OpenAI-compatible /v1 endpoint
   model: "gemma-4"                     # any tool-calling model it serves
 stt:

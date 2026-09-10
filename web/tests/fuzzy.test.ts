@@ -15,19 +15,19 @@ test("subsequence matches score higher for contiguous and word-start hits, and f
 
 test("rankModels keeps provider groups, orders matches by score, and drops providers with no hits", () => {
   const providers = [
-    { id: "lm-studio", name: "LM Studio", models: ["google/gemma-4-e4b", "qwen/qwen3.8-27b"], state: "ready" },
+    { id: "local", name: "Local server", models: ["google/gemma-4-e4b", "qwen/qwen3.8-27b"], state: "ready" },
     { id: "deepseek", name: "DeepSeek", models: ["deepseek-v4-flash", "deepseek-chat"], state: "ready" },
     { id: "glm", name: "glm", models: [], state: "pending" },
   ];
   const all = rankModels("", providers);
-  assert.deepEqual(all.map((g) => g.id), ["lm-studio", "deepseek", "glm"], "an empty query lists everything, pending groups included");
+  assert.deepEqual(all.map((g) => g.id), ["local", "deepseek", "glm"], "an empty query lists everything, pending groups included");
   assert.equal(all[2].items.length, 0);
   const q = rankModels("flash", providers);
   assert.deepEqual(q.map((g) => g.id), ["deepseek", "glm"], "groups without hits drop, pending groups stay so the user knows they are loading");
   assert.deepEqual(q[0].items.map((i) => i.model), ["deepseek-v4-flash"]);
   const gem = rankModels("gemma", providers);
   assert.equal(gem[0].items[0].model, "google/gemma-4-e4b");
-  assert.equal(gem[0].items[0].value, "lm-studio::google/gemma-4-e4b");
+  assert.equal(gem[0].items[0].value, "local::google/gemma-4-e4b");
   const both = rankModels("ds", providers)[0].items.map((i) => i.model);
   assert.equal(both.length, 2);
 });

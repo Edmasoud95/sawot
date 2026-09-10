@@ -15,7 +15,7 @@ function servers() {
 
 async function harness(s: Awaited<ReturnType<typeof servers>>) {
   const registry = new ProviderRegistry(
-    { id: "lm-studio", name: "LM Studio", baseUrl: s.hangingUrl, builtin: true },
+    { id: "local", name: "Local server", baseUrl: s.hangingUrl, builtin: true },
     [{ id: "deepseek", name: "DeepSeek", baseUrl: s.healthyUrl, apiKey: "k" }],
     { timeoutMs: 300 },
   );
@@ -24,7 +24,7 @@ async function harness(s: Awaited<ReturnType<typeof servers>>) {
     store: { load: () => ({}), save: () => {} } as any,
     agent: { setClient() {}, setModel() {}, setDetailedDrawings() {} } as any,
     state: { model: "deepseek::deepseek-v4", voice: "af_heart", sassy: false, detailedDrawings: false } as any,
-    registry, fallbackModel: "lm-studio::x", summary: "", name: "Rita", setSystemPrompt() {},
+    registry, fallbackModel: "local::x", summary: "", name: "Rita", setSystemPrompt() {},
     inference: { voices: async () => ({ engine: "kokoro", voices: ["af_heart"], default: "af_heart" }) } as any,
   });
   await app.ready();
@@ -40,7 +40,7 @@ test("settings answer at once with each provider's last known models instead of 
     assert.equal(res.statusCode, 200);
     assert.ok(Date.now() - t < 250, `settings must not wait for model lists (took ${Date.now() - t} ms)`);
     const providers = res.json().providers;
-    assert.deepEqual(providers.map((p: any) => [p.id, p.state]), [["lm-studio", "pending"], ["deepseek", "pending"]]);
+    assert.deepEqual(providers.map((p: any) => [p.id, p.state]), [["local", "pending"], ["deepseek", "pending"]]);
   } finally { await app.close(); s.close(); }
 });
 
@@ -52,7 +52,7 @@ test("each provider's models load through their own route, and settings then car
     assert.equal(ok.statusCode, 200);
     assert.deepEqual(ok.json(), { id: "deepseek", models: ["deepseek-v4"] });
     const t = Date.now();
-    const hung = await app.inject({ method: "GET", url: "/api/providers/lm-studio/models" });
+    const hung = await app.inject({ method: "GET", url: "/api/providers/local/models" });
     assert.equal(hung.statusCode, 200, "an unreachable provider is a result, not a failure");
     assert.equal(hung.json().models.length, 0);
     assert.match(hung.json().error, /timed out/);
@@ -63,7 +63,7 @@ test("each provider's models load through their own route, and settings then car
     const byId = Object.fromEntries(settings.providers.map((p: any) => [p.id, p]));
     assert.deepEqual(byId.deepseek.models, ["deepseek-v4"]);
     assert.equal(byId.deepseek.state, "ready");
-    assert.equal(byId["lm-studio"].state, "error");
+    assert.equal(byId["local"].state, "error");
     assert.deepEqual(settings.models, ["deepseek::deepseek-v4"]);
   } finally { await app.close(); s.close(); }
 });

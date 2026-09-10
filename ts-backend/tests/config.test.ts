@@ -8,7 +8,7 @@ import { loadConfig } from "../src/config.js";
 const yaml = `
 home_assistant:
   url: "http://yaml.local:8123/"
-lm_studio:
+llm:
   url: "http://localhost:1234/v1/"
   model: "from-yaml"
 stt:
@@ -29,8 +29,8 @@ function tmpConfig(): string {
 test("loads yaml with the token from the environment", () => {
   const cfg = loadConfig(tmpConfig(), { HA_TOKEN: "t" });
   assert.equal(cfg.haUrl, "http://yaml.local:8123");
-  assert.equal(cfg.lmstudioUrl, "http://localhost:1234/v1");
-  assert.equal(cfg.lmstudioModel, "from-yaml");
+  assert.equal(cfg.llmUrl, "http://localhost:1234/v1");
+  assert.equal(cfg.llmModel, "from-yaml");
   assert.equal(cfg.ttsVoice, "af_bella");
   assert.equal(cfg.port, 9999);
 });
@@ -38,7 +38,7 @@ test("loads yaml with the token from the environment", () => {
 test("environment overrides yaml keys", () => {
   const cfg = loadConfig(tmpConfig(), { HA_TOKEN: "t", HA_URL: "http://env.local:8123", SERVER_PORT: "8080", ASSISTANT_PERSONALITY: "plain" });
   assert.equal(cfg.haUrl, "http://env.local:8123");
-  assert.equal(cfg.lmstudioModel, "from-yaml");
+  assert.equal(cfg.llmModel, "from-yaml");
   assert.equal(cfg.port, 8080);
   assert.equal(cfg.assistantSassy, false);
 });
@@ -46,11 +46,11 @@ test("environment overrides yaml keys", () => {
 test("works from the environment alone when no yaml exists", () => {
   const missing = join(mkdtempSync(join(tmpdir(), "sawot-cfg-")), "config.yaml");
   const cfg = loadConfig(missing, {
-    HA_TOKEN: "t", HA_URL: "http://ha.local:8123", LM_STUDIO_URL: "http://host.docker.internal:1234/v1", SAWOT_DATA_DIR: "/data",
+    HA_TOKEN: "t", HA_URL: "http://ha.local:8123", LLM_URL: "http://host.docker.internal:1234/v1", SAWOT_DATA_DIR: "/data",
   });
   assert.equal(cfg.haUrl, "http://ha.local:8123");
-  assert.equal(cfg.lmstudioUrl, "http://host.docker.internal:1234/v1");
-  assert.equal(cfg.lmstudioModel, "");
+  assert.equal(cfg.llmUrl, "http://host.docker.internal:1234/v1");
+  assert.equal(cfg.llmModel, "");
   assert.equal(cfg.sttModel, "cohere-transcribe");
   assert.equal(cfg.ttsVoice, "af_heart");
   assert.equal(cfg.host, "0.0.0.0");

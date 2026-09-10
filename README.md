@@ -149,7 +149,7 @@ compose up -d` upgrades without losing anything.
 
 Inside the container, `host.docker.internal` is the machine running Docker,
 which is where the built-in model server URL points by default (port 1234).
-Set `LM_STUDIO_URL` in `.env` if your server listens elsewhere, for example
+Set `LLM_URL` in `.env` if your server listens elsewhere, for example
 `http://host.docker.internal:11434/v1` for Ollama.
 
 The image is CPU-only and **x86_64 only**: the transcribe.cpp native wheel
@@ -182,8 +182,8 @@ Edit `config.yaml`:
 | Key | Description |
 | --- | --- |
 | `home_assistant.url` | Your Home Assistant URL |
-| `lm_studio.url` | Built-in model server: any OpenAI-compatible `/v1` URL (the key name is historical) |
-| `lm_studio.model` | The tool-calling model to use on it (or pick one from Settings) |
+| `llm.url` | Built-in model server: any OpenAI-compatible `/v1` URL |
+| `llm.model` | The tool-calling model to use on it (or pick one from Settings) |
 | `stt.model` | STT model id (default `cohere-transcribe`; see Settings for the list) |
 | `stt.language` | Transcription language (default `en`) |
 | `tts.voice` | Kokoro voice (see the Settings panel for the list) |
@@ -203,7 +203,7 @@ required; the rest default to the values above.
 | Environment variable | `config.yaml` key |
 | --- | --- |
 | `HA_URL` | `home_assistant.url` |
-| `LM_STUDIO_URL` / `LM_STUDIO_MODEL` | `lm_studio.url` / `lm_studio.model` |
+| `LLM_URL` / `LLM_MODEL` | `llm.url` / `llm.model` |
 | `STT_MODEL` / `STT_LANGUAGE` | `stt.model` / `stt.language` |
 | `TTS_VOICE` / `TTS_LANG_CODE` | `tts.voice` / `tts.lang_code` |
 | `ASSISTANT_NAME` / `ASSISTANT_PERSONALITY` | `assistant.name` / `assistant.personality` |

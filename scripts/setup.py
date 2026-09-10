@@ -64,7 +64,7 @@ Downloading {spec.label} (~{spec.size_mb} MB)...")
 def write_config(cfg):
     yaml_text = f"""home_assistant:
   url: "{cfg['ha_url'].rstrip('/')}"
-lm_studio:
+llm:
   url: "{cfg['lm_url'].rstrip('/')}"
   model: "{cfg['lm_model']}"
 stt:

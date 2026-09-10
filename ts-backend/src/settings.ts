@@ -47,7 +47,7 @@ export class SettingsStore {
 }
 
 export interface SettingsState {
-  model: string; // provider-qualified ("lm-studio::qwen3-8b")
+  model: string; // provider-qualified ("local::qwen3-8b")
   voice: string;
   sassy: boolean;
   detailedDrawings: boolean;
