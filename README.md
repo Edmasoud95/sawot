@@ -143,8 +143,13 @@ compose up -d` upgrades without losing anything.
 
 Inside the container, `host.docker.internal` is the machine running Docker,
 which is where the LM Studio default points. Set `LM_STUDIO_URL` in `.env`
-if it runs elsewhere. The image is CPU-only (x86_64); speech works well on a
-modern CPU, and a GPU image is planned.
+if it runs elsewhere.
+
+The image is CPU-only and **x86_64 only**: the transcribe.cpp native wheel
+has no ARM build yet, so Raspberry Pi and Apple Silicon Docker hosts are not
+supported for now. Speech runs well on a modern CPU; a GPU image is planned.
+A Home Assistant add-on built on this image is also planned, which would put
+the UI behind Home Assistant's own login through ingress.
 
 ## Setup (native)
 
