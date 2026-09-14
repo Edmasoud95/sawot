@@ -82,12 +82,47 @@ function Personality({ value, prompt, onChange }) {
   );
 }
 
+function ChatInstructions({ value, onChange }) {
+  const [draft, setDraft] = useState(value ?? "");
+  useEffect(() => { setDraft(value ?? ""); }, [value]);
+  const dirty = draft.trim() !== (value ?? "").trim();
+  return (
+    <div className="flex flex-col gap-2.5">
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="How the assistant should behave in chat, e.g. “Answer concisely, prefer Python examples, call me Ed.” Leave empty for a neutral assistant."
+        aria-label="Chat instructions"
+        rows={5}
+        maxLength={2000}
+        className={`${FIELD_CLS} resize-y leading-snug`}
+      />
+      <p className="-mt-1 text-[0.78rem] leading-snug text-zinc-500">
+        Applies to Chat only. Voice keeps its personality above.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onChange({ chatInstructions: draft.trim() })}
+          disabled={!dirty}
+          className={BUTTON_CLS}
+        >
+          Save instructions
+        </button>
+        {dirty && <span className="text-[0.72rem] text-zinc-500">Unsaved changes</span>}
+      </div>
+    </div>
+  );
+}
+
 export default function AssistantSection({ data, update }) {
   const [openRow, setOpenRow] = useState(null);
   const toggle = (key) => setOpenRow((cur) => (cur === key ? null : key));
   if (!data) return <Skeleton />;
   const modelName = String(data.model ?? "").includes("::") ? data.model.split("::")[1] : data.model;
   const personality = PERSONALITY_OPTIONS.find((o) => o.value === (data.personality ?? "sassy")) ?? PERSONALITY_OPTIONS[0];
+  const instructions = String(data.chatInstructions ?? "").trim();
+  const instructionsSummary = instructions ? (instructions.length > 40 ? instructions.slice(0, 40) + "…" : instructions) : "Default";
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col">
@@ -112,6 +147,9 @@ export default function AssistantSection({ data, update }) {
             prompt={data.personalityPrompt ?? ""}
             onChange={update}
           />
+        </Disclosure>
+        <Disclosure id="chat-instructions" title="Chat instructions" summary={instructionsSummary} open={openRow === "chat-instructions"} onToggle={() => toggle("chat-instructions")}>
+          <ChatInstructions value={data.chatInstructions ?? ""} onChange={update} />
         </Disclosure>
       </div>
       <Toggle
