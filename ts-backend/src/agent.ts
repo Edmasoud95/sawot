@@ -5,6 +5,7 @@ import { temperatureReading, type TemperatureReading } from "./temperature.js";
 import type OpenAI from "openai";
 import { executeTool, toOpenAiTools, touchedIdsFor, type Tool } from "./tools.js";
 import { createChatCompletion } from "./reasoningFallback.js";
+import { speechTagPrompt, stripSpeechTags } from "./speechTags.js";
 
 export type HistoryMessage = Record<string, any>;
 
@@ -98,7 +99,7 @@ export class Agent {
     history: HistoryMessage[],
     userText: string,
     onEvent?: (event: string, data: any) => void | Promise<void>,
-    options: { expressions?: boolean } = {},
+    options: { expressions?: boolean; speechEngine?: string | null } = {},
   ): Promise<string> {
     const emit = async (event: string, data: any) => {
       if (!onEvent) return;
@@ -120,7 +121,7 @@ export class Agent {
       const t0 = performance.now();
       const response = await createChatCompletion<any>(this.client, {
         model: this.model,
-        messages: [{ role: "system", content: this.system + (options.expressions ? expressionPrompt(drawing) : "") }, ...history] as any,
+        messages: [{ role: "system", content: this.system + (options.expressions ? expressionPrompt(drawing) : "") + speechTagPrompt(options.speechEngine) }, ...history] as any,
         tools: toOpenAiTools(modelTools) as any,
       });
       const msg = response.choices[0].message;
@@ -153,7 +154,9 @@ export class Agent {
           await emit("reply", { raw: msg.content ?? "", text: reply, rounds: round,
             latency_ms: Math.round(performance.now() - turnStart) });
         }
-        history.push({ role: "assistant", content: reply });
+        // Performance tags are for the synthesiser only; the conversation
+        // remembers the plain sentence, like hidden markers.
+        history.push({ role: "assistant", content: stripSpeechTags(reply) });
         return reply;
       }
 

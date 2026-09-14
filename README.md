@@ -239,8 +239,11 @@ Kokoro-82M (TTS). Once downloaded, the server runs fully offline.
 ### Chatterbox Turbo and Nano (optional)
 
 Two extra TTS engines from Resemble AI. Turbo (350M) is expressive and low
-latency on a GPU; Nano (110M) also runs well on CPU. Both understand tags such
-as `[laugh]` or `[chuckle]` in the text and can clone a voice: drop a short WAV
+latency on a GPU; Nano (110M) also runs well on CPU. Both understand
+performance tags such as `[laugh]`, `[sigh]` or `[whispering]` in the text;
+while a Chatterbox model is the active voice, the assistant is told about the
+tags and may use them sparingly (they are stripped from captions and history).
+Both can also clone a voice: drop a short WAV
 into `models/tts/voices/` and it appears in the voice picker under its file
 name. They need an optional package installed first, see
 `requirements-chatterbox.txt` for the exact commands, then download either

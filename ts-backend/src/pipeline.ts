@@ -1,6 +1,7 @@
 import type { TemperatureReading } from "./temperature.js";
 import type { Agent, HistoryMessage } from "./agent.js";
 import { InferenceError, type InferenceClient } from "./inference.js";
+import { forSpeech, stripSpeechTags } from "./speechTags.js";
 
 /** The sidecar's own explanation when it gave one, else a generic message. */
 function speechError(e: unknown): string {
@@ -77,17 +78,24 @@ export async function runVoiceTurn(
     await send("debug", { event, data });
   };
 
+  // Which voice will speak decides whether the model may use performance
+  // tags; asking per turn keeps a switch made in Settings honoured at once.
+  let speechEngine: string | null = null;
+  try {
+    speechEngine = (await inference.voices()).engine;
+  } catch { /* sidecar offline: no tags */ }
+
   const checkpoint = history.length;
   let reply: string;
   try {
-    reply = await agent.run(history, text, onAgentEvent, { expressions: true });
+    reply = await agent.run(history, text, onAgentEvent, { expressions: true, speechEngine });
   } catch {
     history.splice(checkpoint);
     await send("error", { message: "LLM backend offline" });
     return;
   }
 
-  await send("assistant_text", { text: reply });
+  await send("assistant_text", { text: stripSpeechTags(reply) });
   if (getCards && touched.length) {
     try {
       await send("entities", { entities: await getCards(touched.slice(0, 8)) });
@@ -99,7 +107,7 @@ export async function runVoiceTurn(
   const t1 = performance.now();
   let wav: Buffer;
   try {
-    wav = await inference.synthesize(reply, voice);
+    wav = await inference.synthesize(forSpeech(reply, speechEngine), voice);
   } catch (e) {
     await send("error", { message: speechError(e) });
     return;

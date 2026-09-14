@@ -80,6 +80,8 @@ For documentation-only edits, check accuracy and `git diff --check`; builds are 
 - `orbExpression.ts` owns expression selection, priority, and expiry. Device shapes
   take priority over sentiment; validated temperature readouts take priority over both.
 - Hidden model markers must stay out of speech, captions, and conversational history.
+  Chatterbox performance tags (`[laugh]`, see `ts-backend/src/speechTags.ts`) reach only
+  a Chatterbox voice; captions, history, and other engines get the stripped text.
   Temperature values must come from validated live tool results, not invented model data.
 - Trigger answer expressions with audio readiness so synthesis latency does not
   consume their display lifetime. Clear stale expressions on recording, disconnect,
