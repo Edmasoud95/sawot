@@ -285,6 +285,11 @@ select { max-width: 100%; }
 .settings-page { padding: 28px 28px 64px; max-width: 40rem; width: 100%; }
 .settings-toast { position: sticky; bottom: 0; display: flex; justify-content: center; margin-top: auto; padding: 8px 18px max(12px, env(safe-area-inset-bottom)); pointer-events: none; }
 .settings-toast-inner { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 8px 14px; border: 1px solid; border-radius: 999px; font-size: 12.5px; box-shadow: 0 8px 30px #00000080; backdrop-filter: blur(12px); pointer-events: auto; }
+.settings-row { border-bottom: 1px solid var(--line); }
+.settings-row-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 15px 2px; text-align: left; color: inherit; transition: color .25s; }
+.settings-row-head:hover .settings-row-summary { color: #c5cede; }
+.settings-row-summary { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 60%; font-size: .8rem; color: var(--muted); transition: color .25s; }
+.settings-row-body { padding: 2px 2px 22px; }
 .settings-content h3 { font-family: var(--font-sans); font-size: 11px; letter-spacing: .1em; color: #aab7ce; }
 .model-card { background: #ffffff02; }
 .model-card-title { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px; }

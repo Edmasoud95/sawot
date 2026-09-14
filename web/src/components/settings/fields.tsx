@@ -40,12 +40,12 @@ export function Toggle({ label, hint, checked, onChange }) {
   );
 }
 
-export function Select({ label, value, options, onChange, disabled = false, labels = null }) {
+export function Select({ label, value, options, onChange, disabled = false, labels = null, ariaLabel = label }) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-[0.85rem] font-medium text-zinc-200">{label}</span>
+      {label && <span className="text-[0.85rem] font-medium text-zinc-200">{label}</span>}
       <select
-        aria-label={label}
+        aria-label={ariaLabel}
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
@@ -69,6 +69,31 @@ export function Skeleton() {
       <div className="h-3 w-16 rounded bg-white/10" />
       <div className="h-9 rounded-lg bg-white/5" />
       <div className="h-3 w-40 rounded bg-white/5" />
+    </div>
+  );
+}
+
+/** A settings row that reads its current value at a glance and expands in
+ *  place to reveal the controls. */
+export function Disclosure({ id, title, summary, open, onToggle, children }) {
+  return (
+    <div className="settings-row">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-controls={`${id}-body`}
+        className="settings-row-head"
+      >
+        <span className="text-[0.9rem] font-medium text-zinc-100">{title}</span>
+        <span className="settings-row-summary">
+          <span className="truncate">{summary}</span>
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className={`shrink-0 transition-transform duration-300 ${open ? "rotate-90" : ""}`}>
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </span>
+      </button>
+      {open && <div id={`${id}-body`} className="settings-row-body">{children}</div>}
     </div>
   );
 }

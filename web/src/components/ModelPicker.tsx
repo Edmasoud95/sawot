@@ -59,7 +59,7 @@ export default function ModelPicker({ label = "Model", value, providers, onChang
         <input
           ref={input}
           role="combobox"
-          aria-label={label}
+          aria-label={label || "Model"}
           aria-expanded={open}
           aria-controls={listId}
           aria-autocomplete="list"

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
-import ModelsSection from "../ModelsSection";
+import { useEffect, useState } from "react";
+import { ModelList, useSpeechModels } from "../ModelsSection";
 import { useRecorder } from "../../hooks/useRecorder";
-import { BUTTON_CLS, FIELD_CLS, SectionTitle, Select, Skeleton } from "./fields";
+import { BUTTON_CLS, Disclosure, FIELD_CLS, Select, Skeleton } from "./fields";
 
 // Read aloud in ten to fifteen seconds; varied sounds, natural rhythm.
 const CLONE_PASSAGE =
@@ -9,8 +9,7 @@ const CLONE_PASSAGE =
   "is ready by the time I reach the kitchen. Some days I talk fast, some days I take my time, but " +
   "I always say exactly what I mean.";
 
-function ClonedVoices({ active, selectedVoice, onUse }) {
-  const [info, setInfo] = useState(null); // { engine, voices, default, clones }
+function ClonedVoices({ info, setInfo, selectedVoice, onUse }) {
   const [name, setName] = useState("");
   const [clip, setClip] = useState(null); // { blob, url }
   const [recording, setRecording] = useState(false);
@@ -20,11 +19,6 @@ function ClonedVoices({ active, selectedVoice, onUse }) {
     const blob = new Blob([buffer], { type: "audio/webm" });
     setClip((prev) => { if (prev) URL.revokeObjectURL(prev.url); return { blob, url: URL.createObjectURL(blob) }; });
   });
-
-  const refresh = useCallback(() => {
-    fetch("/api/voices").then((r) => r.json()).then(setInfo).catch(() => setFormError("Couldn't reach the speech engine."));
-  }, []);
-  useEffect(() => { if (active) { setFormError(""); refresh(); } }, [active, refresh]);
 
   async function toggleRecording() {
     setFormError("");
@@ -75,7 +69,6 @@ function ClonedVoices({ active, selectedVoice, onUse }) {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-3">
-        <SectionTitle>Cloned voices</SectionTitle>
         {!chatterbox && info && (
           <p className="text-[0.78rem] leading-snug text-zinc-500">
             Cloned voices are spoken by Chatterbox. Switch to Chatterbox Turbo or Nano above to use one; you can still record and delete them here.
@@ -152,26 +145,60 @@ function ClonedVoices({ active, selectedVoice, onUse }) {
   );
 }
 
+function activeLabel(models) {
+  return models.find((m) => m.active && m.state === "downloaded")?.label ?? "None";
+}
+
 export default function SpeechSection({ data, update, active, onSwitched }) {
+  const [openRow, setOpenRow] = useState(null);
+  const toggle = (key) => setOpenRow((cur) => (cur === key ? null : key));
+  const speech = useSpeechModels(active, onSwitched);
+  const stt = speech.models.filter((m) => m.kind === "stt");
+  const tts = speech.models.filter((m) => m.kind === "tts");
+  const [info, setInfo] = useState(null); // { engine, voices, default, clones }
+  const [voicesError, setVoicesError] = useState("");
+  // A new speech engine brings its own voice list, so refetch on a switch.
+  const activeTts = tts.find((m) => m.active)?.id;
+  useEffect(() => {
+    if (!active) return;
+    setVoicesError("");
+    fetch("/api/voices").then((r) => r.json()).then(setInfo).catch(() => setVoicesError("Couldn't reach the speech engine."));
+  }, [active, activeTts]);
+  const clones = info?.clones ?? [];
+
+  if (!data) return <Skeleton />;
   return (
-    <div className="flex flex-col gap-8">
-      <ModelsSection active={active} onSwitched={onSwitched} />
-      <div className="flex flex-col gap-3">
-        {!data && <Skeleton />}
-        {data && (
-          <Select
-            label="Voice"
-            value={data.voice}
-            options={data.voices}
-            onChange={(voice) => update({ voice })}
-          />
-        )}
-      </div>
-      <ClonedVoices
-        active={active}
-        selectedVoice={data?.voice}
-        onUse={(voice) => update({ voice })}
-      />
+    <div className="flex flex-col">
+      <Disclosure id="stt" title="Speech-to-text" summary={activeLabel(stt)} open={openRow === "stt"} onToggle={() => toggle("stt")}>
+        <ModelList {...speech} models={stt} />
+      </Disclosure>
+      <Disclosure id="tts" title="Text-to-speech" summary={activeLabel(tts)} open={openRow === "tts"} onToggle={() => toggle("tts")}>
+        <ModelList {...speech} models={tts} />
+      </Disclosure>
+      <Disclosure id="voice" title="Voice" summary={data.voice} open={openRow === "voice"} onToggle={() => toggle("voice")}>
+        <Select
+          label=""
+          ariaLabel="Voice"
+          value={data.voice}
+          options={data.voices}
+          onChange={(voice) => update({ voice })}
+        />
+      </Disclosure>
+      <Disclosure
+        id="clones"
+        title="Cloned voices"
+        summary={info ? (clones.length === 1 ? "1 voice" : `${clones.length} voices`) : "…"}
+        open={openRow === "clones"}
+        onToggle={() => toggle("clones")}
+      >
+        {voicesError && <p className="mb-3 text-[0.75rem] leading-snug text-red-400/90">{voicesError}</p>}
+        <ClonedVoices
+          info={info}
+          setInfo={setInfo}
+          selectedVoice={data.voice}
+          onUse={(voice) => update({ voice })}
+        />
+      </Disclosure>
     </div>
   );
 }

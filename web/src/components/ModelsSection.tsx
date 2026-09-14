@@ -84,7 +84,9 @@ function ModelCard({ m, onDownload, onSelect, switching }) {
   );
 }
 
-export default function ModelsSection({ active = true, onSwitched = null }) {
+/** Loads the local speech models and polls them while `active`, since
+ *  downloads keep running server-side either way. */
+export function useSpeechModels(active = true, onSwitched = null) {
   const [models, setModels] = useState([]);
   const [switching, setSwitching] = useState(null);
   const [selectError, setSelectError] = useState("");
@@ -95,8 +97,6 @@ export default function ModelsSection({ active = true, onSwitched = null }) {
       .then((d) => setModels(d.models || []))
       .catch(() => {});
 
-  // Poll only while the settings dialog is open — downloads keep running
-  // server-side either way, so there is nothing to watch when hidden.
   useEffect(() => {
     if (!active) return;
     refresh();
@@ -130,8 +130,33 @@ export default function ModelsSection({ active = true, onSwitched = null }) {
     }
   };
 
-  const stt = models.filter((m) => m.kind === "stt");
-  const tts = models.filter((m) => m.kind === "tts");
+  return { models, switching, selectError, download, select };
+}
+
+/** The cards for one kind of speech model. */
+export function ModelList({ models, switching, selectError, download, select }) {
+  return (
+    <div className="flex flex-col gap-3">
+      {selectError && (
+        <p className="text-[0.75rem] leading-snug text-red-400/90">{selectError}</p>
+      )}
+      {models.map((m) => (
+        <ModelCard
+          key={m.id}
+          m={m}
+          onDownload={download}
+          onSelect={select}
+          switching={switching}
+        />
+      ))}
+    </div>
+  );
+}
+
+export default function ModelsSection({ active = true, onSwitched = null }) {
+  const speech = useSpeechModels(active, onSwitched);
+  const stt = speech.models.filter((m) => m.kind === "stt");
+  const tts = speech.models.filter((m) => m.kind === "tts");
 
   return (
     <div className="flex flex-col gap-6">
@@ -139,32 +164,13 @@ export default function ModelsSection({ active = true, onSwitched = null }) {
         <h3 className="font-mono text-[0.65rem] uppercase tracking-[0.25em] text-zinc-500">
           Speech-to-text
         </h3>
-        {selectError && (
-          <p className="text-[0.75rem] leading-snug text-red-400/90">{selectError}</p>
-        )}
-        {stt.map((m) => (
-          <ModelCard
-            key={m.id}
-            m={m}
-            onDownload={download}
-            onSelect={select}
-            switching={switching}
-          />
-        ))}
+        <ModelList {...speech} models={stt} />
       </div>
       <div className="flex flex-col gap-3">
         <h3 className="font-mono text-[0.65rem] uppercase tracking-[0.25em] text-zinc-500">
           Text-to-speech
         </h3>
-        {tts.map((m) => (
-          <ModelCard
-            key={m.id}
-            m={m}
-            onDownload={download}
-            onSelect={select}
-            switching={switching}
-          />
-        ))}
+        <ModelList {...speech} models={tts} />
       </div>
     </div>
   );

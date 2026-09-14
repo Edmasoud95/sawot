@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import ModelPicker from "../ModelPicker";
-import { BUTTON_CLS, FIELD_CLS, Select, Skeleton, Toggle } from "./fields";
+import { BUTTON_CLS, Disclosure, FIELD_CLS, Select, Skeleton, Toggle } from "./fields";
 
 const PERSONALITY_OPTIONS = [
   { value: "sassy", label: "Sassy", hint: "Rita gets witty and teases you." },
@@ -83,25 +83,37 @@ function Personality({ value, prompt, onChange }) {
 }
 
 export default function AssistantSection({ data, update }) {
+  const [openRow, setOpenRow] = useState(null);
+  const toggle = (key) => setOpenRow((cur) => (cur === key ? null : key));
   if (!data) return <Skeleton />;
+  const modelName = String(data.model ?? "").includes("::") ? data.model.split("::")[1] : data.model;
+  const personality = PERSONALITY_OPTIONS.find((o) => o.value === (data.personality ?? "sassy")) ?? PERSONALITY_OPTIONS[0];
   return (
-    <div className="flex flex-col gap-5">
-      <ModelPicker
-        label="Model"
-        value={data.model}
-        providers={data.providers ?? []}
-        onChange={(model) => update({ model })}
-      />
-      {data.models_error && (
-        <p className="-mt-3 text-[0.75rem] leading-snug text-red-400/90">
-          Can't reach the local model server — showing the last saved model.
-        </p>
-      )}
-      <Personality
-        value={data.personality ?? "sassy"}
-        prompt={data.personalityPrompt ?? ""}
-        onChange={update}
-      />
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col">
+        <Disclosure id="model" title="Model" summary={modelName || "Not set"} open={openRow === "model"} onToggle={() => toggle("model")}>
+          <div className="flex flex-col gap-2">
+            <ModelPicker
+              label=""
+              value={data.model}
+              providers={data.providers ?? []}
+              onChange={(model) => update({ model })}
+            />
+            {data.models_error && (
+              <p className="text-[0.75rem] leading-snug text-red-400/90">
+                Can't reach the local model server — showing the last saved model.
+              </p>
+            )}
+          </div>
+        </Disclosure>
+        <Disclosure id="personality" title="Personality" summary={personality.label} open={openRow === "personality"} onToggle={() => toggle("personality")}>
+          <Personality
+            value={data.personality ?? "sassy"}
+            prompt={data.personalityPrompt ?? ""}
+            onChange={update}
+          />
+        </Disclosure>
+      </div>
       <Toggle
         label="Detailed drawings"
         hint="Lets the model draw with filled shapes (circles, ellipses, rectangles, polygons, arcs) and more strokes. Off keeps simple outlines."

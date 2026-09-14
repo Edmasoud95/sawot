@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FIELD_CLS, SectionTitle, Skeleton, Toggle } from "./fields";
+import { Disclosure, FIELD_CLS, SectionTitle, Skeleton, Toggle } from "./fields";
 
 function ProviderRow({ p, onRemove }) {
   return (
@@ -109,15 +109,27 @@ function AddProviderForm({ apply }) {
 }
 
 export default function GeneralSection({ data, debugEnabled, toggleDebug, removeProvider, onProvidersChanged }) {
+  const [openRow, setOpenRow] = useState(null);
+  const toggle = (key) => setOpenRow((cur) => (cur === key ? null : key));
+  const providers = data?.providers ?? [];
+  if (!data) return <Skeleton />;
   return (
-    <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-3">
-        <SectionTitle>Providers</SectionTitle>
-        {!data && <Skeleton />}
-        {data && (data.providers ?? []).map((p) => (
-          <ProviderRow key={p.id} p={p} onRemove={removeProvider} />
-        ))}
-        {data && <AddProviderForm apply={onProvidersChanged} />}
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col">
+        <Disclosure
+          id="providers"
+          title="Providers"
+          summary={providers.length === 1 ? "1 provider" : `${providers.length} providers`}
+          open={openRow === "providers"}
+          onToggle={() => toggle("providers")}
+        >
+          <div className="flex flex-col gap-3">
+            {providers.map((p) => (
+              <ProviderRow key={p.id} p={p} onRemove={removeProvider} />
+            ))}
+            <AddProviderForm apply={onProvidersChanged} />
+          </div>
+        </Disclosure>
       </div>
       <div className="flex flex-col gap-3">
         <SectionTitle>Developer</SectionTitle>
