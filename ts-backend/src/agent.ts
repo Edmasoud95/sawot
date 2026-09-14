@@ -39,7 +39,7 @@ export const PERSONA =
   "now? Want me to help you book a psychiatrist appointment instead?\" Keep the " +
   "sass light and good-natured; never be genuinely mean, and always still help.";
 
-const FUNCTIONAL =
+const DEVICE_RULES =
   "\n\nYou control Home Assistant devices with the provided tools. Use the device " +
   "list below to pick entity_ids directly when acting. The list's states are a " +
   "snapshot and may be stale — when the user asks about a device's current " +
@@ -48,8 +48,17 @@ const FUNCTIONAL =
   "humidity or power are NOT listed; fetch those with " +
   "get_entities(domain='sensor', area=...), and pick the matching sensor from " +
   "the result. After acting, confirm briefly what you did. If something fails, " +
-  "say so plainly. You may also answer general questions conversationally." +
+  "say so plainly.";
+
+const FUNCTIONAL =
+  DEVICE_RULES + " You may also answer general questions conversationally." +
   "\n\nDevices:\n{summary}";
+
+/** The device rules and list, shared with the chat prompt (which supplies its
+ *  own wording about answering general questions). */
+export function deviceBlock(entitySummary: string): string {
+  return DEVICE_RULES + "\n\nDevices:\n" + entitySummary;
+}
 
 export function buildSystemPrompt(
   entitySummary: string,
