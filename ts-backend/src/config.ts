@@ -1,3 +1,4 @@
+import { normalizePersonality } from "./agent.js";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse } from "yaml";
@@ -13,7 +14,10 @@ export interface Config {
   ttsVoice: string;
   ttsLangCode: string;
   assistantName: string;
-  assistantSassy: boolean;
+  assistantPersonality: "sassy" | "plain" | "custom";
+  assistantPersonalityPrompt: string;
+  /** Brave Search API key; empty disables the chat web search tools. */
+  braveApiKey: string;
   host: string;
   port: number;
   allowedControls?: Record<string, string[]>;
@@ -44,6 +48,8 @@ const ENV_KEYS: Record<string, string[]> = {
   TTS_LANG_CODE: ["tts", "lang_code"],
   ASSISTANT_NAME: ["assistant", "name"],
   ASSISTANT_PERSONALITY: ["assistant", "personality"],
+  ASSISTANT_PERSONALITY_PROMPT: ["assistant", "personality_prompt"],
+  BRAVE_API_KEY: ["search", "brave_api_key"],
   SERVER_HOST: ["server", "host"],
   SERVER_PORT: ["server", "port"],
   TLS_CERTFILE: ["tls", "certfile"],
@@ -53,12 +59,14 @@ const ENV_KEYS: Record<string, string[]> = {
 const DEFAULTS: Record<string, string | number> = {
   "llm.url": "http://localhost:1234/v1",
   "llm.model": "",
-  "stt.model": "cohere-transcribe",
+  "stt.model": "parakeet-unified-en",
   "stt.language": "en",
   "tts.voice": "af_heart",
   "tts.lang_code": "a",
   "assistant.name": "Rita",
   "assistant.personality": "sassy",
+  "assistant.personality_prompt": "",
+  "search.brave_api_key": "",
   "server.host": "0.0.0.0",
   "server.port": 8765,
 };
@@ -102,7 +110,9 @@ export function loadConfig(path = "config.yaml", env: NodeJS.ProcessEnv = proces
     ttsVoice: String(get("tts", "voice")),
     ttsLangCode: String(get("tts", "lang_code")),
     assistantName: String(get("assistant", "name")),
-    assistantSassy: get("assistant", "personality") !== "plain",
+    assistantPersonality: normalizePersonality(get("assistant", "personality")),
+    assistantPersonalityPrompt: String(get("assistant", "personality_prompt") ?? ""),
+    braveApiKey: String(get("search", "brave_api_key") ?? "").trim(),
     host: String(get("server", "host")),
     port: Number(get("server", "port")),
     allowedControls: raw.controls,

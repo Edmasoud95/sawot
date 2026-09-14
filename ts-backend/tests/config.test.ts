@@ -40,7 +40,7 @@ test("environment overrides yaml keys", () => {
   assert.equal(cfg.haUrl, "http://env.local:8123");
   assert.equal(cfg.llmModel, "from-yaml");
   assert.equal(cfg.port, 8080);
-  assert.equal(cfg.assistantSassy, false);
+  assert.equal(cfg.assistantPersonality, "plain");
 });
 
 test("works from the environment alone when no yaml exists", () => {
@@ -51,7 +51,7 @@ test("works from the environment alone when no yaml exists", () => {
   assert.equal(cfg.haUrl, "http://ha.local:8123");
   assert.equal(cfg.llmUrl, "http://host.docker.internal:1234/v1");
   assert.equal(cfg.llmModel, "");
-  assert.equal(cfg.sttModel, "cohere-transcribe");
+  assert.equal(cfg.sttModel, "parakeet-unified-en");
   assert.equal(cfg.ttsVoice, "af_heart");
   assert.equal(cfg.host, "0.0.0.0");
   assert.equal(cfg.port, 8765);
@@ -68,4 +68,15 @@ test("missing HA_URL and HA_TOKEN are reported by name", () => {
   const missing = join(mkdtempSync(join(tmpdir(), "sawot-cfg-")), "config.yaml");
   assert.throws(() => loadConfig(missing, { HA_TOKEN: "t" }), /HA_URL/);
   assert.throws(() => loadConfig(missing, { HA_URL: "http://ha" }), /HA_TOKEN/);
+});
+
+test("the Brave key comes from yaml or the environment and defaults to empty", () => {
+  const none = loadConfig(tmpConfig(), { HA_TOKEN: "t" });
+  assert.equal(none.braveApiKey, "");
+  const fromEnv = loadConfig(tmpConfig(), { HA_TOKEN: "t", BRAVE_API_KEY: "brv-1" });
+  assert.equal(fromEnv.braveApiKey, "brv-1");
+  const dir = mkdtempSync(join(tmpdir(), "sawot-cfg-"));
+  const path = join(dir, "config.yaml");
+  writeFileSync(path, yaml + "search:\n  brave_api_key: \"brv-yaml\"\n");
+  assert.equal(loadConfig(path, { HA_TOKEN: "t" }).braveApiKey, "brv-yaml");
 });

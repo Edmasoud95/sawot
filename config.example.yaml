@@ -5,14 +5,17 @@ llm:                            # built-in model server
   url: "http://192.168.1.11:1234/v1"  # any OpenAI-compatible /v1 endpoint
   model: "gemma-4"                     # any tool-calling model it serves
 stt:
-  model: "cohere-transcribe"           # STT model id (see Settings for the list)
+  model: "parakeet-unified-en"         # STT model id (see Settings for the list)
   language: "en"                      # transcription language
 tts:
   voice: "af_heart"                   # any Kokoro voice in the UI list
   lang_code: "a"                      # Kokoro language code ('a' = American English)
 assistant:
   name: "Rita"                        # assistant name/persona
-  personality: "sassy"                # "sassy" or "plain"
+  personality: "sassy"                # "sassy", "plain" or "custom"
+  # personality_prompt: "You are a dry British butler..."   # used when personality is "custom"
+search:
+  # brave_api_key: "BSA..."          # Brave Search API key; enables web search in Chat
 server:
   host: "0.0.0.0"                     # use "127.0.0.1" to restrict to localhost
   port: 8765
