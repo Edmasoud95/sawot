@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import ModelPicker from "../ModelPicker";
-import { BUTTON_CLS, FIELD_CLS, SectionTitle, Select, Skeleton, Toggle } from "./fields";
+import { BUTTON_CLS, FIELD_CLS, Select, Skeleton, Toggle } from "./fields";
 
 const PERSONALITY_OPTIONS = [
   { value: "sassy", label: "Sassy", hint: "Rita gets witty and teases you." },
@@ -86,7 +86,6 @@ export default function AssistantSection({ data, update }) {
   if (!data) return <Skeleton />;
   return (
     <div className="flex flex-col gap-5">
-      <SectionTitle>Assistant</SectionTitle>
       <ModelPicker
         label="Model"
         value={data.model}

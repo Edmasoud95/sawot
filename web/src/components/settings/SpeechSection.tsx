@@ -157,7 +157,6 @@ export default function SpeechSection({ data, update, active, onSwitched }) {
     <div className="flex flex-col gap-8">
       <ModelsSection active={active} onSwitched={onSwitched} />
       <div className="flex flex-col gap-3">
-        <SectionTitle>Voice</SectionTitle>
         {!data && <Skeleton />}
         {data && (
           <Select
