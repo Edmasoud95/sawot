@@ -11,8 +11,8 @@ def test_registry_has_recommended_stt_and_tts():
 
 
 def test_get_model_lookup():
-    assert get_model("stt", "cohere-transcribe").recommended is True
-    assert get_model("stt", "parakeet-unified-en").recommended is False
+    assert get_model("stt", "parakeet-unified-en").recommended is True
+    assert get_model("stt", "cohere-transcribe").recommended is False
     assert get_model("tts", "kokoro").kind == "tts"
     assert get_model("stt", "does-not-exist") is None
 
@@ -246,7 +246,7 @@ def test_select_tts_swaps_engine_persists_and_updates_voices(monkeypatch, tmp_pa
     loaded, persisted = [], []
     app = _tts_select_app(monkeypatch, tmp_path, factory=loaded.append, persist=persisted.append)
     client = TestClient(app)
-    assert client.get("/api/voices").json() == {"engine": "kokoro", "voices": ["af_heart", "am_adam"], "default": "af_heart"}
+    assert client.get("/api/voices").json() == {"engine": "kokoro", "voices": ["af_heart", "am_adam"], "default": "af_heart", "clones": []}
 
     resp = client.post("/api/models/tts/chatterbox-nano/select")
     assert resp.status_code == 200, resp.text
@@ -255,7 +255,7 @@ def test_select_tts_swaps_engine_persists_and_updates_voices(monkeypatch, tmp_pa
     by_id = {m["id"]: m for m in client.get("/api/models").json()["models"] if m["kind"] == "tts"}
     assert by_id["chatterbox-nano"]["active"] is True and by_id["kokoro"]["active"] is False
     assert by_id["chatterbox-nano"]["selectable"] is False and by_id["kokoro"]["selectable"] is False  # kokoro not downloaded here
-    assert client.get("/api/voices").json() == {"engine": "chatterbox-nano", "voices": ["default", "alice"], "default": "default"}
+    assert client.get("/api/voices").json() == {"engine": "chatterbox-nano", "voices": ["default", "alice"], "default": "default", "clones": []}
     assert client.post("/api/models/tts/chatterbox-turbo/select").status_code == 409  # not downloaded
 
 
@@ -366,4 +366,4 @@ def test_failed_switch_and_failed_reload_leave_a_clear_placeholder(monkeypatch, 
     from server.stt import ModelNotDownloaded
     with pytest.raises(ModelNotDownloaded, match="no text-to-speech model is loaded"):
         state.tts.synthesize("hi")
-    assert client.get("/api/voices").json() == {"engine": None, "voices": [], "default": None}
+    assert client.get("/api/voices").json() == {"engine": None, "voices": [], "default": None, "clones": []}

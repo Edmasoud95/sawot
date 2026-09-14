@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 
-import { buildSystemPrompt, type Agent } from "./agent.js";
+import { buildSystemPrompt, normalizePersonality, PERSONA, PERSONALITIES, PERSONALITY_PROMPT_MAX, type Agent, type Personality } from "./agent.js";
+import { createChatCompletion } from "./reasoningFallback.js";
 import type { InferenceClient } from "./inference.js";
 import { probeEndpoint, qualifyModel, type ProviderRegistry } from "./providers.js";
 
@@ -19,12 +20,12 @@ export function resolveVoice(voices: string[], current: string, fallback: string
 }
 
 /** Live voice list from the sidecar, or Kokoro's curated list when it is down. */
-async function activeVoices(ctx: SettingsCtx): Promise<{ voices: string[]; default: string | null }> {
+async function activeVoices(ctx: SettingsCtx): Promise<{ engine: string | null; voices: string[]; default: string | null }> {
   try {
     const live = await ctx.inference.voices();
-    if (live.voices.length) return { voices: live.voices, default: live.default };
+    if (live.voices.length) return { engine: live.engine, voices: live.voices, default: live.default };
   } catch { /* sidecar offline */ }
-  return { voices: KOKORO_VOICES, default: KOKORO_VOICES[0] };
+  return { engine: null, voices: KOKORO_VOICES, default: KOKORO_VOICES[0] };
 }
 
 export class SettingsStore {
@@ -49,7 +50,9 @@ export class SettingsStore {
 export interface SettingsState {
   model: string; // provider-qualified ("local::qwen3-8b")
   voice: string;
-  sassy: boolean;
+  personality: Personality;
+  /** The custom personality text; kept even while sassy or plain is active. */
+  personalityPrompt: string;
   detailedDrawings: boolean;
 }
 
@@ -66,11 +69,21 @@ export interface SettingsCtx {
   inference: InferenceClient;
 }
 
+function refinePrompt(name: string): string {
+  return `You write personality briefs for ${name}, a spoken smart-home voice assistant. ` +
+    "A brief is a single paragraph of two to five sentences addressed to the assistant in the second person: " +
+    "it names the character's traits, how it talks, and includes one or two short example lines in quotes. " +
+    "It never changes what the assistant can do, never mentions tools or devices, and stays speakable out loud. " +
+    "Here is the brief for the built-in sassy personality, as a model of the form:\n\n" + PERSONA.trim() + "\n\n" +
+    "Reply with the brief only: no title, no preamble, no markdown, and do not start with \"You have personality:\".";
+}
+
 function persist(ctx: SettingsCtx): void {
   ctx.store.save({
     model: ctx.state.model,
     voice: ctx.state.voice,
-    sassy: ctx.state.sassy,
+    personality: ctx.state.personality,
+    personalityPrompt: ctx.state.personalityPrompt,
     detailedDrawings: ctx.state.detailedDrawings,
     providers: ctx.registry.customSpecs(),
   });
@@ -91,11 +104,15 @@ async function settingsPayload(ctx: SettingsCtx): Promise<Record<string, any>> {
   const data: Record<string, any> = {
     model: ctx.state.model,
     voice: ctx.state.voice,
-    sassy: ctx.state.sassy,
+    personality: ctx.state.personality,
+    personalityPrompt: ctx.state.personalityPrompt,
     detailedDrawings: ctx.state.detailedDrawings,
     models,
     providers,
     voices: active.voices,
+    // The active speech engine, so the panel can offer voice cloning only
+    // where it works (Chatterbox).
+    engine: active.engine,
   };
   const builtin = providers.find((p) => p.builtin);
   if (builtin?.error) data.models_error = builtin.error;
@@ -119,8 +136,18 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
     const body = req.body ?? {};
     const model = body.model;
     const voice = body.voice;
-    const sassy = body.sassy;
+    // `sassy` is the pre-custom boolean; older clients may still send it.
+    const personality = body.personality !== undefined || body.sassy !== undefined
+      ? body.personality ?? (body.sassy ? "sassy" : "plain") : undefined;
+    const personalityPrompt = body.personalityPrompt;
     const detailedDrawings = body.detailedDrawings;
+
+    if (personality !== undefined && !(PERSONALITIES as readonly string[]).includes(personality)) {
+      return reply.code(400).send({ detail: "unknown personality: " + personality });
+    }
+    if (personalityPrompt !== undefined && (typeof personalityPrompt !== "string" || personalityPrompt.length > PERSONALITY_PROMPT_MAX)) {
+      return reply.code(400).send({ detail: `personality prompt must be text of at most ${PERSONALITY_PROMPT_MAX} characters` });
+    }
 
     if (voice !== undefined && !(await activeVoices(ctx)).voices.includes(voice)) {
       return reply.code(400).send({ detail: "unknown voice: " + voice });
@@ -142,9 +169,10 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
       ctx.state.model = qualifyModel(resolved.providerId, resolved.model);
     }
     if (voice !== undefined) ctx.state.voice = voice;
-    if (sassy !== undefined) {
-      ctx.state.sassy = Boolean(sassy);
-      ctx.setSystemPrompt(buildSystemPrompt(ctx.summary, ctx.state.sassy, ctx.name));
+    if (personality !== undefined || personalityPrompt !== undefined) {
+      if (personality !== undefined) ctx.state.personality = normalizePersonality(personality);
+      if (personalityPrompt !== undefined) ctx.state.personalityPrompt = personalityPrompt.trim();
+      ctx.setSystemPrompt(buildSystemPrompt(ctx.summary, ctx.state.personality, ctx.name, ctx.state.personalityPrompt));
     }
     if (detailedDrawings !== undefined) {
       ctx.state.detailedDrawings = Boolean(detailedDrawings);
@@ -153,6 +181,33 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
 
     persist(ctx);
     return settingsPayload(ctx);
+  });
+
+  // Turn a rough draft (or nothing) into a personality brief with the model
+  // selected at the top of Settings. Nothing is applied until it is saved.
+  app.post("/api/personality/refine", async (req: any, reply: any) => {
+    const draft = String((req.body ?? {}).text ?? "").trim().slice(0, PERSONALITY_PROMPT_MAX);
+    const resolved = ctx.registry.resolve(ctx.state.model);
+    const task = draft
+      ? "Rewrite these notes into the personality brief, keeping every trait and intent they express:\n\n" + draft
+      : "Invent a distinctive, likeable personality for this assistant and write its brief.";
+    try {
+      const resp = await createChatCompletion<any>(resolved.client, {
+        model: resolved.model,
+        messages: [
+          { role: "system", content: refinePrompt(ctx.name) },
+          { role: "user", content: task },
+        ],
+      });
+      // Models like to echo the example's opening; the prompt builder adds
+      // its own lead-in, so drop it here.
+      const text = String(resp.choices?.[0]?.message?.content ?? "").trim()
+        .replace(/^"(.*)"$/s, "$1").replace(/^(?:your|you have) personality:\s*/i, "").trim();
+      if (!text) return reply.code(502).send({ detail: "The model couldn't write a personality — try again." });
+      return { text: text.slice(0, PERSONALITY_PROMPT_MAX) };
+    } catch (e: any) {
+      return reply.code(502).send({ detail: "Couldn't reach the model to refine the personality: " + String(e?.message ?? e) });
+    }
   });
 
   app.post("/api/providers", async (req: any, reply: any) => {

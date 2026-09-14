@@ -12,8 +12,9 @@ test("only Chatterbox engines get the tag guidance in the prompt", () => {
     assert.ok(supportsSpeechTags(engine));
     for (const tag of CHATTERBOX_TAGS) assert.ok(prompt.includes(tag), `${engine} prompt lists ${tag}`);
     assert.match(prompt, /sparingly/i);
+    for (const inert of ["[whispering]", "[dramatic]", "[angry]"]) assert.ok(!prompt.includes(inert), `${inert} does nothing on Turbo and is not suggested`);
   }
-  assert.equal(CHATTERBOX_TAGS.length, 19);
+  assert.equal(CHATTERBOX_TAGS.length, 9);
 });
 
 test("tags are stripped from captions and history but kept for a Chatterbox voice", () => {
@@ -23,6 +24,8 @@ test("tags are stripped from captions and history but kept for a Chatterbox voic
   assert.equal(stripSpeechTags("[whispering]Shh, it's late."), "Shh, it's late.");
   assert.equal(stripSpeechTags("The [red] button, in [brackets]."), "The [red] button, in [brackets].", "unknown brackets are ordinary text");
   assert.equal(forSpeech(raw, "chatterbox-nano"), raw);
+  assert.equal(forSpeech("[dramatic] Every light blazed red. [whispering] We've been waiting. [gasp] Oh.", "chatterbox-turbo"),
+    "Every light blazed red. We've been waiting. [gasp] Oh.", "inert style tags are dropped even for Chatterbox");
   assert.equal(forSpeech(raw, "kokoro"), stripSpeechTags(raw), "other engines would read the tags aloud");
   assert.equal(forSpeech(raw, null), stripSpeechTags(raw));
 });

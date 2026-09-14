@@ -62,6 +62,8 @@ def register_openai_api(app, state) -> None:
                 wav = await asyncio.to_thread(state.tts.synthesize, text)
         except ModelNotDownloaded as exc:
             raise HTTPException(503, str(exc))
+        except Exception as exc:  # noqa: BLE001 - the engine's reason must reach the caller
+            raise HTTPException(500, f"speech synthesis failed: {exc}")
 
         if fmt == "wav" and speed == 1.0:
             return Response(content=wav, media_type="audio/wav")

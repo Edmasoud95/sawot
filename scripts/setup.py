@@ -92,7 +92,7 @@ def main():
     print("SAWOT setup")
     print("=" * 60)
 
-    stt = choose("Speech-to-text model:", STT_MODELS, "cohere-transcribe")
+    stt = choose("Speech-to-text model:", STT_MODELS, "parakeet-unified-en")
     tts = next(m for m in TTS_MODELS if m.recommended)  # Kokoro; Chatterbox downloads from Settings
 
     voice = ask("Kokoro voice", "af_heart")

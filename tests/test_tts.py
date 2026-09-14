@@ -41,38 +41,42 @@ class FakeTurbo:
     def generate(self, text, audio_prompt_path=None, **kw):
         import torch
         self.calls.append((text, audio_prompt_path))
+        self.kwargs = kw
         return torch.zeros(1, 2400)
 
 
-def _chatterbox(tmp_path):
+def _chatterbox(tmp_path, monkeypatch):
+    import server.models as models
     from server.tts import ChatterboxTTS
+    monkeypatch.setattr(models, "MODELS_DIR", tmp_path.parent)
     tts = ChatterboxTTS.__new__(ChatterboxTTS)
     tts._model = FakeTurbo()
-    tts._voices_dir = tmp_path / "voices"
     tts._voice = "default"
     tts.model_id = "chatterbox-nano"
     return tts
 
 
 @needs_torch
-def test_chatterbox_synthesize_uses_builtin_voice_by_default(tmp_path):
-    tts = _chatterbox(tmp_path)
+def test_chatterbox_synthesize_uses_builtin_voice_by_default(tmp_path, monkeypatch):
+    tts = _chatterbox(tmp_path / "tts", monkeypatch)
     data, samplerate = sf.read(io.BytesIO(tts.synthesize("hello")))
     assert samplerate == 24000 and len(data) == 2400
     assert tts._model.calls == [("hello", None)]
 
 
 @needs_torch
-def test_chatterbox_voices_are_reference_clips_plus_default(tmp_path):
-    tts = _chatterbox(tmp_path)
+def test_chatterbox_voices_are_reference_clips_plus_default(tmp_path, monkeypatch):
+    tmp_path = tmp_path / "tts"
+    tts = _chatterbox(tmp_path, monkeypatch)
     assert tts.voices() == ["default"]
-    (tmp_path / "voices").mkdir()
+    (tmp_path / "voices").mkdir(parents=True)
     (tmp_path / "voices" / "alice.wav").write_bytes(b"RIFF")
     (tmp_path / "voices" / "notes.txt").write_text("ignored")
     assert tts.voices() == ["default", "alice"]
     assert tts.default_voice == "default"
     tts.synthesize("hi", voice="alice")
     assert tts._model.calls[-1] == ("hi", str(tmp_path / "voices" / "alice.wav"))
+    assert tts._model.kwargs.get("norm_loudness") is False, "the engine's float64-promoting loudness step is skipped"
     tts.synthesize("hi", voice="nobody")
     assert tts._model.calls[-1] == ("hi", None), "unknown voices fall back to the built-in one"
 

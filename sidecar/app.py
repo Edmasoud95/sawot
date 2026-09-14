@@ -11,6 +11,7 @@ from fastapi import FastAPI
 
 from server.model_routes import register_model_routes
 from server.openai_api import register_openai_api
+from server.voices import register_voice_routes
 
 
 class EngineState:
@@ -48,4 +49,6 @@ def create_sidecar_app(
     # GET /api/models, POST /api/models/{kind}/{id}/download, POST .../select
     register_model_routes(app, state, stt_factory=stt_factory, persist_stt=persist_stt,
                           tts_factory=tts_factory, persist_tts=persist_tts)
+    # Voice cloning: POST /api/voices (name + recording), DELETE /api/voices/{name}
+    register_voice_routes(app, state)
     return app

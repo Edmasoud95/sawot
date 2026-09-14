@@ -73,11 +73,10 @@ def register_model_routes(
 
     @app.get("/api/voices")
     async def list_voices():
-        """Voices the active TTS engine can speak with, and its default."""
-        engine = getattr(state, "tts", None)
-        voices = list(engine.voices()) if engine is not None and hasattr(engine, "voices") else []
-        default = getattr(engine, "default_voice", voices[0] if voices else None)
-        return {"engine": getattr(state, "tts_model", None), "voices": voices, "default": default}
+        """Voices the active TTS engine can speak with, its default, and every
+        saved clone (listed even when the active engine cannot speak them)."""
+        from server.voices import voice_listing  # local: voices imports tts, which is heavy at import
+        return voice_listing(state)
 
     @app.post("/api/models/{kind}/{model_id}/download")
     async def start_download(kind: str, model_id: str):

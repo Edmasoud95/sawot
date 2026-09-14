@@ -81,7 +81,7 @@ function brief({ event, data }: { event: string; data: any }) {
   if (event === "tool_call") return `${data?.name}(${JSON.stringify(data?.args ?? {}).slice(0, 80)})`;
   if (event === "tool_result") return `${data?.name} ${data?.ok ? "ok" : "error"} · ${data?.size_chars ?? 0} chars${ms_}`;
   if (event === "reply") return `${(data?.text ?? "").slice(0, 80)}${ms_}`;
-  if (event === "tts") return `${data?.bytes ?? 0} bytes${ms_}`;
+  if (event === "tts") return `${data?.engine ? data.engine + " · " : ""}${data?.bytes ?? 0} bytes${ms_}${data?.text ? ` · "${String(data.text).slice(0, 80)}"` : ""}`;
   if (event === "user") return `"${data?.text ?? ""}"`;
   return JSON.stringify(data).slice(0, 80);
 }

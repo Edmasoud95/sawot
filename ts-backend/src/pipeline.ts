@@ -105,16 +105,17 @@ export async function runVoiceTurn(
   }
 
   const t1 = performance.now();
+  const spoken = forSpeech(reply, speechEngine);
   let wav: Buffer;
   try {
-    wav = await inference.synthesize(forSpeech(reply, speechEngine), voice);
+    wav = await inference.synthesize(spoken, voice);
   } catch (e) {
     await send("error", { message: speechError(e) });
     return;
   }
   await send("debug", {
     event: "tts",
-    data: { latency_ms: Math.round(performance.now() - t1), bytes: wav.length },
+    data: { latency_ms: Math.round(performance.now() - t1), bytes: wav.length, engine: speechEngine, text: spoken },
   });
   // Begin the expression with playback, so slow synthesis cannot use up its lifetime.
   if (expression) await send("expression", expression);

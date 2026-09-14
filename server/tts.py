@@ -4,10 +4,17 @@ from typing import Protocol
 import numpy as np
 import soundfile as sf
 
+from server import models as _models
 from server.models import MODELS_DIR, get_model, tts_dir
 from server.settings import KOKORO_VOICES
 
 SAMPLE_RATE = 24000
+
+
+def voices_dir():
+    """Reference clips for voice cloning, read at call time so a clip saved
+    from Settings shows up without reloading the engine."""
+    return _models.MODELS_DIR / "tts" / "voices"
 
 
 class TTSEngine(Protocol):
@@ -78,8 +85,6 @@ class ChatterboxTTS:
     tags such as [laugh] pass straight through in the text.
     """
 
-    VOICES_DIR = MODELS_DIR / "tts" / "voices"
-
     def __init__(self, model_id: str, device: str | None = None):
         from chatterbox.tts_turbo import ChatterboxTurboTTS  # heavy import; deferred
         import torch
@@ -90,7 +95,6 @@ class ChatterboxTTS:
         device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model_id = model_id
         self._model = ChatterboxTurboTTS.from_local(str(tts_dir(spec)), device, nano=model_id.endswith("nano"))
-        self._voices_dir = self.VOICES_DIR
         self._voice = "default"
         # The first generation pays for kernel compilation and lazy loads
         # (over a minute on a cold GPU); take that hit at load time, not on
@@ -106,7 +110,8 @@ class ChatterboxTTS:
             del self._model
 
     def voices(self) -> list[str]:
-        clips = sorted(p.stem for p in self._voices_dir.glob("*.wav")) if self._voices_dir.exists() else []
+        folder = voices_dir()
+        clips = sorted(p.stem for p in folder.glob("*.wav")) if folder.exists() else []
         return ["default", *clips]
 
     @property
@@ -115,9 +120,13 @@ class ChatterboxTTS:
 
     def synthesize(self, text: str, voice: str | None = None) -> bytes:
         name = voice or self._voice
-        clip = self._voices_dir / f"{name}.wav"
+        clip = voices_dir() / f"{name}.wav"
         prompt = str(clip) if name != "default" and clip.exists() else None
-        wav = self._model.generate(text, audio_prompt_path=prompt)
+        # Chatterbox's own loudness step multiplies the float32 clip by a
+        # numpy float64 gain, which numpy 2 promotes to float64 and the model
+        # then rejects ("expected scalar type Float but found Double"). Clips
+        # saved from Settings are normalised at save time instead.
+        wav = self._model.generate(text, audio_prompt_path=prompt, norm_loudness=False)
         data = wav.detach().cpu().numpy() if hasattr(wav, "detach") else np.asarray(wav)
         data = np.asarray(data, dtype=np.float32).reshape(-1)
         if data.size == 0:

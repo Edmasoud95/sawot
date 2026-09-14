@@ -46,7 +46,7 @@ ENV_KEYS: dict[str, tuple[str, ...]] = {
 DEFAULTS = {
     ("llm", "url"): "http://localhost:1234/v1",
     ("llm", "model"): "",
-    ("stt", "model"): "cohere-transcribe",
+    ("stt", "model"): "parakeet-unified-en",
     ("stt", "language"): "en",
     ("tts", "voice"): "af_heart",
     ("tts", "lang_code"): "a",

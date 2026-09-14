@@ -37,14 +37,14 @@ class ModelSpec:
 # All STT models are quantized GGUFs from Handy's catalog, run by
 # transcribe.cpp on CPU (or Vulkan when available) — no CUDA required.
 STT_MODELS = [
-    ModelSpec("stt", "cohere-transcribe", "Cohere Transcribe",
-              "handy-computer/cohere-transcribe-03-2026-gguf", 1560, recommended=True,
-              description="Recommended — top accuracy, 14 languages",
-              files=("cohere-transcribe-03-2026-Q4_K_M.gguf",)),
     ModelSpec("stt", "parakeet-unified-en", "Parakeet Unified EN 0.6B",
-              "handy-computer/parakeet-unified-en-0.6b-gguf", 731,
-              description="Very fast; English only",
+              "handy-computer/parakeet-unified-en-0.6b-gguf", 731, recommended=True,
+              description="Recommended — very fast and accurate; English only",
               files=("parakeet-unified-en-0.6b-Q8_0.gguf",)),
+    ModelSpec("stt", "cohere-transcribe", "Cohere Transcribe",
+              "handy-computer/cohere-transcribe-03-2026-gguf", 1560,
+              description="Top accuracy across 14 languages; larger and slower",
+              files=("cohere-transcribe-03-2026-Q4_K_M.gguf",)),
     ModelSpec("stt", "parakeet-tdt-v3", "Parakeet TDT 0.6B v3",
               "handy-computer/parakeet-tdt-0.6b-v3-gguf", 740,
               description="Fast; 25 European languages",

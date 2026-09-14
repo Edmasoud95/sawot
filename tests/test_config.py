@@ -159,7 +159,7 @@ def test_load_config_from_environment_only(tmp_path, monkeypatch):
     assert cfg.assistant_sassy is False
     assert cfg.port == 9000
     # Defaults for everything not given
-    assert cfg.stt_model == "cohere-transcribe"
+    assert cfg.stt_model == "parakeet-unified-en"
     assert cfg.tts_voice == "af_heart"
     assert cfg.host == "0.0.0.0"
     assert cfg.assistant_name == "Rita"

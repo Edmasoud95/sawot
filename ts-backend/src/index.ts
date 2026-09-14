@@ -7,7 +7,8 @@ import fastifyStatic from "@fastify/static";
 import { WebSocketServer } from "ws";
 import proxy from "@fastify/http-proxy";
 
-import { Agent, buildSystemPrompt } from "./agent.js";
+import { Agent, buildSystemPrompt, normalizePersonality } from "./agent.js";
+import { registerVoiceRoutes } from "./voiceRoutes.js";
 import { ChatStore } from "./chat.js";
 import { registerChatRoutes, type ChatCtx } from "./chatRoutes.js";
 import { loadConfig } from "./config.js";
@@ -83,6 +84,9 @@ async function main() {
   app.register(proxy, { upstream: config.sidecarUrl, prefix: "/v1/audio", rewritePrefix: "/v1/audio" });
   app.register(proxy, { upstream: config.sidecarUrl, prefix: "/v1/models", rewritePrefix: "/v1/models" });
   app.register(proxy, { upstream: config.sidecarUrl, prefix: "/api/models", rewritePrefix: "/api/models" });
+  // Voice cloning lives in the sidecar (it owns models/tts/voices/); the
+  // upload is relayed rather than proxied, see voiceRoutes.ts.
+  registerVoiceRoutes(app, config.sidecarUrl);
 
   const inference = new InferenceClient(config.sidecarUrl);
   const ha = new HomeAssistant(config.haUrl, config.haToken);
@@ -102,12 +106,15 @@ async function main() {
   const state: SettingsState = {
     model: qualifyModel(initial.providerId, initial.model),
     voice: overrides.voice ?? config.ttsVoice,
-    sassy: overrides.sassy ?? config.assistantSassy,
+    personality: overrides.personality !== undefined || overrides.sassy !== undefined
+      ? normalizePersonality(overrides.personality, overrides.sassy)
+      : config.assistantPersonality,
+    personalityPrompt: String(overrides.personalityPrompt ?? config.assistantPersonalityPrompt ?? ""),
     detailedDrawings: Boolean(overrides.detailedDrawings ?? false),
   };
 
   let summary = "";
-  let systemPrompt = buildSystemPrompt(summary, state.sassy, config.assistantName);
+  let systemPrompt = buildSystemPrompt(summary, state.personality, config.assistantName, state.personalityPrompt);
   const agent = new Agent(initial.client, initial.model, tools, systemPrompt);
   agent.setDetailedDrawings(state.detailedDrawings);
 
@@ -122,7 +129,7 @@ async function main() {
   } catch {
     summary = "(device list unavailable — use get_entities tool)";
   }
-  systemPrompt = buildSystemPrompt(summary, state.sassy, config.assistantName);
+  systemPrompt = buildSystemPrompt(summary, state.personality, config.assistantName, state.personalityPrompt);
   agent.setSystemPrompt(systemPrompt);
 
   registerSettingsRoutes(app, {

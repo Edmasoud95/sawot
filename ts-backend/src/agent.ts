@@ -9,14 +9,28 @@ import { speechTagPrompt, stripSpeechTags } from "./speechTags.js";
 
 export type HistoryMessage = Record<string, any>;
 
+export type Personality = "sassy" | "plain" | "custom";
+export const PERSONALITIES: readonly Personality[] = ["sassy", "plain", "custom"];
+/** Longest custom personality accepted, in characters. */
+export const PERSONALITY_PROMPT_MAX = 2000;
+
+/** Map a stored or configured value (including the pre-custom boolean) to a
+ *  personality, defaulting to sassy. */
+export function normalizePersonality(value: unknown, sassy?: boolean): Personality {
+  if (typeof value === "string" && (PERSONALITIES as readonly string[]).includes(value)) return value as Personality;
+  if (sassy === undefined) return "sassy";
+  return sassy ? "sassy" : "plain";
+}
+
 const INTRO_SASSY = "You are {name}, a sassy voice assistant for a smart home, ";
 const INTRO_PLAIN = "You are {name}, a friendly voice assistant for a smart home, ";
+const INTRO_CUSTOM = "You are {name}, a voice assistant for a smart home, ";
 
 const INTRO_TAIL =
   "speaking with the user out loud. Keep replies short, natural and speakable — " +
   "one or two sentences, no markdown, no lists, no emojis.";
 
-const PERSONA =
+export const PERSONA =
   "\n\nYou have personality: you're witty, a little sarcastic, and you tease the user " +
   "while still getting the job done. After doing a chore for them you might quip " +
   "something like \"Next time do it yourself.\" When the user asks you to control or " +
@@ -39,11 +53,14 @@ const FUNCTIONAL =
 
 export function buildSystemPrompt(
   entitySummary: string,
-  sassy = true,
+  personality: Personality = "sassy",
   name = "Rita",
+  customPrompt = "",
 ): string {
-  const intro = (sassy ? INTRO_SASSY : INTRO_PLAIN).replace("{name}", name);
-  const persona = sassy ? PERSONA : "";
+  const custom = customPrompt.trim();
+  if (personality === "custom" && !custom) personality = "plain";
+  const intro = (personality === "sassy" ? INTRO_SASSY : personality === "custom" ? INTRO_CUSTOM : INTRO_PLAIN).replace("{name}", name);
+  const persona = personality === "sassy" ? PERSONA : personality === "custom" ? "\n\nYour personality: " + custom : "";
   return (intro + INTRO_TAIL + persona + FUNCTIONAL).replace("{summary}", entitySummary);
 }
 
