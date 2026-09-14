@@ -4,46 +4,9 @@ import ModelsSection from "./ModelsSection";
 import ModelPicker from "./ModelPicker";
 import { loadProviderModels } from "./chat/useModels";
 import { useDialogFocus } from "../hooks/useDialogFocus";
+import { useRecorder } from "../hooks/useRecorder";
 import { useVoiceStore } from "../store";
-
-function SectionTitle({ children }) {
-  return (
-    <h3 className="font-mono text-[0.65rem] uppercase tracking-[0.25em] text-zinc-500">
-      {children}
-    </h3>
-  );
-}
-
-function Toggle({ label, hint, checked, onChange }) {
-  return (
-    <div className="flex items-start justify-between gap-4">
-      <span className="flex flex-col gap-1">
-        <span className="text-[0.85rem] font-medium text-zinc-200">{label}</span>
-        {hint && (
-          <span className="text-[0.78rem] leading-snug text-zinc-500">{hint}</span>
-        )}
-      </span>
-      <button
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
-        onClick={() => onChange(!checked)}
-        className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition-colors duration-300 ${
-          checked ? "bg-aurora-teal/70" : "bg-white/10"
-        }`}
-      >
-        <span
-          className={`absolute left-0 top-1 h-4 w-4 rounded-full bg-white shadow transition-transform duration-300 ${
-            checked ? "translate-x-6" : "translate-x-1"
-          }`}
-        />
-      </button>
-    </div>
-  );
-}
-
-const FIELD_CLS =
-  "w-full min-w-0 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[0.85rem] text-zinc-200 outline-none backdrop-blur transition-colors duration-300 hover:border-white/25 focus:border-aurora-teal/50 disabled:opacity-50";
+import { BUTTON_CLS, FIELD_CLS, SectionTitle, Select, Skeleton, Toggle } from "./settings/fields";
 
 function ProviderRow({ p, onRemove }) {
   return (
@@ -152,41 +115,263 @@ function AddProviderForm({ apply }) {
   );
 }
 
-function Select({ label, value, options, onChange, disabled = false }) {
+const PERSONALITY_OPTIONS = [
+  { value: "sassy", label: "Sassy", hint: "Rita gets witty and teases you." },
+  { value: "plain", label: "Plain", hint: "Friendly and to the point." },
+  { value: "custom", label: "Custom", hint: "Describe the character yourself, or let the model write it." },
+];
+
+function Personality({ value, prompt, onChange }) {
+  const [draft, setDraft] = useState(prompt ?? "");
+  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState("");
+  // A save from elsewhere (or first load) refreshes the draft; typing does not.
+  useEffect(() => { setDraft(prompt ?? ""); }, [prompt]);
+  const dirty = draft.trim() !== (prompt ?? "").trim();
+  const current = PERSONALITY_OPTIONS.find((o) => o.value === value) ?? PERSONALITY_OPTIONS[0];
+
+  async function refine() {
+    setFormError("");
+    setBusy(true);
+    try {
+      const res = await fetch("/api/personality/refine", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: draft }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setFormError(body.detail || "The model couldn't refine that — try again.");
+        return;
+      }
+      setDraft(body.text);
+    } catch {
+      setFormError("Couldn't reach the server.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-[0.85rem] font-medium text-zinc-200">{label}</span>
-      <select
-        aria-label={label}
+    <div className="flex flex-col gap-2.5">
+      <Select
+        label="Personality"
         value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-        className={FIELD_CLS}
-      >
-        {options.map((o) => (
-          <option key={o} value={o} className="bg-ink-900">
-            {o}
-          </option>
-        ))}
-      </select>
-    </label>
+        options={PERSONALITY_OPTIONS.map((o) => o.value)}
+        labels={Object.fromEntries(PERSONALITY_OPTIONS.map((o) => [o.value, o.label]))}
+        onChange={(personality) => onChange({ personality })}
+      />
+      <p className="-mt-1 text-[0.78rem] leading-snug text-zinc-500">{current.hint}</p>
+      {value === "custom" && (
+        <>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="A few words are enough — e.g. “dry British butler, unflappable, calls me sir”. Refine turns notes into a full brief; leave it empty to have the model invent one."
+            aria-label="Custom personality"
+            rows={5}
+            maxLength={2000}
+            disabled={busy}
+            className={`${FIELD_CLS} resize-y leading-snug`}
+          />
+          {formError && <p className="text-[0.75rem] leading-snug text-red-400/90">{formError}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={refine} disabled={busy} className={BUTTON_CLS}>
+              {busy ? "Asking the model…" : draft.trim() ? "Refine with model" : "Write one for me"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange({ personalityPrompt: draft })}
+              disabled={busy || !dirty}
+              className={BUTTON_CLS}
+            >
+              Save personality
+            </button>
+            {dirty && !busy && <span className="text-[0.72rem] text-zinc-500">Unsaved changes</span>}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
-function Skeleton() {
+// Read aloud in ten to fifteen seconds; varied sounds, natural rhythm.
+const CLONE_PASSAGE =
+  "Hi, this is my voice. I like it when the lights come on before I even ask, and when the coffee " +
+  "is ready by the time I reach the kitchen. Some days I talk fast, some days I take my time, but " +
+  "I always say exactly what I mean.";
+
+function ClonedVoices({ active, selectedVoice, onUse }) {
+  const [info, setInfo] = useState(null); // { engine, voices, default, clones }
+  const [name, setName] = useState("");
+  const [clip, setClip] = useState(null); // { blob, url }
+  const [recording, setRecording] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState("");
+  const { start, stop } = useRecorder((buffer) => {
+    const blob = new Blob([buffer], { type: "audio/webm" });
+    setClip((prev) => { if (prev) URL.revokeObjectURL(prev.url); return { blob, url: URL.createObjectURL(blob) }; });
+  });
+
+  const refresh = useCallback(() => {
+    fetch("/api/voices").then((r) => r.json()).then(setInfo).catch(() => setFormError("Couldn't reach the speech engine."));
+  }, []);
+  useEffect(() => { if (active) { setFormError(""); refresh(); } }, [active, refresh]);
+
+  async function toggleRecording() {
+    setFormError("");
+    if (recording) { stop(); setRecording(false); return; }
+    try {
+      await start();
+      setRecording(true);
+    } catch {
+      setFormError("Couldn't open the microphone — allow access and try again.");
+    }
+  }
+
+  async function call(url, init, okMessage) {
+    setFormError("");
+    setBusy(true);
+    try {
+      const res = await fetch(url, init);
+      const body = await res.json();
+      if (!res.ok) { setFormError(body.detail || okMessage); return null; }
+      setInfo(body);
+      return body;
+    } catch {
+      setFormError("Couldn't reach the server.");
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
+    const form = new FormData();
+    form.append("name", name.trim());
+    form.append("file", clip.blob, "clip.webm");
+    const body = await call("/api/voices", { method: "POST", body: form }, "Couldn't save the voice — try again.");
+    if (!body) return;
+    setName("");
+    setClip((prev) => { if (prev) URL.revokeObjectURL(prev.url); return null; });
+    if (chatterbox) onUse(body.voice);
+  }
+
+  async function remove(voice) {
+    const body = await call(`/api/voices/${encodeURIComponent(voice)}`, { method: "DELETE" }, "Couldn't remove the voice.");
+    if (body && voice === selectedVoice) onUse("default");
+  }
+
+  const chatterbox = String(info?.engine ?? "").startsWith("chatterbox-");
+  const clones = info?.clones ?? [];
   return (
-    <div className="flex animate-pulse flex-col gap-4" aria-hidden="true">
-      <div className="h-3 w-16 rounded bg-white/10" />
-      <div className="h-9 rounded-lg bg-white/5" />
-      <div className="h-3 w-16 rounded bg-white/10" />
-      <div className="h-9 rounded-lg bg-white/5" />
-      <div className="h-3 w-40 rounded bg-white/5" />
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-3">
+        <SectionTitle>Cloned voices</SectionTitle>
+        {!chatterbox && info && (
+          <p className="text-[0.78rem] leading-snug text-zinc-500">
+            Cloned voices are spoken by Chatterbox. Switch to Chatterbox Turbo or Nano under Text-to-speech to use one; you can still record and delete them here.
+          </p>
+        )}
+        {info && clones.length === 0 && (
+          <p className="text-[0.78rem] leading-snug text-zinc-500">No cloned voices yet.</p>
+        )}
+        {clones.map((voice) => (
+          <div key={voice} className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5">
+            <span className="flex min-w-0 items-center gap-2 text-[0.85rem] font-medium text-zinc-200">
+              <span className="truncate">{voice}</span>
+              {voice === selectedVoice && (
+                <span className="rounded-full bg-aurora-teal/15 px-2 py-0.5 font-mono text-[0.55rem] uppercase tracking-wider text-aurora-teal">in use</span>
+              )}
+            </span>
+            <span className="flex shrink-0 items-center gap-2">
+              {chatterbox && voice !== selectedVoice && (
+                <button type="button" onClick={() => onUse(voice)} disabled={busy} className={BUTTON_CLS}>Use</button>
+              )}
+              <button
+                type="button"
+                onClick={() => remove(voice)}
+                disabled={busy}
+                aria-label={`Delete voice ${voice}`}
+                className="grid h-7 w-7 place-items-center rounded-full border border-white/10 text-zinc-500 transition-colors duration-300 hover:border-red-400/50 hover:text-red-300 disabled:opacity-50"
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-col gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-3">
+        <span className="text-[0.85rem] font-medium text-zinc-200">Clone my voice</span>
+        <p className="text-[0.78rem] leading-snug text-zinc-500">
+          Read this aloud in your normal voice, ten to fifteen seconds, somewhere quiet. The voice picks up the mood you read it in.
+        </p>
+        <p className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[0.85rem] leading-relaxed text-zinc-300">
+          {CLONE_PASSAGE}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={toggleRecording} disabled={busy} className={BUTTON_CLS} aria-pressed={recording}>
+            {recording ? "Stop recording" : clip ? "Record again" : "Start recording"}
+          </button>
+          {recording && (
+            <span className="flex items-center gap-1.5 text-[0.75rem] text-red-300">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-400" /> Recording
+            </span>
+          )}
+          {clip && !recording && <audio controls src={clip.url} className="h-8 max-w-full" aria-label="Recording preview" />}
+        </div>
+        {clip && !recording && (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Name this voice (e.g. Ed)"
+              aria-label="Voice name"
+              maxLength={40}
+              className={`${FIELD_CLS} w-auto flex-1`}
+            />
+            <button type="button" onClick={save} disabled={busy || !name.trim()} className={BUTTON_CLS}>
+              {busy ? "Saving…" : "Save voice"}
+            </button>
+          </div>
+        )}
+      </div>
+      {formError && <p className="text-[0.75rem] leading-snug text-red-400/90">{formError}</p>}
+    </div>
+  );
+}
+
+const TABS = [
+  { key: "general", label: "General" },
+  { key: "advanced", label: "Advanced" },
+];
+
+function Tabs({ value, onChange }) {
+  return (
+    <div role="tablist" aria-label="Settings sections" className="flex gap-1 rounded-full border border-white/10 bg-white/[0.03] p-1">
+      {TABS.map((t) => (
+        <button
+          key={t.key}
+          role="tab"
+          aria-selected={value === t.key}
+          onClick={() => onChange(t.key)}
+          className={`rounded-full px-3.5 py-1 text-[0.78rem] transition-colors duration-300 ${
+            value === t.key ? "bg-white/[0.08] text-zinc-100" : "text-zinc-500 hover:text-zinc-200"
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
     </div>
   );
 }
 
 export default function SettingsPanel() {
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState("general");
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -335,8 +520,10 @@ export default function SettingsPanel() {
                 Saved
               </span>
             </div>
-            <button
-              ref={closeBtn}
+            <div className="flex items-center gap-3">
+              <Tabs value={tab} onChange={setTab} />
+              <button
+                ref={closeBtn}
               onClick={() => setOpen(false)}
               aria-label="Close settings"
               className="icon-button"
@@ -344,14 +531,27 @@ export default function SettingsPanel() {
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path d="M6 6l12 12M18 6L6 18" />
               </svg>
-            </button>
+              </button>
+            </div>
           </header>
           {error && (
             <p className="mx-6 mb-3 rounded-lg border border-red-400/20 bg-red-400/10 px-3 py-2 text-[0.8rem] text-red-300 sm:mx-10">
               {error}
             </p>
           )}
-          <div className="settings-content modal-scroll grid overflow-y-auto">
+          {tab === "advanced" && (
+            <div className="settings-content modal-scroll overflow-y-auto" role="tabpanel" aria-label="Advanced">
+              <section className="flex min-w-0 max-w-xl flex-col gap-5">
+                <ClonedVoices
+                  active={open && tab === "advanced"}
+                  selectedVoice={data?.voice}
+                  onUse={(voice) => update({ voice })}
+                />
+              </section>
+            </div>
+          )}
+          {tab === "general" && (
+          <div className="settings-content modal-scroll grid overflow-y-auto" role="tabpanel" aria-label="General">
             <section className="flex min-w-0 flex-col gap-5">
               <SectionTitle>Assistant</SectionTitle>
               {!data && !error && <Skeleton />}
@@ -374,17 +574,17 @@ export default function SettingsPanel() {
                     options={data.voices}
                     onChange={(voice) => update({ voice })}
                   />
+
                   <Toggle
                     label="Debug bar"
                     hint="A diagnostics strip along the bottom: turn timings, events, raw traffic, and live state."
                     checked={debugEnabled}
                     onChange={() => toggleDebug()}
                   />
-                  <Toggle
-                    label="Sassy personality"
-                    hint="Rita gets witty and teases you. Off is plain and friendly."
-                    checked={!!data.sassy}
-                    onChange={(sassy) => update({ sassy })}
+                  <Personality
+                    value={data.personality ?? "sassy"}
+                    prompt={data.personalityPrompt ?? ""}
+                    onChange={update}
                   />
                   <Toggle
                     label="Detailed drawings"
@@ -412,6 +612,7 @@ export default function SettingsPanel() {
               />
             </section>
           </div>
+          )}
         </div>
       </div>
     </>
