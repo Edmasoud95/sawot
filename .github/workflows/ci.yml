@@ -35,6 +35,10 @@ jobs:
         run: |
           node --import tsx tests/activity.test.ts
           node --import tsx tests/temperature.test.ts
+          node --import tsx tests/chatPrompt.test.ts
+          node --import tsx tests/search.test.ts
+          node --import tsx tests/chatRoutes.test.ts
+          node --import tsx tests/personality.test.ts
           node --import tsx ../web/tests/orbExpression.test.ts
           node --import tsx ../web/tests/inkSimulation.test.ts
 

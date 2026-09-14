@@ -46,9 +46,10 @@ you ask about the heating, a smile when it is pleased with itself.
 - **Devices view** — toggle lights and switches, drag brightness and colour
   temperature bars, pick colours, and step thermostat targets directly from
   the cards.
-- **Chat** — a ChatGPT-style interface with multiple server-stored
-  conversations, streaming replies, collapsible reasoning, inline device
-  cards, and the same Home Assistant tools.
+- **Chat** — a general-purpose AI chat with multiple server-stored
+  conversations, streaming replies, collapsible reasoning, image/text/PDF
+  uploads, web search with a Brave key, and a per-conversation switch that
+  brings in the Home Assistant tools and inline device cards.
 - **Attachments** — upload images (vision models), text files, and PDFs
   (extracted text is sent inline to the model).
 - **Personality** — "Rita" ships with a sassy, teasing persona; switch to
@@ -199,6 +200,7 @@ Edit `config.yaml`:
 | `assistant.name` | Assistant name in the system prompt (default `Rita`) |
 | `assistant.personality` | `sassy` (default), `plain`, or `custom` |
 | `assistant.personality_prompt` | The custom personality text (also editable and generated from Settings) |
+| `search.brave_api_key` | Brave Search API key; enables web search in Chat (optional) |
 | `server.host` / `server.port` | Bind address / port (default `0.0.0.0:8765`) |
 | `controls` | Optional per-domain service whitelist override |
 | `tls.certfile` / `tls.keyfile` | Optional — required for phone mic access over https |
@@ -216,12 +218,15 @@ required; the rest default to the values above.
 | `STT_MODEL` / `STT_LANGUAGE` | `stt.model` / `stt.language` |
 | `TTS_VOICE` / `TTS_LANG_CODE` | `tts.voice` / `tts.lang_code` |
 | `ASSISTANT_NAME` / `ASSISTANT_PERSONALITY` | `assistant.name` / `assistant.personality` |
+| `BRAVE_API_KEY` | `search.brave_api_key` |
 | `SERVER_HOST` / `SERVER_PORT` | `server.host` / `server.port` |
 | `TLS_CERTFILE` / `TLS_KEYFILE` | `tls.certfile` / `tls.keyfile` |
 | `SAWOT_DATA_DIR` | where `settings.json`, `data/` and `models/` live (default: beside `config.yaml`; `/data` in Docker) |
 
 Custom LLM providers and their API keys are added from Settings and stored in
 `settings.json` (gitignored). Keys are never returned by the API.
+The Brave key is treated the same way: it is read from `config.yaml` or the
+environment and never logged or returned.
 
 ## Models
 
@@ -315,9 +320,15 @@ targets. Every target is at least 44 px for touch.
 
 ### Chat (speech-bubble icon)
 
-Text chat with multiple server-stored conversations (`data/conversations/`),
-streaming replies with collapsible thinking, a per-conversation model picker,
-image/text/PDF uploads, the same Home Assistant tools, and inline device cards.
+A general-purpose assistant for everyday use, not a home controller. Multiple
+server-stored conversations (`data/conversations/`), streaming replies with
+collapsible thinking, a per-conversation model picker, image/text/PDF uploads,
+and markdown with highlighted code blocks. With a Brave Search key configured
+the model can call `web_search` and `fetch_page` and cites its sources as
+links. The house button in the header turns Home Assistant on for that
+conversation: the device list, the HA tools, and inline device cards. Chat has
+its own instructions in Settings → Assistant, separate from the voice
+personality.
 
 ### History (clock icon)
 
@@ -327,7 +338,8 @@ when the debug bar is on.
 ### Settings (gear icon)
 
 Model (searchable across every provider), voice, personality (sassy, plain,
-or a custom brief you write or have the model write), detailed drawings, the
+or a custom brief you write or have the model write), chat instructions,
+detailed drawings, the
 debug bar, custom providers, and STT/TTS model downloads. Changes apply
 instantly and persist.
 

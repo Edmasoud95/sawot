@@ -2,7 +2,8 @@
 
 ## Project
 
-SAWOT is a voice and chat assistant for Home Assistant. Preserve its minimal,
+SAWOT is a voice assistant for Home Assistant with a general-purpose chat mode
+that can bring the home tools in per conversation. Preserve its minimal,
 orb-centered interface and fluid ink animation. The GitHub repository is
 `Edmasoud95/sawot` and is public.
 
@@ -10,7 +11,8 @@ orb-centered interface and fluid ink animation. The GitHub repository is
 
 - `web/`: React, TypeScript, Vite, Zustand, Three.js/React Three Fiber.
 - `ts-backend/`: Fastify, voice WebSocket pipeline, chat streaming, Home Assistant
-  tools, provider registry (built-in local server plus custom OpenAI-compatible providers), and settings.
+  tools, chat prompt and Brave web search tools (`chatPrompt.ts`, `search.ts`),
+  provider registry (built-in local server plus custom OpenAI-compatible providers), and settings.
 - `sidecar/`: Python FastAPI speech service.
 - `server/`: shared Python speech engines, model management, configuration, and
   OpenAI-compatible audio routes. Current STT uses `transcribe-cpp`; TTS uses Kokoro.
@@ -44,6 +46,9 @@ npm run typecheck
 npm run build
 node --import tsx tests/activity.test.ts
 node --import tsx tests/temperature.test.ts
+node --import tsx tests/chatPrompt.test.ts
+node --import tsx tests/search.test.ts
+node --import tsx tests/chatRoutes.test.ts
 node --import tsx ../web/tests/orbExpression.test.ts
 node --import tsx ../web/tests/inkSimulation.test.ts
 ```
