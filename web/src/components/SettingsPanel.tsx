@@ -3,39 +3,21 @@ import gsap from "gsap";
 import { loadProviderModels } from "./chat/useModels";
 import { useDialogFocus } from "../hooks/useDialogFocus";
 import { useVoiceStore } from "../store";
-import { BUTTON_CLS, FIELD_CLS, SectionTitle, Select, Skeleton, Toggle } from "./settings/fields";
 import GeneralSection from "./settings/GeneralSection";
 import AssistantSection from "./settings/AssistantSection";
 import SpeechSection from "./settings/SpeechSection";
+import SectionNav from "./settings/SectionNav";
+import Toast from "./settings/Toast";
 
-const TABS = [
+const SECTIONS = [
   { key: "general", label: "General" },
-  { key: "advanced", label: "Advanced" },
+  { key: "assistant", label: "Assistant" },
+  { key: "speech", label: "Speech" },
 ];
-
-function Tabs({ value, onChange }) {
-  return (
-    <div role="tablist" aria-label="Settings sections" className="flex gap-1 rounded-full border border-white/10 bg-white/[0.03] p-1">
-      {TABS.map((t) => (
-        <button
-          key={t.key}
-          role="tab"
-          aria-selected={value === t.key}
-          onClick={() => onChange(t.key)}
-          className={`rounded-full px-3.5 py-1 text-[0.78rem] transition-colors duration-300 ${
-            value === t.key ? "bg-white/[0.08] text-zinc-100" : "text-zinc-500 hover:text-zinc-200"
-          }`}
-        >
-          {t.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 export default function SettingsPanel() {
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState("general");
+  const [section, setSection] = useState("general");
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -90,6 +72,7 @@ export default function SettingsPanel() {
   }, []);
   useEffect(() => {
     if (!open) return;
+    setSection("general");
     setError("");
     fetch("/api/settings")
       .then((r) => r.json())
@@ -162,66 +145,28 @@ export default function SettingsPanel() {
         aria-hidden="true"
         className="invisible fixed inset-0 z-40 bg-black/50 opacity-0 backdrop-blur-[3px]"
       />
-      <div className="pointer-events-none fixed inset-0 z-50 grid place-items-center p-4 pt-[max(1rem,env(safe-area-inset-top))]">
+      <div className="settings-layer pointer-events-none fixed inset-0 z-50 grid place-items-center">
         <div
           ref={panel}
           inert={!open}
           role="dialog"
           aria-modal="true"
           aria-label="Settings"
-          className="settings-panel pointer-events-auto invisible flex max-h-[min(88vh,48rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-ink-900/95 opacity-0 shadow-2xl shadow-black/60 backdrop-blur-2xl"
+          className="settings-panel pointer-events-auto invisible flex w-full flex-col overflow-hidden border border-white/10 bg-ink-900/95 opacity-0 shadow-2xl shadow-black/60 backdrop-blur-2xl"
         >
           <header className="settings-header flex items-center justify-between gap-3">
-            <div className="flex items-baseline gap-4">
-              <h2 className="text-xl font-medium text-zinc-100">Settings</h2>
-              <span
-                role="status"
-                className={`flex items-center gap-1.5 text-[0.75rem] text-aurora-teal transition-opacity duration-300 ${
-                  saved ? "opacity-100" : "opacity-0"
-                }`}
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-aurora-teal" />
-                Saved
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              <Tabs value={tab} onChange={setTab} />
-              <button
-                ref={closeBtn}
-              onClick={() => setOpen(false)}
-              aria-label="Close settings"
-              className="icon-button"
-            >
+            <h2 className="text-xl font-medium text-zinc-100">Settings</h2>
+            <button ref={closeBtn} onClick={() => setOpen(false)} aria-label="Close settings" className="icon-button">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path d="M6 6l12 12M18 6L6 18" />
               </svg>
-              </button>
-            </div>
+            </button>
           </header>
-          {error && (
-            <p className="mx-6 mb-3 rounded-lg border border-red-400/20 bg-red-400/10 px-3 py-2 text-[0.8rem] text-red-300 sm:mx-10">
-              {error}
-            </p>
-          )}
-          {tab === "advanced" && (
-            <div className="settings-content modal-scroll overflow-y-auto" role="tabpanel" aria-label="Advanced">
-              <SpeechSection
-                data={data}
-                update={update}
-                active={open && tab === "advanced"}
-                onSwitched={() => { fetch("/api/settings").then((r) => r.json()).then(setData).catch(() => {}); }}
-              />
-            </div>
-          )}
-          {tab === "general" && (
-          <div className="settings-content modal-scroll grid overflow-y-auto" role="tabpanel" aria-label="General">
-            <section className="flex min-w-0 flex-col gap-5">
-              <SectionTitle>Assistant</SectionTitle>
-              {!data && !error && <Skeleton />}
-              {data && (
-                <>
-                  <AssistantSection data={data} update={update} />
-
+          <div className="settings-body">
+            <SectionNav sections={SECTIONS} value={section} onChange={setSection} />
+            <div className="settings-content modal-scroll" role="tabpanel" aria-labelledby={`settings-tab-${section}`}>
+              <div className="settings-page">
+                {section === "general" && (
                   <GeneralSection
                     data={data}
                     debugEnabled={debugEnabled}
@@ -229,11 +174,20 @@ export default function SettingsPanel() {
                     removeProvider={removeProvider}
                     onProvidersChanged={(body) => { mergeSettings(body); refreshProviders(body.providers ?? []); }}
                   />
-                </>
-              )}
-            </section>
+                )}
+                {section === "assistant" && <AssistantSection data={data} update={update} />}
+                {section === "speech" && (
+                  <SpeechSection
+                    data={data}
+                    update={update}
+                    active={open && section === "speech"}
+                    onSwitched={() => { fetch("/api/settings").then((r) => r.json()).then(setData).catch(() => {}); }}
+                  />
+                )}
+              </div>
+              <Toast saved={saved} error={error} />
+            </div>
           </div>
-          )}
         </div>
       </div>
     </>
