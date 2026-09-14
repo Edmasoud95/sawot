@@ -66,8 +66,9 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
   app.get("/api/chat/conversations", async () => ctx.store.list());
 
   app.post("/api/chat/conversations", async (req: any) => {
-    const model = (req.body ?? {}).model || ctx.getDefaultModel();
-    return ctx.store.create(model);
+    const body = req.body ?? {};
+    const model = body.model || ctx.getDefaultModel();
+    return ctx.store.create(model, Boolean(body.homeAssistant));
   });
 
   app.get("/api/chat/conversations/:cid", async (req: any, reply: any) => {
@@ -82,6 +83,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     const body = req.body ?? {};
     if ("title" in body) conv.title = String(body.title).slice(0, 80);
     if ("model" in body) conv.model = String(body.model);
+    if ("homeAssistant" in body) conv.homeAssistant = Boolean(body.homeAssistant);
     ctx.store.save(conv);
     return conv;
   });

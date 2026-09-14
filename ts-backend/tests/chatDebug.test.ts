@@ -23,3 +23,11 @@ test("chat streaming yields debug events for rounds, tools, and the final reply"
   assert.deepEqual(events.filter(([e]) => e === "tool").length, 1);
   assert.equal(events.at(-1)![0], "final");
 });
+
+test("an empty tool list leaves the tools field out of the request", async () => {
+  const requests: any[] = [];
+  const client = { chat: { completions: { create: async (body: any) => { requests.push(body); return stream([{ choices: [{ delta: { content: "hi" } }] }]); } } } };
+  for await (const _ of runChat(client, "m", [], "sys", [{ role: "user", content: "hey" }])) { /* drain */ }
+  assert.equal("tools" in requests[0], false);
+  assert.equal(requests[0].stream, true);
+});

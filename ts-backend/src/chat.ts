@@ -88,9 +88,9 @@ export class ChatStore {
     return join(this.root, cid + ".json");
   }
 
-  create(model: string): any {
+  create(model: string, homeAssistant = false): any {
     const now = Date.now() / 1000;
-    const conv = { id: newId(), title: "New chat", model, created: now, updated: now, messages: [] };
+    const conv = { id: newId(), title: "New chat", model, homeAssistant, created: now, updated: now, messages: [] };
     this.save(conv);
     return conv;
   }
@@ -99,7 +99,9 @@ export class ChatStore {
     const p = this.path(cid);
     if (!existsSync(p)) return null;
     try {
-      return JSON.parse(readFileSync(p, "utf8"));
+      const conv = JSON.parse(readFileSync(p, "utf8"));
+      conv.homeAssistant = Boolean(conv.homeAssistant);
+      return conv;
     } catch {
       return null;
     }
@@ -131,6 +133,7 @@ export class ChatStore {
         const conv = JSON.parse(readFileSync(join(this.root, f), "utf8"));
         out.push({
           id: conv.id, title: conv.title, model: conv.model,
+          homeAssistant: Boolean(conv.homeAssistant),
           created: conv.created, updated: conv.updated,
         });
       } catch {
@@ -211,7 +214,7 @@ export async function* runChat(
     const stream = await createChatCompletion<any>(client, {
       model,
       messages: convo,
-      tools: toOpenAiTools(tools),
+      ...(tools.length ? { tools: toOpenAiTools(tools) } : {}),
       stream: true,
     });
 
