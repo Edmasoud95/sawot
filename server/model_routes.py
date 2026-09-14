@@ -1,11 +1,53 @@
 """REST endpoints for the model manager (list + download + engine switching)."""
 
 import asyncio
+import gc
+import logging
 from typing import Callable
 
 from fastapi import HTTPException
 
 from server.models import get_model, is_downloaded, manager
+from server.stt import UnavailableEngine
+
+logger = logging.getLogger("voice.models")
+
+KIND_LABEL = {"stt": "speech-to-text", "tts": "text-to-speech"}
+
+
+def _free_accelerator_memory() -> None:
+    """Return freed memory to the OS and GPU driver, not just to the
+    allocators' caches: glibc keeps released heap mapped (the sidecar sat on
+    3.5 GB of dead weights after unloading Chatterbox) and torch keeps VRAM
+    reserved unless told otherwise."""
+    gc.collect()
+    try:
+        import torch
+    except ImportError:
+        torch = None
+    if torch is not None and torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        pass  # not glibc (macOS, musl); nothing to trim
+
+
+def unload_engine(state, kind: str, message: str) -> None:
+    """Unload the live engine of one kind, first, so that at no point do two
+    models share the machine's memory. Requests that arrive before the next
+    engine is ready get ``message`` as a 503."""
+    old = getattr(state, kind, None)
+    setattr(state, kind, UnavailableEngine(message))
+    if old is not None and hasattr(old, "close"):
+        try:
+            old.close()
+        except Exception:  # noqa: BLE001 - the reference is dropped regardless
+            logger.exception("closing the old %s engine failed", kind)
+    del old
+    _free_accelerator_memory()
 
 
 def register_model_routes(
@@ -59,17 +101,37 @@ def register_model_routes(
             raise HTTPException(409, "model is not downloaded yet")
 
         async with switch_lock:
-            if getattr(state, f"{kind}_model") != model_id:
-                # Loading takes seconds; keep the event loop free. The old
-                # engine keeps serving until the new one is ready.
+            previous = getattr(state, f"{kind}_model")
+            if previous != model_id:
+                label = KIND_LABEL.get(kind, kind)
+                # Unload first: holding two models at once has taken the whole
+                # machine down, so the old one is freed before the new one is
+                # even started. Loading takes seconds; keep the event loop free.
+                await asyncio.to_thread(unload_engine, state, kind, f"{label} model {model_id} is loading")
+                setattr(state, f"{kind}_model", None)
                 try:
                     engine = await asyncio.to_thread(factory, model_id)
-                except ImportError as e:
-                    raise HTTPException(501, f"{model_id} needs an optional package that is not installed: {e}")
                 except Exception as e:  # noqa: BLE001 - surfaced to the UI
+                    await _restore(state, kind, previous, factory)
+                    if isinstance(e, ImportError):
+                        raise HTTPException(501, f"{model_id} needs an optional package that is not installed: {e}")
                     raise HTTPException(500, f"could not load {model_id}: {e}")
                 setattr(state, kind, engine)
                 setattr(state, f"{kind}_model", model_id)
                 if persist:
                     persist(model_id)
         return {"ok": True, "active": getattr(state, f"{kind}_model")}
+
+    async def _restore(state, kind: str, previous: str | None, factory: Callable) -> None:
+        """A switch failed after the old model was unloaded: bring it back,
+        or leave a placeholder that says why nothing is loaded."""
+        label = KIND_LABEL.get(kind, kind)
+        if previous:
+            try:
+                setattr(state, kind, await asyncio.to_thread(factory, previous))
+                setattr(state, f"{kind}_model", previous)
+                return
+            except Exception:  # noqa: BLE001 - reported below
+                logger.exception("reloading the previous %s model %s failed", kind, previous)
+        setattr(state, kind, UnavailableEngine(f"no {label} model is loaded — pick one in Settings"))
+        setattr(state, f"{kind}_model", None)

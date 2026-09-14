@@ -1,3 +1,4 @@
+import pytest
 import server.models as models
 from server.models import all_models, download, get_model, is_downloaded
 
@@ -269,3 +270,100 @@ def test_select_tts_reports_missing_package_clearly(monkeypatch, tmp_path):
     resp = client.post("/api/models/tts/chatterbox-nano/select")
     assert resp.status_code == 501
     assert "chatterbox" in resp.json()["detail"]
+
+
+def _switch_app(monkeypatch, tmp_path, factory):
+    """Sidecar app whose active TTS engine records when it is unloaded."""
+    from sidecar.app import create_sidecar_app
+
+    monkeypatch.setattr(models, "MODELS_DIR", tmp_path)
+    _fake_download(tmp_path, get_model("tts", "chatterbox-nano"))
+    _fake_download(tmp_path, get_model("tts", "chatterbox-turbo"))
+
+    class Old:
+        closed = False
+        def close(self):
+            Old.closed = True
+        def voices(self):
+            return ["af_heart"]
+        default_voice = "af_heart"
+
+    app = create_sidecar_app(None, Old(), tts_model="kokoro", tts_factory=factory)
+    return app, Old
+
+
+def test_select_unloads_the_old_engine_before_loading_the_new_one(monkeypatch, tmp_path):
+    """Two models never coexist in memory: the old one is closed and freed
+    first, and the new one is only built afterwards."""
+    from fastapi.testclient import TestClient
+    import server.model_routes as routes
+
+    order = []
+    monkeypatch.setattr(routes, "_free_accelerator_memory", lambda: order.append("freed"))
+
+    def factory(mid):
+        order.append(("load", mid, Old.closed))
+        return object()
+
+    app, Old = _switch_app(monkeypatch, tmp_path, factory)
+    client = TestClient(app)
+    assert client.post("/api/models/tts/chatterbox-nano/select").status_code == 200
+    assert order == ["freed", ("load", "chatterbox-nano", True)]
+
+
+def test_requests_during_a_switch_get_503_not_a_crash(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    seen = {}
+
+    def factory(mid):
+        seen["engine_while_loading"] = app.state.engines.tts
+        return object()
+
+    app, Old = _switch_app(monkeypatch, tmp_path, factory)
+    client = TestClient(app)
+    assert client.post("/api/models/tts/chatterbox-nano/select").status_code == 200
+    placeholder = seen["engine_while_loading"]
+    from server.stt import ModelNotDownloaded
+    with pytest.raises(ModelNotDownloaded, match="chatterbox-nano.*loading"):
+        placeholder.synthesize("hi")
+    with pytest.raises(ModelNotDownloaded):
+        placeholder.transcribe(b"x")
+    assert placeholder.voices() == [] and placeholder.default_voice is None
+
+
+def test_failed_switch_reloads_the_previous_model(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    loads = []
+
+    def factory(mid):
+        loads.append(mid)
+        if mid == "chatterbox-nano":
+            raise RuntimeError("out of memory")
+        return object()
+
+    app, Old = _switch_app(monkeypatch, tmp_path, factory)
+    client = TestClient(app)
+    resp = client.post("/api/models/tts/chatterbox-nano/select")
+    assert resp.status_code == 500 and "out of memory" in resp.json()["detail"]
+    assert loads == ["chatterbox-nano", "kokoro"], "the old model is unloaded first, so it must be brought back"
+    active = [m for m in client.get("/api/models").json()["models"] if m["kind"] == "tts" and m["active"]]
+    assert [m["id"] for m in active] == ["kokoro"]
+
+
+def test_failed_switch_and_failed_reload_leave_a_clear_placeholder(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    def factory(mid):
+        raise RuntimeError(f"cannot load {mid}")
+
+    app, Old = _switch_app(monkeypatch, tmp_path, factory)
+    client = TestClient(app)
+    assert client.post("/api/models/tts/chatterbox-turbo/select").status_code == 500
+    state = app.state.engines
+    assert state.tts_model is None
+    from server.stt import ModelNotDownloaded
+    with pytest.raises(ModelNotDownloaded, match="no text-to-speech model is loaded"):
+        state.tts.synthesize("hi")
+    assert client.get("/api/voices").json() == {"engine": None, "voices": [], "default": None}

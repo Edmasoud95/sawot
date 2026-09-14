@@ -52,3 +52,12 @@ def test_missing_stt_reports_which_model_to_download():
     engine = stt_mod.MissingSTT("cohere-transcribe")
     with pytest.raises(stt_mod.ModelNotDownloaded, match="cohere-transcribe.*Settings"):
         engine.transcribe(b"audio")
+
+
+def test_gguf_transcriber_close_drops_session_and_model():
+    engine = stt_mod.GgufTranscriber.__new__(stt_mod.GgufTranscriber)
+    engine._model = object()
+    engine._session = object()
+    engine.close()
+    assert not hasattr(engine, "_session") and not hasattr(engine, "_model")
+    engine.close()

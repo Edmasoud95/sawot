@@ -36,6 +36,7 @@ def create_sidecar_app(
 ) -> FastAPI:
     app = FastAPI(title="SAWOT inference sidecar")
     state = EngineState(stt, tts, openai_stt_model, tts_model)
+    app.state.engines = state
 
     @app.get("/health")
     async def health():

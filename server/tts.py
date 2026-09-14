@@ -46,6 +46,11 @@ class KokoroTTS:
     def set_voice(self, voice: str) -> None:
         self._voice = voice
 
+    def close(self) -> None:
+        """Drop the pipeline (and its weights) so a replacement can load."""
+        if hasattr(self, "_pipe"):
+            del self._pipe
+
     def voices(self) -> list[str]:
         return list(KOKORO_VOICES)
 
@@ -94,6 +99,11 @@ class ChatterboxTTS:
             self._model.generate("Ready.", audio_prompt_path=None)
         except Exception:  # noqa: BLE001 - warm-up is best effort
             pass
+
+    def close(self) -> None:
+        """Drop the model so its VRAM can be reclaimed before another loads."""
+        if hasattr(self, "_model"):
+            del self._model
 
     def voices(self) -> list[str]:
         clips = sorted(p.stem for p in self._voices_dir.glob("*.wav")) if self._voices_dir.exists() else []

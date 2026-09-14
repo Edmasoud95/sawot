@@ -124,3 +124,17 @@ def test_chatterbox_warms_up_once_at_load(monkeypatch, tmp_path):
     assert fake.calls[0][1] is None
     tts.synthesize("hi")
     assert len(fake.calls) == 2
+
+
+def test_engines_close_drops_their_models():
+    tts = KokoroTTS.__new__(KokoroTTS)
+    tts._pipe = FakePipeline()
+    tts._voice = "af_heart"
+    tts.close()
+    assert not hasattr(tts, "_pipe")
+    from server.tts import ChatterboxTTS
+    cb = ChatterboxTTS.__new__(ChatterboxTTS)
+    cb._model = object()
+    cb.close()
+    assert not hasattr(cb, "_model")
+    cb.close()  # idempotent

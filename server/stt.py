@@ -27,6 +27,28 @@ class MissingSTT:
         )
 
 
+class UnavailableEngine:
+    """Placeholder that stands in for either engine kind while a model is
+    being switched, or after a switch failed and nothing could be reloaded.
+    Every request gets the given message as a 503 instead of an AttributeError."""
+
+    def __init__(self, message: str):
+        self.message = message
+
+    def transcribe(self, audio: bytes, language: str | None = None) -> str:
+        raise ModelNotDownloaded(self.message)
+
+    def synthesize(self, text: str, voice: str | None = None) -> bytes:
+        raise ModelNotDownloaded(self.message)
+
+    def voices(self) -> list[str]:
+        return []
+
+    @property
+    def default_voice(self):
+        return None
+
+
 def decode_to_pcm(audio: bytes, sample_rate: int = 16000):
     """Decode browser audio (webm/wav/ogg) to mono float32 PCM via ffmpeg."""
     import numpy as np
@@ -66,6 +88,12 @@ class GgufTranscriber:
         self._session = self._model.session()
         self._language = language
         self._lock = threading.Lock()
+
+    def close(self) -> None:
+        """Release the ggml session and weights so a replacement can load."""
+        for attr in ("_session", "_model"):
+            if hasattr(self, attr):
+                delattr(self, attr)
 
     def transcribe(self, audio: bytes, language: str | None = None) -> str:
         pcm = decode_to_pcm(audio, self.SAMPLE_RATE)
