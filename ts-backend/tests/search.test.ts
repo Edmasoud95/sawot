@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BraveSearchClient, buildSearchTools } from "../src/search.js";
+import { BraveSearchClient, buildSearchTools, htmlToText, isPrivateAddress } from "../src/search.js";
 import { executeTool } from "../src/tools.js";
 
 function fakeFetch(status: number, body: unknown, capture: any[] = []): typeof fetch {
@@ -48,4 +48,68 @@ test("web_search clamps count and returns results", async () => {
   await executeTool(tools, "web_search", { query: "q" });
   assert.match(calls[1].url, /count=5/, "default count");
   assert.equal(tool.touchedIds, undefined, "search never produces device cards");
+});
+
+test("private, loopback and link-local addresses are recognised", () => {
+  for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.10", "169.254.1.1", "::1", "fc00::1", "fd12::3", "fe80::1", "::ffff:192.168.0.1", "0.0.0.0"]) {
+    assert.equal(isPrivateAddress(ip), true, ip);
+  }
+  for (const ip of ["8.8.8.8", "172.32.0.1", "93.184.216.34", "2606:4700::1111"]) {
+    assert.equal(isPrivateAddress(ip), false, ip);
+  }
+});
+
+test("htmlToText keeps paragraph text and drops scripts, styles and tags", () => {
+  const { title, text } = htmlToText(
+    "<html><head><title>My &amp; Page</title><style>p{color:red}</style></head>" +
+    "<body><script>alert(1)</script><h1>Hello</h1><p>One &lt;two&gt;</p><div>Three<br>Four</div><svg><path d=\"M0\"/></svg></body></html>",
+  );
+  assert.equal(title, "My & Page");
+  assert.equal(text, "Hello\nOne <two>\nThree\nFour");
+});
+
+const publicLookup = async () => ["93.184.216.34"];
+const privateLookup = async () => ["192.168.1.10"];
+const noClient = { search: async () => [] };
+
+test("fetch_page refuses unsafe URLs before fetching", async () => {
+  let fetched = 0;
+  const fetchFn = (async () => { fetched++; return new Response("x"); }) as typeof fetch;
+  const tools = buildSearchTools(noClient, { fetchFn, lookup: privateLookup });
+  for (const url of ["file:///etc/passwd", "ftp://example.com/", "http://127.0.0.1:8123/", "http://homeassistant.local:8123/", "http://[::1]/", "not a url"]) {
+    const result = await executeTool(tools, "fetch_page", { url });
+    assert.ok(result.error, url);
+  }
+  assert.equal(fetched, 0, "nothing was fetched");
+});
+
+test("fetch_page returns page text with a title and a truncation flag", async () => {
+  const long = "<p>" + "word ".repeat(6000) + "</p>";
+  const fetchFn = (async (url: any) => new Response(
+    String(url).includes("long") ? "<title>Long</title>" + long : "<title>Short</title><p>Hi there</p>",
+    { status: 200, headers: { "content-type": "text/html; charset=utf-8" } },
+  )) as typeof fetch;
+  const tools = buildSearchTools(noClient, { fetchFn, lookup: publicLookup });
+  const short = await executeTool(tools, "fetch_page", { url: "https://example.com/short" });
+  assert.deepEqual(short, { url: "https://example.com/short", title: "Short", text: "Hi there", truncated: false });
+  const longResult = await executeTool(tools, "fetch_page", { url: "https://example.com/long" });
+  assert.equal(longResult.truncated, true);
+  assert.equal(longResult.text.length, 20_000);
+});
+
+test("fetch_page rejects non-text content and follows only safe redirects", async () => {
+  const seen: string[] = [];
+  const fetchFn = (async (url: any) => {
+    seen.push(String(url));
+    if (String(url).endsWith("/pdf")) return new Response("%PDF", { status: 200, headers: { "content-type": "application/pdf" } });
+    if (String(url).endsWith("/hop")) return new Response(null, { status: 302, headers: { location: "http://192.168.1.10/" } });
+    return new Response("<p>ok</p>", { status: 200, headers: { "content-type": "text/html" } });
+  }) as typeof fetch;
+  const lookup = async (host: string) => (host === "192.168.1.10" ? ["192.168.1.10"] : ["93.184.216.34"]);
+  const tools = buildSearchTools(noClient, { fetchFn, lookup });
+  const pdf = await executeTool(tools, "fetch_page", { url: "https://example.com/pdf" });
+  assert.match(pdf.error, /content type/i);
+  const hop = await executeTool(tools, "fetch_page", { url: "https://example.com/hop" });
+  assert.match(hop.error, /private|local/i);
+  assert.ok(!seen.includes("http://192.168.1.10/"), "the private redirect target was never fetched");
 });
