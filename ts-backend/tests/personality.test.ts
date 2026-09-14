@@ -53,7 +53,7 @@ async function harness(url: string) {
   registry.setModels("local", ["gemma"]);
   const saved: any[] = [];
   const prompts: string[] = [];
-  const state: any = { model: "local::gemma", voice: "af_heart", personality: "sassy", personalityPrompt: "", detailedDrawings: false };
+  const state: any = { model: "local::gemma", voice: "af_heart", personality: "sassy", personalityPrompt: "", detailedDrawings: false, chatInstructions: "" };
   const app = Fastify();
   registerSettingsRoutes(app, {
     store: { load: () => ({}), save: (d: any) => saved.push(d) } as any,
@@ -116,4 +116,23 @@ test("a refine failure is reported, not thrown", async () => {
     assert.equal(res.statusCode, 502);
     assert.match(res.json().detail, /couldn't/i);
   } finally { await app.close(); server.close(); }
+});
+
+test("chat instructions are validated, trimmed, saved, and returned", async () => {
+  const llm = await llmServer(() => "unused");
+  const { app, state, saved, prompts } = await harness(llm.url);
+  try {
+    let res = await app.inject({ method: "GET", url: "/api/settings" });
+    assert.equal(res.json().chatInstructions, "");
+    res = await app.inject({ method: "POST", url: "/api/settings", payload: { chatInstructions: "  Prefer Python.  " } });
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(res.json().chatInstructions, "Prefer Python.");
+    assert.equal(state.chatInstructions, "Prefer Python.");
+    assert.equal(saved.at(-1).chatInstructions, "Prefer Python.");
+    assert.equal(prompts.length, 0, "chat instructions do not touch the voice prompt");
+    res = await app.inject({ method: "POST", url: "/api/settings", payload: { chatInstructions: "x".repeat(2001) } });
+    assert.equal(res.statusCode, 400);
+    res = await app.inject({ method: "POST", url: "/api/settings", payload: { chatInstructions: 42 } });
+    assert.equal(res.statusCode, 400);
+  } finally { await app.close(); llm.close(); }
 });

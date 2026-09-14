@@ -6,6 +6,9 @@ import { createChatCompletion } from "./reasoningFallback.js";
 import type { InferenceClient } from "./inference.js";
 import { probeEndpoint, qualifyModel, type ProviderRegistry } from "./providers.js";
 
+/** Longest chat instructions accepted, in characters. */
+export const CHAT_INSTRUCTIONS_MAX = 2000;
+
 export const KOKORO_VOICES = [
   "af_heart", "af_alloy", "af_bella", "af_nicole", "af_nova", "af_sky",
   "am_adam", "am_michael", "am_onyx",
@@ -86,6 +89,7 @@ function persist(ctx: SettingsCtx): void {
     voice: ctx.state.voice,
     personality: ctx.state.personality,
     personalityPrompt: ctx.state.personalityPrompt,
+    chatInstructions: ctx.state.chatInstructions,
     detailedDrawings: ctx.state.detailedDrawings,
     providers: ctx.registry.customSpecs(),
   });
@@ -108,6 +112,7 @@ async function settingsPayload(ctx: SettingsCtx): Promise<Record<string, any>> {
     voice: ctx.state.voice,
     personality: ctx.state.personality,
     personalityPrompt: ctx.state.personalityPrompt,
+    chatInstructions: ctx.state.chatInstructions,
     detailedDrawings: ctx.state.detailedDrawings,
     models,
     providers,
@@ -143,12 +148,16 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
       ? body.personality ?? (body.sassy ? "sassy" : "plain") : undefined;
     const personalityPrompt = body.personalityPrompt;
     const detailedDrawings = body.detailedDrawings;
+    const chatInstructions = body.chatInstructions;
 
     if (personality !== undefined && !(PERSONALITIES as readonly string[]).includes(personality)) {
       return reply.code(400).send({ detail: "unknown personality: " + personality });
     }
     if (personalityPrompt !== undefined && (typeof personalityPrompt !== "string" || personalityPrompt.length > PERSONALITY_PROMPT_MAX)) {
       return reply.code(400).send({ detail: `personality prompt must be text of at most ${PERSONALITY_PROMPT_MAX} characters` });
+    }
+    if (chatInstructions !== undefined && (typeof chatInstructions !== "string" || chatInstructions.length > CHAT_INSTRUCTIONS_MAX)) {
+      return reply.code(400).send({ detail: `chat instructions must be text of at most ${CHAT_INSTRUCTIONS_MAX} characters` });
     }
 
     if (voice !== undefined && !(await activeVoices(ctx)).voices.includes(voice)) {
@@ -180,6 +189,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
       ctx.state.detailedDrawings = Boolean(detailedDrawings);
       ctx.agent.setDetailedDrawings(ctx.state.detailedDrawings);
     }
+    if (chatInstructions !== undefined) ctx.state.chatInstructions = chatInstructions.trim();
 
     persist(ctx);
     return settingsPayload(ctx);
