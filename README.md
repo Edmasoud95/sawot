@@ -51,8 +51,10 @@ you ask about the heating, a smile when it is pleased with itself.
   cards, and the same Home Assistant tools.
 - **Attachments** — upload images (vision models), text files, and PDFs
   (extracted text is sent inline to the model).
-- **Personality** — "Rita" ships with a sassy, teasing persona that you can
-  switch off from Settings for a plain, friendly assistant.
+- **Personality** — "Rita" ships with a sassy, teasing persona; switch to
+  plain and friendly, or write a custom personality in Settings. Type a few
+  words and let the selected model refine them into a full brief, or have it
+  invent one from scratch, then save.
 - **Any OpenAI-compatible model server** — one built-in local endpoint plus
   any number of extra providers (OpenRouter, OpenAI, another local server, …)
   added with their API keys from Settings. Every provider's models appear in
@@ -90,8 +92,9 @@ thermometer reading on a phone:
 
 ![Chat mode](screenshots/chat.png)
 
-**Settings** — model picker across providers, voice, personality, drawing
-detail, and speech model downloads:
+**Settings** — three sections: General for providers and the debug bar,
+Assistant for the model, personality, and drawing detail, and Speech for the
+speech engines, voice, and voice cloning:
 
 ![Settings panel](screenshots/settings.png)
 
@@ -142,7 +145,7 @@ docker compose up -d
 ```
 
 Open <http://localhost:8765>, then download the speech models from Settings
-(Cohere Transcribe and Kokoro are the recommended defaults) and pick a model
+(Parakeet Unified EN and Kokoro are the recommended defaults) and pick a model
 from your provider. Everything the container writes — downloaded models,
 settings, chat history — lands in `./data`, so `docker compose pull && docker
 compose up -d` upgrades without losing anything.
@@ -189,12 +192,13 @@ Edit `config.yaml`:
 | `home_assistant.url` | Your Home Assistant URL |
 | `llm.url` | Built-in model server: any OpenAI-compatible `/v1` URL |
 | `llm.model` | The tool-calling model to use on it (or pick one from Settings) |
-| `stt.model` | STT model id (default `cohere-transcribe`; see Settings for the list) |
+| `stt.model` | STT model id (default `parakeet-unified-en`; see Settings for the list) |
 | `stt.language` | Transcription language (default `en`) |
 | `tts.voice` | Kokoro voice (see the Settings panel for the list) |
 | `tts.lang_code` | Kokoro language code (default `a` = American English) |
 | `assistant.name` | Assistant name in the system prompt (default `Rita`) |
-| `assistant.personality` | `sassy` (default) or `plain` |
+| `assistant.personality` | `sassy` (default), `plain`, or `custom` |
+| `assistant.personality_prompt` | The custom personality text (also editable and generated from Settings) |
 | `server.host` / `server.port` | Bind address / port (default `0.0.0.0:8765`) |
 | `controls` | Optional per-domain service whitelist override |
 | `tls.certfile` / `tls.keyfile` | Optional — required for phone mic access over https |
@@ -232,20 +236,25 @@ Speech-to-text and text-to-speech models are downloaded on demand into a local
 The STT catalog mirrors [Handy](https://github.com/cjpais/Handy)'s: quantized
 GGUF models (Cohere Transcribe, Parakeet, Whisper Large v3 Turbo, Canary) run
 on CPU by [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) —
-no CUDA or Hugging Face account needed. Recommended defaults: Cohere
-Transcribe (STT — top of the Open ASR Leaderboard, 14 languages, 1.6 GB) and
-Kokoro-82M (TTS). Once downloaded, the server runs fully offline.
+no CUDA or Hugging Face account needed. Recommended defaults: Parakeet
+Unified EN 0.6B (STT — very fast and accurate, English only, 0.7 GB; pick
+Cohere Transcribe for 14 languages) and Kokoro-82M (TTS). Once downloaded, the
+server runs fully offline.
 
 ### Chatterbox Turbo and Nano (optional)
 
 Two extra TTS engines from Resemble AI. Turbo (350M) is expressive and low
 latency on a GPU; Nano (110M) also runs well on CPU. Both understand
-performance tags such as `[laugh]`, `[sigh]` or `[whispering]` in the text;
-while a Chatterbox model is the active voice, the assistant is told about the
-tags and may use them sparingly (they are stripped from captions and history).
-Both can also clone a voice: drop a short WAV
-into `models/tts/voices/` and it appears in the voice picker under its file
-name. They need an optional package installed first, see
+sound tags such as `[laugh]`, `[sigh]` or `[gasp]` in the text; while a
+Chatterbox model is the active voice, the assistant is told about the tags and
+may use them sparingly (they are stripped from captions and history). Mood
+tags like `[whispering]` exist in the vocabulary but change nothing audible,
+so they are not offered.
+Both can also clone a voice: while a Chatterbox model is
+active, Settings shows **Clone my voice** — read the short passage aloud,
+name the recording, and it appears in the voice picker under that name
+(`default` stays the built-in voice). A WAV dropped into `models/tts/voices/`
+works the same way. They need an optional package installed first, see
 `requirements-chatterbox.txt` for the exact commands, then download either
 model from Settings and click it to switch.
 
@@ -317,9 +326,10 @@ when the debug bar is on.
 
 ### Settings (gear icon)
 
-Model (searchable across every provider), voice, sassy personality, detailed
-drawings, the debug bar, custom providers, and STT/TTS model downloads. Changes
-apply instantly and persist.
+Model (searchable across every provider), voice, personality (sassy, plain,
+or a custom brief you write or have the model write), detailed drawings, the
+debug bar, custom providers, and STT/TTS model downloads. Changes apply
+instantly and persist.
 
 ### Debug bar
 
