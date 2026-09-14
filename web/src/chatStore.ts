@@ -84,6 +84,22 @@ export const useChatStore = create<any>()((set, get) => ({
     }
   },
 
+  setHomeAssistant: async (homeAssistant) => {
+    const { activeId } = get();
+    if (!activeId) return;
+    try {
+      const updated = await patchConversation(activeId, { homeAssistant });
+      set((s) => ({
+        active: s.active ? { ...s.active, homeAssistant: updated.homeAssistant } : s.active,
+        conversations: s.conversations.map((c) =>
+          c.id === activeId ? { ...c, homeAssistant: updated.homeAssistant } : c
+        ),
+      }));
+    } catch (e) {
+      console.error("setHomeAssistant failed", e);
+    }
+  },
+
   addAttachment: (attachment) =>
     set((s) => ({ pendingAttachments: [...s.pendingAttachments, attachment] })),
 
