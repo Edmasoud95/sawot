@@ -11,6 +11,7 @@ import { Agent, buildSystemPrompt, normalizePersonality } from "./agent.js";
 import { registerVoiceRoutes } from "./voiceRoutes.js";
 import { ChatStore } from "./chat.js";
 import { registerChatRoutes, type ChatCtx } from "./chatRoutes.js";
+import { BraveSearchClient, buildSearchTools } from "./search.js";
 import { loadConfig } from "./config.js";
 import { HomeAssistant } from "./ha.js";
 import { InferenceClient } from "./inference.js";
@@ -111,6 +112,7 @@ async function main() {
       : config.assistantPersonality,
     personalityPrompt: String(overrides.personalityPrompt ?? config.assistantPersonalityPrompt ?? ""),
     detailedDrawings: Boolean(overrides.detailedDrawings ?? false),
+    chatInstructions: String(overrides.chatInstructions ?? "").trim().slice(0, 2000),
   };
 
   let summary = "";
@@ -144,13 +146,19 @@ async function main() {
     inference,
   });
 
+  const searchTools = config.braveApiKey
+    ? buildSearchTools(new BraveSearchClient(config.braveApiKey))
+    : [];
   const chatCtx: ChatCtx = {
     store: new ChatStore(join(dataDir, "data", "conversations")),
     resolve: (model) => registry.resolve(model),
-    tools,
+    haTools: tools,
+    searchTools,
     ha,
     uploadDir: join(dataDir, "data", "uploads"),
-    getSystemPrompt: () => systemPrompt,
+    name: config.assistantName,
+    getEntitySummary: () => summary,
+    getChatInstructions: () => state.chatInstructions,
     getDefaultModel: () => state.model,
   };
   registerChatRoutes(app, chatCtx);

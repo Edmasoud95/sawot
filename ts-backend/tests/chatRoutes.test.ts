@@ -58,3 +58,64 @@ test("the flag is set on create and toggled by patch", async () => {
     assert.equal(res.json().find((c: any) => c.id === id).homeAssistant, false);
   } finally { await app.close(); }
 });
+
+async function* once(text: string) { yield { choices: [{ delta: { content: text } }] }; }
+
+function recordingClient(requests: any[]) {
+  return { chat: { completions: { create: async (body: any) => { requests.push(body); return once("done"); } } } };
+}
+
+function sseEvents(body: string): any[] {
+  return body.split("\n").filter((l) => l.startsWith("data: ")).map((l) => JSON.parse(l.slice(6)));
+}
+
+const haTool = { name: "get_entities", description: "", parameters: {}, handler: async () => [] };
+const searchTool = { name: "web_search", description: "", parameters: {}, handler: async () => ({ results: [] }) };
+
+test("a general conversation gets the chat prompt and only the search tools", async () => {
+  const requests: any[] = [];
+  const { app } = harness({
+    resolve: () => ({ client: recordingClient(requests), model: "m" }),
+    haTools: [haTool], searchTools: [searchTool],
+    getChatInstructions: () => "Call me Ed.",
+  });
+  try {
+    const conv = (await app.inject({ method: "POST", url: "/api/chat/conversations", payload: {} })).json();
+    const res = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "hello" } });
+    assert.equal(res.statusCode, 200);
+    const system = requests[0].messages[0];
+    assert.equal(system.role, "system");
+    assert.match(system.content, /general-purpose AI assistant/);
+    assert.match(system.content, /Call me Ed\./);
+    assert.match(system.content, /web_search/);
+    assert.doesNotMatch(system.content, /Devices:/);
+    assert.deepEqual(requests[0].tools.map((t: any) => t.function.name), ["web_search"]);
+    const done = sseEvents(res.body).find((e) => e.type === "done");
+    assert.equal(done.message.content, "done");
+  } finally { await app.close(); }
+});
+
+test("a Home Assistant conversation adds the device block and tools", async () => {
+  const requests: any[] = [];
+  const { app } = harness({
+    resolve: () => ({ client: recordingClient(requests), model: "m" }),
+    haTools: [haTool], searchTools: [searchTool],
+  });
+  try {
+    const conv = (await app.inject({ method: "POST", url: "/api/chat/conversations", payload: { homeAssistant: true } })).json();
+    await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "lights?" } });
+    assert.match(requests[0].messages[0].content, /Devices:\n\(devices\)/);
+    assert.deepEqual(requests[0].tools.map((t: any) => t.function.name), ["web_search", "get_entities"]);
+  } finally { await app.close(); }
+});
+
+test("without a search key and without Home Assistant no tools are sent", async () => {
+  const requests: any[] = [];
+  const { app } = harness({ resolve: () => ({ client: recordingClient(requests), model: "m" }), haTools: [haTool] });
+  try {
+    const conv = (await app.inject({ method: "POST", url: "/api/chat/conversations", payload: {} })).json();
+    await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "hi" } });
+    assert.equal("tools" in requests[0], false);
+    assert.doesNotMatch(requests[0].messages[0].content, /web_search/);
+  } finally { await app.close(); }
+});

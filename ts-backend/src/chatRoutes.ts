@@ -4,6 +4,7 @@ import { extname, join } from "node:path";
 import type { FastifyInstance } from "fastify";
 
 import { ChatStore, newId, runChat, SAFE_ID, toOpenAiMessages } from "./chat.js";
+import { buildChatSystemPrompt, todayLabel } from "./chatPrompt.js";
 import type { HomeAssistant } from "./ha.js";
 import type { Tool } from "./tools.js";
 
@@ -24,10 +25,16 @@ export interface ChatCtx {
   store: ChatStore;
   /** Resolve a (possibly provider-qualified) model id to its client. */
   resolve: (model: string) => { client: any; model: string };
-  tools: Tool[];
+  /** Home Assistant tools, offered only when the conversation asks for them. */
+  haTools: Tool[];
+  /** web_search and fetch_page; empty when no search key is configured. */
+  searchTools: Tool[];
   ha: HomeAssistant | null;
   uploadDir: string;
-  getSystemPrompt: () => string;
+  /** Assistant name from config. */
+  name: string;
+  getEntitySummary: () => string;
+  getChatInstructions: () => string;
   getDefaultModel: () => string;
 }
 
@@ -164,10 +171,20 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
 
     try {
       const history = toOpenAiMessages(conv.messages, ctx.uploadDir);
-      const getCards = ctx.ha ? (ids: string[]) => ctx.ha!.getCards(ids) : undefined;
+      const homeAssistant = Boolean(conv.homeAssistant);
+      const tools = [...ctx.searchTools, ...(homeAssistant ? ctx.haTools : [])];
+      const system = buildChatSystemPrompt({
+        name: ctx.name,
+        instructions: ctx.getChatInstructions(),
+        today: todayLabel(),
+        homeAssistant,
+        entitySummary: ctx.getEntitySummary(),
+        search: ctx.searchTools.length > 0,
+      });
+      const getCards = homeAssistant && ctx.ha ? (ids: string[]) => ctx.ha!.getCards(ids) : undefined;
       const llm = ctx.resolve(conv.model);
       for await (const [event, data] of runChat(
-        llm.client, llm.model, ctx.tools, ctx.getSystemPrompt(), history, getCards,
+        llm.client, llm.model, tools, system, history, getCards,
       )) {
         if (event === "thinking") {
           assistant.thinking += data;

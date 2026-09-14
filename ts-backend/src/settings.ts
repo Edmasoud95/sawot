@@ -54,6 +54,8 @@ export interface SettingsState {
   /** The custom personality text; kept even while sassy or plain is active. */
   personalityPrompt: string;
   detailedDrawings: boolean;
+  /** Extra system-prompt instructions for Chat mode; blank means neutral. */
+  chatInstructions: string;
 }
 
 export interface SettingsCtx {
