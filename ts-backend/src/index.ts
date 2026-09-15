@@ -92,6 +92,9 @@ async function main() {
   const inference = new InferenceClient(config.sidecarUrl);
   const ha = new HomeAssistant(config.haUrl, config.haToken);
   const tools = buildHaTools(ha);
+  const searchTools = config.braveApiKey
+    ? buildSearchTools(new BraveSearchClient(config.braveApiKey))
+    : [];
 
   const store = new SettingsStore(join(dataDir, "settings.json"));
   const overrides = store.load();
@@ -117,7 +120,7 @@ async function main() {
 
   let summary = "";
   let systemPrompt = buildSystemPrompt(summary, state.personality, config.assistantName, state.personalityPrompt);
-  const agent = new Agent(initial.client, initial.model, tools, systemPrompt);
+  const agent = new Agent(initial.client, initial.model, [...tools, ...searchTools], systemPrompt);
   agent.setDetailedDrawings(state.detailedDrawings);
 
   const setSystemPrompt = (prompt: string) => {
@@ -146,9 +149,6 @@ async function main() {
     inference,
   });
 
-  const searchTools = config.braveApiKey
-    ? buildSearchTools(new BraveSearchClient(config.braveApiKey))
-    : [];
   const chatCtx: ChatCtx = {
     store: new ChatStore(join(dataDir, "data", "conversations")),
     resolve: (model) => registry.resolve(model),

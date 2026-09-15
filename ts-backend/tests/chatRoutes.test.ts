@@ -119,3 +119,33 @@ test("without a search key and without Home Assistant no tools are sent", async 
     assert.doesNotMatch(requests[0].messages[0].content, /web_search/);
   } finally { await app.close(); }
 });
+
+test("text chat executes find_in_page and gives matching passages to the model", async () => {
+  const { buildSearchTools } = await import("../src/search.js");
+  const requests: any[] = [];
+  const searchTools = buildSearchTools({ search: async () => [] }, {
+    lookup: async () => ["93.184.216.34"],
+    fetchFn: async () => new Response("Intro ".repeat(5000) + "The warranty lasts two years.", { headers: { "content-type": "text/plain" } }),
+  });
+  async function* call() {
+    yield { choices: [{ delta: { tool_calls: [{ index: 0, id: "find-1", function: {
+      name: "find_in_page", arguments: '{"url":"https://example.com/manual","query":"warranty"}',
+    } }] } }] };
+  }
+  const client = { chat: { completions: { create: async (body: any) => {
+    requests.push(structuredClone(body));
+    return requests.length === 1 ? call() : once("The warranty lasts two years.");
+  } } } };
+  const { app } = harness({ searchTools, resolve: () => ({ client, model: "m" }) });
+  try {
+    const conv = (await app.inject({ method: "POST", url: "/api/chat/conversations", payload: {} })).json();
+    const res = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "Find the warranty in the manual" } });
+    assert.equal(res.statusCode, 200);
+    assert.ok(requests[0].tools.some((t: any) => t.function.name === "find_in_page"));
+    assert.match(requests[0].messages[0].content, /find_in_page/);
+    const found = JSON.parse(requests[1].messages.find((m: any) => m.role === "tool").content);
+    assert.match(found.matches[0].text, /warranty lasts two years/);
+    assert.ok(sseEvents(res.body).some(e => e.type === "tool" && e.name === "find_in_page"));
+    assert.equal(sseEvents(res.body).find(e => e.type === "done").message.content, "The warranty lasts two years.");
+  } finally { await app.close(); }
+});

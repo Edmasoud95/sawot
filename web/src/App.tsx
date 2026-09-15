@@ -1,5 +1,6 @@
 import Orb from "./components/Orb";
 import Captions from "./components/Captions";
+import VoiceSources from "./components/VoiceSources";
 import PushToTalk from "./components/PushToTalk";
 import HistoryDrawer from "./components/HistoryDrawer";
 import SettingsPanel from "./components/SettingsPanel";
@@ -15,6 +16,7 @@ export default function App() {
   const mode = useVoiceStore((s) => s.mode);
   const debugEnabled = useVoiceStore((s) => s.debugEnabled);
   const hasCaptions = useVoiceStore((s) => !!(s.userCaption || s.assistantCaption));
+  const hasSearch = useVoiceStore((s) => !!s.search);
   return (
     <main className="app-shell" data-mode={mode} data-debug={debugEnabled}>
       <header className="app-header">
@@ -30,7 +32,7 @@ export default function App() {
         <ChatView sendControl={sendControl} />
       ) : (
         <div className="voice-workspace">
-          <div className="voice-content">
+          <div className="voice-content" data-search={hasSearch}>
             {mode === "orb" ? (
               <div className="orb-stage" aria-hidden="true"><Orb /></div>
             ) : (
@@ -38,6 +40,7 @@ export default function App() {
                 <CardGrid sendControl={sendControl} />
               </section>
             )}
+            <VoiceSources />
             <div className="caption-space" data-visible={hasCaptions}>
               {hasCaptions && <Captions />}
             </div>

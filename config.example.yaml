@@ -15,7 +15,7 @@ assistant:
   personality: "sassy"                # "sassy", "plain" or "custom"
   # personality_prompt: "You are a dry British butler..."   # used when personality is "custom"
 search:
-  # brave_api_key: "BSA..."          # Brave Search API key; enables web search in Chat
+  # brave_api_key: "BSA..."          # Brave Search API key; enables web tools in voice and Chat
 server:
   host: "0.0.0.0"                     # use "127.0.0.1" to restrict to localhost
   port: 8765

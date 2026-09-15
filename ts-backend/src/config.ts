@@ -16,7 +16,7 @@ export interface Config {
   assistantName: string;
   assistantPersonality: "sassy" | "plain" | "custom";
   assistantPersonalityPrompt: string;
-  /** Brave Search API key; empty disables the chat web search tools. */
+  /** Brave Search API key; empty disables the voice and chat web tools. */
   braveApiKey: string;
   host: string;
   port: number;

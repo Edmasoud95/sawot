@@ -200,7 +200,7 @@ Edit `config.yaml`:
 | `assistant.name` | Assistant name in the system prompt (default `Rita`) |
 | `assistant.personality` | `sassy` (default), `plain`, or `custom` |
 | `assistant.personality_prompt` | The custom personality text (also editable and generated from Settings) |
-| `search.brave_api_key` | Brave Search API key; enables web search in Chat (optional) |
+| `search.brave_api_key` | Brave Search API key; enables web tools in voice and Chat (optional) |
 | `server.host` / `server.port` | Bind address / port (default `0.0.0.0:8765`) |
 | `controls` | Optional per-domain service whitelist override |
 | `tls.certfile` / `tls.keyfile` | Optional — required for phone mic access over https |
@@ -324,8 +324,15 @@ A general-purpose assistant for everyday use, not a home controller. Multiple
 server-stored conversations (`data/conversations/`), streaming replies with
 collapsible thinking, a per-conversation model picker, image/text/PDF uploads,
 and markdown with highlighted code blocks. With a Brave Search key configured
-the model can call `web_search` and `fetch_page` and cites its sources as
-links. The house button in the header turns Home Assistant on for that
+the model can call `web_search`, `fetch_page`, and `find_in_page` and cites its
+sources as links. These tools are also available in voice mode. `fetch_page`
+returns a 20,000-character preview; `find_in_page` searches the longer cached
+text for a literal phrase, ignoring case, and returns up to 10 passages with
+surrounding context (5 by default). Pages are cached in memory for 5 minutes,
+with at most 12 URL entries and a 2 MiB download limit per page. Results flag
+incomplete downloads; `fetch_page` can refresh a cached page.
+
+The house button in the header turns Home Assistant on for that
 conversation: the device list, the HA tools, and inline device cards. Chat has
 its own instructions in Settings → Assistant, separate from the voice
 personality.

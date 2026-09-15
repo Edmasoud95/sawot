@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { expressionFromActivity, expressionFromPayload, expressionFromReading } from "./lib/orbExpression";
+import { updateVoiceSearch } from "./lib/voiceSearch";
 
 // High-frequency mic/playback level, deliberately OUTSIDE React state:
 // the orb reads it per-frame in its render loop; pushing 60Hz updates
@@ -19,15 +20,18 @@ export const useVoiceStore = create<any>()((set) => ({
   traces: [], // [{ id, events: [{event, data}] }], capped at MAX_TRACES
   nextTraceId: 1,
   expression: null,
+  search: null,
 
-  setStatus: (status) => set({ status, ...(["recording", "connecting"].includes(status) ? { expression: null } : {}) }),
+  setStatus: (status) => set({ status, ...(["recording", "connecting"].includes(status) ? { expression: null, search: null } : {}) }),
+  showSearch: (event) => set((s) => ({ search: updateVoiceSearch(s.search, event) })),
+  clearSearch: () => set({ search: null }),
   showActivity: (activity) => set((s) => ({ expression: expressionFromActivity(s.expression, activity) })),
   showReading: (reading) => set((s) => ({ expression: expressionFromReading(s.expression, reading) })),
   showExpression: (payload) => set((s) => ({ expression: expressionFromPayload(s.expression, payload) })),
   clearExpression: (expected?) => set((s) => !expected || s.expression === expected ? { expression: null } : {}),
   setUserCaption: (text) => set({ userCaption: text }),
   setAssistantCaption: (text) => set({ assistantCaption: text }),
-  clearCaptions: () => set({ userCaption: "", assistantCaption: "" }),
+  clearCaptions: () => set({ userCaption: "", assistantCaption: "", search: null }),
   addTurn: (role, text, traceId = null) =>
     set((s) => ({ history: [...s.history, { role, text, traceId }] })),
   toggleDrawer: () => set((s) => ({ drawerOpen: !s.drawerOpen })),

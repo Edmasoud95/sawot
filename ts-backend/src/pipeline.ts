@@ -43,6 +43,10 @@ export async function runVoiceTurn(
   let expression: Record<string, unknown> | null = null;
   let activity: { tool: string; domain: string; service?: string } | null = null;
   const onAgentEvent = async (event: string, data: any) => {
+    if (event === "search") {
+      await send("search", data);
+      return;
+    }
     if (event === "reading") {
       reading = data;
       return;

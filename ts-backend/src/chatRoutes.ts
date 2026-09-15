@@ -27,7 +27,7 @@ export interface ChatCtx {
   resolve: (model: string) => { client: any; model: string };
   /** Home Assistant tools, offered only when the conversation asks for them. */
   haTools: Tool[];
-  /** web_search and fetch_page; empty when no search key is configured. */
+  /** Shared web tools, including find_in_page; empty without a search key. */
   searchTools: Tool[];
   ha: HomeAssistant | null;
   uploadDir: string;

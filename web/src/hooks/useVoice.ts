@@ -26,6 +26,8 @@ export function useVoice() {
           s.showExpression(msg);
         } else if (msg.type === "activity") {
           s.showActivity(msg);
+        } else if (msg.type === "search") {
+          s.showSearch(msg);
         } else if (msg.type === "debug") {
           s.addDebugEvent(msg);
         } else if (msg.type === "transcript") {
@@ -41,6 +43,7 @@ export function useVoice() {
           // Keep inline chat cards in sync with control refreshes.
           useChatStore.getState().patchCards(msg.entities);
         } else if (msg.type === "error") {
+          s.clearSearch();
           s.clearExpression();
           s.setAssistantCaption(msg.message);
           s.setStatus("idle");
@@ -50,6 +53,7 @@ export function useVoice() {
         if (useVoiceStore.getState().debugEnabled) useDebugStore.getState().logMessage("in", `audio ${buf.byteLength} bytes`);
         useVoiceStore.getState().setStatus("speaking");
         playWav(buf, () => useVoiceStore.getState().setStatus("idle")).catch(() => {
+          useVoiceStore.getState().clearSearch();
           useVoiceStore.getState().clearExpression();
           useVoiceStore.getState().setStatus("idle");
         });

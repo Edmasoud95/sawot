@@ -37,6 +37,9 @@ jobs:
           node --import tsx tests/temperature.test.ts
           node --import tsx tests/chatPrompt.test.ts
           node --import tsx tests/search.test.ts
+          node --import tsx tests/findInPage.test.ts
+          node --import tsx tests/voiceSearch.test.ts
+          node --import tsx ../web/tests/voiceSearch.test.ts
           node --import tsx tests/chatRoutes.test.ts
           node --import tsx tests/personality.test.ts
           node --import tsx ../web/tests/orbExpression.test.ts

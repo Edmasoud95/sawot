@@ -11,7 +11,7 @@ export interface ChatPromptOptions {
   homeAssistant: boolean;
   /** Device list, used only when homeAssistant is true. */
   entitySummary: string;
-  /** Whether web_search and fetch_page are offered. */
+  /** Whether the web search, page fetch, and find tools are offered. */
   search: boolean;
 }
 
@@ -34,7 +34,10 @@ const IDENTITY =
 const SEARCH =
   "\n\nYou have web tools. Use web_search for current events, facts that may " +
   "have changed since your training, and anything the user asks you to look " +
-  "up. Use fetch_page to read a result when its snippet is not enough. Cite " +
+  "up. Use fetch_page to read a result when its snippet is not enough. Use " +
+  "find_in_page to locate specific phrases in a page, including text beyond " +
+  "the fetch_page preview. It returns matching passages with context; if " +
+  "page_truncated is true, the entire page was not searched. Cite " +
   "sources as markdown links in your answer and never invent URLs.";
 
 export function buildChatSystemPrompt(o: ChatPromptOptions): string {

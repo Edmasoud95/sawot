@@ -113,3 +113,48 @@ test("fetch_page rejects non-text content and follows only safe redirects", asyn
   assert.match(hop.error, /private|local/i);
   assert.ok(!seen.includes("http://192.168.1.10/"), "the private redirect target was never fetched");
 });
+
+test("Brave retries a short rate limit and returns the subsequent results", async () => {
+  const attempts: number[] = [];
+  const client = new BraveSearchClient("key", async () => {
+    attempts.push(performance.now());
+    if (attempts.length === 1) return new Response(null, { status: 429, headers: {
+      "X-RateLimit-Remaining": "0, 1200", "X-RateLimit-Reset": "1, 90000",
+    } });
+    return new Response(JSON.stringify({ web: { results: [{ title: "Recovered", url: "https://example.com/", description: "Found" }] } }));
+  });
+  const result = await client.search("news", 1);
+  assert.equal(result[0].title, "Recovered");
+  assert.equal(attempts.length, 2);
+  assert.ok(attempts[1] - attempts[0] >= 950, "wait for the one-second limit to reset");
+});
+
+test("Brave bounds retries and does not retry authentication or long quota failures", async () => {
+  for (const [status, headers, expected] of [
+    [429, {}, 3],
+    [401, {}, 1],
+    [429, { "Retry-After": "3600" }, 1],
+    [429, { "X-RateLimit-Remaining": "0, 0", "X-RateLimit-Reset": "1, 90000" }, 1],
+  ] as const) {
+    let calls = 0;
+    const client = new BraveSearchClient("secret", async () => {
+      calls++;
+      return new Response(null, { status, headers });
+    });
+    await assert.rejects(client.search("news", 1), new RegExp(`HTTP ${status}`));
+    assert.equal(calls, expected);
+  }
+});
+
+test("Brave keeps trusted favicon URLs for source metadata and rejects other origins", async () => {
+  const favicon = "https://imgs.search.brave.com/test-icon";
+  const client = new BraveSearchClient("key", fakeFetch(200, { web: { results: [
+    { title: "A", url: "https://example.com/a", profile: { img: favicon } },
+    { title: "B", url: "https://example.com/b", profile: { img: "http://127.0.0.1/icon" } },
+  ] } }));
+  const results = await client.search("news", 2);
+  const { voiceSearchSources } = await import("../src/search.js");
+  const sources = voiceSearchSources("web_search", { results });
+  assert.equal(sources[0].favicon, favicon);
+  assert.equal(sources[1].favicon, undefined);
+});
