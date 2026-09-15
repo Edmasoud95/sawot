@@ -44,16 +44,16 @@ async function handleControl(
   try {
     msg = JSON.parse(raw);
   } catch {
-    socket.send(JSON.stringify({ type: "error", message: "malformed message" }));
+    socket.send(JSON.stringify({ type: "error", source: "control", message: "malformed message" }));
     return;
   }
   if (msg.type !== "control") {
-    socket.send(JSON.stringify({ type: "error", message: "unknown message type" }));
+    socket.send(JSON.stringify({ type: "error", source: "control", message: "unknown message type" }));
     return;
   }
   const { domain, service, entity_id } = msg;
   if (!entity_id || !(controls[domain] ?? []).includes(service)) {
-    socket.send(JSON.stringify({ type: "error", message: "control not allowed" }));
+    socket.send(JSON.stringify({ type: "error", source: "control", message: "control not allowed" }));
     return;
   }
   try {
@@ -61,7 +61,7 @@ async function handleControl(
     const cards = await ha.getCards([entity_id]);
     socket.send(JSON.stringify({ type: "entities", entities: cards }));
   } catch {
-    socket.send(JSON.stringify({ type: "error", message: "control failed" }));
+    socket.send(JSON.stringify({ type: "error", source: "control", message: "control failed" }));
   }
 }
 
@@ -191,8 +191,12 @@ async function main() {
 
       ws.on("message", (data: any, isBinary: boolean) => {
         if (isBinary) {
+          // Freeze the settings for this request, including every model round.
+          const llm = registry.resolve(state.model);
+          const turnAgent = new Agent(llm.client, llm.model, [...tools, ...searchTools], systemPrompt);
+          turnAgent.setDetailedDrawings(state.detailedDrawings);
           runVoiceTurn(
-            inference, agent, Buffer.from(data), history, send, state.voice, getCards,
+            inference, turnAgent, Buffer.from(data), history, send, state.voice, getCards, llm,
           ).catch((e) => send("error", { message: String(e?.message ?? e) }));
         } else {
           handleControl(ws, ha, data.toString(), controls);

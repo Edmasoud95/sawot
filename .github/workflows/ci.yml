@@ -41,6 +41,9 @@ jobs:
           node --import tsx tests/voiceSearch.test.ts
           node --import tsx ../web/tests/voiceSearch.test.ts
           node --import tsx tests/chatRoutes.test.ts
+          node --import tsx tests/chatDebug.test.ts
+          node --import tsx tests/debugContext.test.ts
+          node --import tsx ../web/tests/debugStore.test.ts
           node --import tsx tests/personality.test.ts
           node --import tsx ../web/tests/orbExpression.test.ts
           node --import tsx ../web/tests/inkSimulation.test.ts

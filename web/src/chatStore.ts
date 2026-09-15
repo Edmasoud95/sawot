@@ -135,16 +135,21 @@ export const useChatStore = create<any>()((set, get) => ({
     });
 
     let doneFired = false;
+    let cancelled = false;
     const debug = () => (useVoiceStore.getState().debugEnabled ? useDebugStore.getState() : null);
-    debug()?.beginTurn("chat", { event: "user", data: { text: content, attachments: pendingAttachments.length } });
+    const debugTurn = debug()?.beginTurn("chat", { event: "user", data: { text: content, attachments: pendingAttachments.length } });
+    const finishDebug = (outcome: "completed" | "failed" | "cancelled", error?: string) => {
+      if (debugTurn !== undefined) useDebugStore.getState().finishTurn(debugTurn, outcome, error);
+    };
 
     const abort = streamMessage(
       activeId,
       { content, attachments: pendingAttachments },
       (event) => {
+        if (cancelled) return;
         if (event.type !== "content" && event.type !== "thinking") debug()?.logMessage("in", event);
         if (event.type === "debug") {
-          debug()?.addEvent(event);
+          if (debugTurn !== undefined) debug()?.addEvent(event, debugTurn);
         } else if (event.type === "thinking") {
           set((s) => ({ streamThinking: s.streamThinking + event.delta }));
         } else if (event.type === "content") {
@@ -155,6 +160,7 @@ export const useChatStore = create<any>()((set, get) => ({
           set({ streamCards: event.entities });
         } else if (event.type === "done") {
           doneFired = true;
+          finishDebug("completed");
           const msg = event.message;
           if (event.title) {
             set((s) => ({
@@ -176,6 +182,7 @@ export const useChatStore = create<any>()((set, get) => ({
             streamCards: [],
           }));
         } else if (event.type === "error" && !doneFired) {
+          finishDebug("failed", event.message);
           set((s) => ({
             active: s.active
               ? {
@@ -188,12 +195,17 @@ export const useChatStore = create<any>()((set, get) => ({
               : s.active,
           }));
         } else if (event.type === "stream_end") {
+          if (!doneFired) finishDebug("failed", "Connection ended before the response completed");
           set({ streaming: false, abortStream: null });
         }
       }
     );
 
-    set({ abortStream: abort });
+    set({ abortStream: () => {
+      cancelled = true;
+      finishDebug("cancelled");
+      abort();
+    } });
   },
 
   stopStream: () => {

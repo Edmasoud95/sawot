@@ -58,3 +58,44 @@ test("raw messages are logged in both directions with a cap and can be cleared",
   d.clearMessages();
   assert.equal(useDebugStore.getState().messages.length, 0);
 });
+
+test("metadata and outcomes stay with their turn when voice and chat overlap", () => {
+  const d = useDebugStore.getState();
+  d.clear();
+  const chat = d.beginTurn("chat");
+  assert.equal(useDebugStore.getState().turns[0].outcome, "running");
+  d.addEvent({ event: "context", data: { model: "model-a", providerId: "cloud", providerName: "Cloud" } }, chat);
+  const voice = d.beginTurn("voice");
+  d.addEvent({ event: "context", data: { model: "model-b", providerId: "local", providerName: "Local server", voice: "af_heart" } }, voice);
+  d.addEvent({ event: "speech", data: { engine: "kokoro", voice: "af_heart" } }, voice);
+  d.addEvent({ event: "reply", data: { text: "chat answer" } }, chat);
+  d.finishTurn(chat, "completed");
+  const [a, b] = useDebugStore.getState().turns;
+  assert.equal(a.model, "model-a");
+  assert.equal(a.providerName, "Cloud");
+  assert.equal(a.text, "chat answer");
+  assert.equal(a.outcome, "completed");
+  assert.equal(b.model, "model-b");
+  assert.equal(b.speechEngine, "kokoro");
+  assert.equal(b.voice, "af_heart");
+  assert.equal(b.outcome, "running");
+  assert.equal(JSON.parse(JSON.stringify(a)).providerId, "cloud");
+});
+
+test("late events cannot overwrite terminal outcomes or restore cleared turns", () => {
+  const d = useDebugStore.getState();
+  d.clear();
+  const id = d.beginTurn("chat");
+  d.finishTurn(id, "cancelled");
+  d.addEvent({ event: "context", data: { model: "late" } }, id);
+  d.finishTurn(id, "completed");
+  assert.equal(useDebugStore.getState().turns[0].outcome, "cancelled");
+  assert.equal(useDebugStore.getState().turns[0].model, undefined);
+  const failed = d.beginTurn("voice");
+  d.finishTurn(failed, "failed", "Speech recognition failed");
+  assert.equal(useDebugStore.getState().turns[1].error, "Speech recognition failed");
+  d.clear();
+  d.addEvent({ event: "reply", data: { text: "late" } }, failed);
+  d.finishTurn(failed, "completed");
+  assert.equal(useDebugStore.getState().turns.length, 0);
+});

@@ -20,7 +20,7 @@ function Tile({ label, value, tone }: { label: string; value: string; tone?: "ok
   return (
     <span className="dbg-tile" data-tone={tone}>
       <span className="dbg-tile-label">{label}</span>
-      <span className="dbg-tile-value">{value}</span>
+      <span className="dbg-tile-value" title={value}>{value}</span>
     </span>
   );
 }
@@ -34,6 +34,16 @@ function Timeline({ turn }: { turn: DebugTurn }) {
   ] as const;
   return (
     <div className="dbg-timeline">
+      <dl className="dbg-context">
+        <div><dt>Model</dt><dd>{turn.model || "Unknown"}</dd></div>
+        <div><dt>Provider</dt><dd>{turn.providerName || turn.providerId || "Unknown"}</dd></div>
+        <div><dt>Outcome</dt><dd data-outcome={turn.outcome}>{turn.outcome}</dd></div>
+        {turn.mode === "voice" && <>
+          <div><dt>TTS engine</dt><dd>{turn.speechEngine || "Unknown"}</dd></div>
+          <div><dt>Requested voice</dt><dd>{turn.voice || "Default"}</dd></div>
+        </>}
+      </dl>
+      {turn.error && <p className="dbg-error">{turn.error}</p>}
       <div className="dbg-bar" role="img" aria-label="Turn timeline">
         {stages.map(([key, , value]) => value > 0 && (
           <span key={key} className="dbg-bar-seg" data-stage={key} style={{ flexGrow: value }} title={`${key} ${ms(value)}`} />
@@ -76,6 +86,8 @@ function Events({ turn }: { turn: DebugTurn }) {
 
 function brief({ event, data }: { event: string; data: any }) {
   const ms_ = data?.latency_ms != null ? ` · ${ms(data.latency_ms)}` : "";
+  if (event === "context") return [data?.providerName || data?.providerId, data?.model].filter(Boolean).join(" · ");
+  if (event === "speech") return [data?.engine || "Unknown engine", data?.voice].filter(Boolean).join(" · ");
   if (event === "stt") return `"${data?.text ?? ""}"${ms_}`;
   if (event === "llm_round") return `round ${data?.round}${data?.tool_calls?.length ? " → " + data.tool_calls.join(", ") : ""}${ms_}`;
   if (event === "tool_call") return `${data?.name}(${JSON.stringify(data?.args ?? {}).slice(0, 80)})`;
@@ -177,6 +189,8 @@ export default function DebugBar() {
           <span className="dbg-chevron" aria-hidden="true">{open ? "▾" : "▴"}</span>
         </button>
         <div className="dbg-tiles">
+          <Tile label="model" value={turn?.model || "–"} />
+          <Tile label="outcome" value={turn?.outcome || "–"} tone={turn?.outcome === "failed" ? "bad" : turn?.outcome === "completed" ? "ok" : undefined} />
           <Tile label="status" value={status} />
           <Tile label="turn" value={turn ? ms(turn.total) : "–"} tone={turn && turn.total > 4000 ? "warn" : undefined} />
           <Tile label="stt" value={turn ? ms(turn.stages.stt) : "–"} />
@@ -197,7 +211,7 @@ export default function DebugBar() {
             <div className="dbg-turnpick">
               <label className="dbg-count">Turn
                 <select className="dbg-select" value={turn?.id ?? ""} onChange={(e) => setSelected(Number(e.target.value))} aria-label="Select turn">
-                  {turns.map((t) => <option key={t.id} value={t.id}>#{t.id} · {t.mode} · {clock(t.startedAt)}</option>)}
+                  {turns.map((t) => <option key={t.id} value={t.id}>#{t.id} · {t.mode} · {t.outcome} · {clock(t.startedAt)}</option>)}
                 </select>
               </label>
               <button type="button" className="dbg-button" onClick={copy} disabled={!turn}>Copy</button>

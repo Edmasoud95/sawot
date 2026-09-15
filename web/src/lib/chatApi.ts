@@ -57,10 +57,10 @@ export function streamMessage(conversationId, body, onEvent) {
           if (line.startsWith("data: ")) onEvent(JSON.parse(line.slice(6)));
         }
       }
-      onEvent({ type: "stream_end" });
     } catch (e) {
       if (e.name !== "AbortError") onEvent({ type: "error", message: String(e) });
-      else onEvent({ type: "stream_end" });
+    } finally {
+      onEvent({ type: "stream_end" });
     }
   })();
   return () => controller.abort();

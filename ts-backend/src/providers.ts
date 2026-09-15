@@ -146,14 +146,14 @@ export class ProviderRegistry {
   /** Split a possibly-qualified model id into a client + bare model name.
    *  Bare ids (pre-provider settings and conversations) fall back to the
    *  built-in provider. */
-  resolve(model: string): { client: OpenAI; model: string; providerId: string } {
+  resolve(model: string): { client: OpenAI; model: string; providerId: string; providerName: string } {
     const at = model.indexOf(MODEL_SEP);
     const prefix = at >= 0 ? model.slice(0, at) : "";
     const bare = at >= 0 ? model.slice(at + MODEL_SEP.length) : model;
     // Unknown prefixes (a removed provider) fall back to the built-in
     // provider with the bare model name, like unqualified legacy ids do.
     const providerId = this.providers.has(prefix) ? prefix : this.defaultId;
-    return { client: this.clientFor(providerId), model: bare, providerId };
+    return { client: this.clientFor(providerId), model: bare, providerId, providerName: this.providers.get(providerId)!.name };
   }
 
   async modelsFor(id: string): Promise<string[]> {

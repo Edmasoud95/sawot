@@ -24,7 +24,7 @@ const UPLOAD_MEDIA: Record<string, string> = {
 export interface ChatCtx {
   store: ChatStore;
   /** Resolve a (possibly provider-qualified) model id to its client. */
-  resolve: (model: string) => { client: any; model: string };
+  resolve: (model: string) => { client: any; model: string; providerId?: string; providerName?: string };
   /** Home Assistant tools, offered only when the conversation asks for them. */
   haTools: Tool[];
   /** Shared web tools, including find_in_page; empty without a search key. */
@@ -183,6 +183,9 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       });
       const getCards = homeAssistant && ctx.ha ? (ids: string[]) => ctx.ha!.getCards(ids) : undefined;
       const llm = ctx.resolve(conv.model);
+      sse({ type: "debug", event: "context", data: {
+        model: llm.model, providerId: llm.providerId, providerName: llm.providerName,
+      } });
       for await (const [event, data] of runChat(
         llm.client, llm.model, tools, system, history, getCards,
       )) {

@@ -19,7 +19,11 @@ export async function runVoiceTurn(
   send: SendFn,
   voice: string,
   getCards?: (ids: string[]) => Promise<any[]>,
+  provider?: { providerId: string; providerName: string },
 ): Promise<void> {
+  await send("debug", { event: "context", data: {
+    model: agent.currentModel, providerId: provider?.providerId, providerName: provider?.providerName, voice,
+  } });
   const t0 = performance.now();
   let text: string;
   try {
@@ -88,6 +92,7 @@ export async function runVoiceTurn(
   try {
     speechEngine = (await inference.voices()).engine;
   } catch { /* sidecar offline: no tags */ }
+  await send("debug", { event: "speech", data: { engine: speechEngine, voice } });
 
   const checkpoint = history.length;
   let reply: string;
@@ -119,7 +124,7 @@ export async function runVoiceTurn(
   }
   await send("debug", {
     event: "tts",
-    data: { latency_ms: Math.round(performance.now() - t1), bytes: wav.length, engine: speechEngine, text: spoken },
+    data: { latency_ms: Math.round(performance.now() - t1), bytes: wav.length, engine: speechEngine, voice, text: spoken },
   });
   // Begin the expression with playback, so slow synthesis cannot use up its lifetime.
   if (expression) await send("expression", expression);
