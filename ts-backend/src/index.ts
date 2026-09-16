@@ -16,6 +16,7 @@ import { loadConfig } from "./config.js";
 import { HomeAssistant } from "./ha.js";
 import { InferenceClient } from "./inference.js";
 import { VoiceSession } from "./voiceSession.js";
+import { isAllowedVoiceOrigin } from "./voiceOrigin.js";
 import { runVoiceTurn } from "./pipeline.js";
 import { ProviderRegistry, qualifyModel } from "./providers.js";
 import { registerSettingsRoutes, SettingsStore, type SettingsState } from "./settings.js";
@@ -174,7 +175,10 @@ async function main() {
 
   // Voice pipeline over WebSocket (direct ws + Fastify's upgrade event;
   // @fastify/websocket 11.x mis-wraps handlers under Fastify 5).
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({
+    noServer: true,
+    verifyClient: ({ origin }: { origin: string }) => isAllowedVoiceOrigin(origin, config.allowedOrigins),
+  });
   app.server.on("upgrade", (req: any, socket: any, head: any) => {
     const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
     if (pathname !== "/ws") {

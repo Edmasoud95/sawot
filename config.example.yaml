@@ -19,6 +19,11 @@ search:
 server:
   host: "0.0.0.0"                     # use "127.0.0.1" to restrict to localhost
   port: 8765
+  # Required for voice WebSockets; list every exact browser origin you use.
+  # No wildcard, path or trailing slash. An empty list disables voice connections.
+  allowed_origins: ["https://localhost:8765"]
+  # Example LAN entry: "https://voice.example.com"
+  # Vite development entry: "http://localhost:5173"
 # controls:                            # optional service whitelist override
 #   light: ["turn_on", "turn_off"]
 #   switch: ["turn_on", "turn_off"]

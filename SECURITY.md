@@ -19,6 +19,16 @@ read conversation history. Treat it as a **trusted-LAN-only** service.
 
 ## Running it safely
 
+- Configure `server.allowed_origins` with the exact HTTP(S) origins used to
+  open the voice interface (scheme, hostname and non-default port, without a
+  path or trailing slash). Alternatively, set `SAWOT_ALLOWED_ORIGINS` to a
+  comma-separated list. The environment variable overrides YAML, including
+  when empty. Missing configuration denies all voice WebSocket connections.
+  Missing, `null`, and unlisted Origin headers are rejected. Reverse proxies
+  must preserve the browser's Origin header. This mitigates cross-site
+  WebSocket access; it is not authentication, and non-browser clients can
+  forge Origin. REST endpoints still require trusted-network protection.
+
 - Bind to `127.0.0.1` (`server.host: "127.0.0.1"`) unless you specifically
   need access from other devices on your network.
 - If you expose it on your LAN, keep it on a trusted network and **do not**

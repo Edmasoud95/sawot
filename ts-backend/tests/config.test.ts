@@ -80,3 +80,22 @@ test("the Brave key comes from yaml or the environment and defaults to empty", (
   writeFileSync(path, yaml + "search:\n  brave_api_key: \"brv-yaml\"\n");
   assert.equal(loadConfig(path, { HA_TOKEN: "t" }).braveApiKey, "brv-yaml");
 });
+
+test("WebSocket origins default to deny and can be explicitly configured", () => {
+  const path = tmpConfig();
+  assert.deepEqual(loadConfig(path, { HA_TOKEN: "t" }).allowedOrigins, []);
+  writeFileSync(path, yaml.replace("  port: 9999", '  port: 9999\n  allowed_origins: ["https://voice.example"]'));
+  assert.deepEqual(loadConfig(path, { HA_TOKEN: "t" }).allowedOrigins, ["https://voice.example"]);
+  assert.deepEqual(loadConfig(path, { HA_TOKEN: "t", SAWOT_ALLOWED_ORIGINS: "https://other.example,http://localhost:5173" }).allowedOrigins,
+    ["https://other.example", "http://localhost:5173"]);
+  assert.deepEqual(loadConfig(path, { HA_TOKEN: "t", SAWOT_ALLOWED_ORIGINS: "" }).allowedOrigins, []);
+});
+
+test("invalid origin configuration fails closed at startup", () => {
+  for (const value of ["*", "null", "https://voice.example/path", "https://user:pass@voice.example", "wss://voice.example"]) {
+    assert.throws(() => loadConfig(tmpConfig(), { HA_TOKEN: "t", SAWOT_ALLOWED_ORIGINS: value }), /origin/i);
+  }
+  const path = tmpConfig();
+  writeFileSync(path, yaml.replace("  port: 9999", '  port: 9999\n  allowed_origins: "https://voice.example"'));
+  assert.throws(() => loadConfig(path, { HA_TOKEN: "t" }), /origin/i);
+});

@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse } from "yaml";
 import { config as loadEnv } from "dotenv";
+import { parseAllowedOrigins } from "./voiceOrigin.js";
 
 export interface Config {
   haUrl: string;
@@ -20,6 +21,7 @@ export interface Config {
   braveApiKey: string;
   host: string;
   port: number;
+  allowedOrigins: string[];
   allowedControls?: Record<string, string[]>;
   sslCertfile?: string;
   sslKeyfile?: string;
@@ -115,6 +117,9 @@ export function loadConfig(path = "config.yaml", env: NodeJS.ProcessEnv = proces
     braveApiKey: String(get("search", "brave_api_key") ?? "").trim(),
     host: String(get("server", "host")),
     port: Number(get("server", "port")),
+    allowedOrigins: parseAllowedOrigins(env.SAWOT_ALLOWED_ORIGINS !== undefined
+      ? env.SAWOT_ALLOWED_ORIGINS.split(",").map(value => value.trim()).filter(Boolean)
+      : raw.server?.allowed_origins ?? []),
     allowedControls: raw.controls,
     sslCertfile: get("tls", "certfile") as string | undefined,
     sslKeyfile: get("tls", "keyfile") as string | undefined,
