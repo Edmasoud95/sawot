@@ -3,6 +3,7 @@ import { useChatStore } from "../../chatStore";
 import Message, { Markdown, ToolChips, CardGrid } from "./Message";
 import ThinkingBlock from "./ThinkingBlock";
 import Welcome from "./Welcome";
+import ChatSources from "./ChatSources";
 
 const NEAR_BOTTOM_PX = 120;
 
@@ -12,6 +13,7 @@ export default function MessageList({ sendControl }) {
   const streamText = useChatStore((s) => s.streamText);
   const streamThinking = useChatStore((s) => s.streamThinking);
   const streamTools = useChatStore((s) => s.streamTools);
+  const streamSearch = useChatStore((s) => s.streamSearch);
   const streamCards = useChatStore((s) => s.streamCards);
 
   const scrollRef = useRef(null);
@@ -56,7 +58,7 @@ export default function MessageList({ sendControl }) {
   useEffect(() => {
     const el = scrollRef.current;
     if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [active?.messages, streamText, streamThinking, streamTools, streamCards]);
+  }, [active?.messages, streamText, streamThinking, streamTools, streamCards, streamSearch]);
 
   const messages = active?.messages || [];
   const liveThinking = streaming && !streamText;
@@ -79,7 +81,7 @@ export default function MessageList({ sendControl }) {
               live={liveThinking}
               seconds={thinkSecs}
             />
-            <ToolChips tools={streamTools} />
+            <ToolChips tools={streamTools.filter(tool => !["web_search", "fetch_page", "find_in_page"].includes(tool.name))} />
             {streamText && <Markdown>{streamText}</Markdown>}
             {!streamThinking && !streamText && streamTools.length === 0 && (
               <p className="thinking-shimmer font-mono text-[0.65rem] uppercase tracking-[0.25em]">
@@ -87,6 +89,7 @@ export default function MessageList({ sendControl }) {
               </p>
             )}
             <CardGrid cards={streamCards} sendControl={sendControl} />
+            <ChatSources search={streamSearch} />
           </div>
         )}
       </div>

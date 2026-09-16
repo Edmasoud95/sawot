@@ -228,6 +228,22 @@ select:not([multiple]):not([size]) {
 .caption-space { display: flex; justify-content: center; flex-shrink: 1; width: min(100%, 620px); min-height: 74px; max-height: min(24vh, 180px); padding: 0 24px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; transition: opacity .5s; }
 .caption-space[data-visible="false"] { opacity: 0; }
 .captions { display: flex; flex-direction: column; gap: 10px; text-align: center; padding: 8px 0; overflow-wrap: anywhere; }
+.chat-sources { margin-top: 12px; max-width: 100%; color: var(--muted); font-size: .8rem; }
+.chat-sources summary { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 10px; border-radius: 12px; cursor: pointer; list-style: none; }
+.chat-sources summary::-webkit-details-marker { display: none; }
+.chat-sources summary:hover, .chat-sources[open] summary { background: #b5c9ee08; color: #dbe6fa; }
+.chat-sources summary:focus-visible { outline: 2px solid #8298bd; outline-offset: 2px; }
+.chat-source-icons { display: inline-flex; gap: 4px; }
+.chat-source-icon { display: inline-grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; border-radius: 50%; background: #b5c9ee0a; }
+.chat-source-icon img { border-radius: 3px; }
+.chat-sources[open] .chat-sources-chevron { transform: rotate(180deg); }
+.chat-sources ul { margin-top: 6px; padding: 6px; list-style: none; border: 1px solid #b5c9ee18; border-radius: 14px; max-height: 300px; overflow-y: auto; overscroll-behavior: contain; }
+.chat-sources li a { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 8px; border-radius: 9px; }
+.chat-sources li a:hover { background: #b5c9ee08; }
+.chat-source-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.chat-source-title { color: #dbe6fa; overflow-wrap: anywhere; }
+.chat-source-host, .chat-sources-status { font-size: .75rem; }
+.chat-sources-status { margin: 6px 10px; }
 .voice-sources { display: flex; align-items: center; justify-content: center; flex: 0 0 44px; width: min(100%, 560px); min-width: 0; padding: 0 24px; }
 .voice-sources-button { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; max-width: 100%; padding: 0 10px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font-size: .875rem; }
 .voice-sources-button:hover, .voice-sources-button[aria-expanded="true"] { color: #dbe6fa; background: #b5c9ee08; }

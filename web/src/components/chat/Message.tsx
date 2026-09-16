@@ -5,6 +5,7 @@ import rehypeHighlight from "rehype-highlight";
 import EntityCard from "../cards/EntityCard";
 import ThinkingBlock from "./ThinkingBlock";
 import ToolChip from "./ToolChip";
+import ChatSources from "./ChatSources";
 
 const ImageIcon = () => (
   <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
@@ -186,6 +187,7 @@ export default function Message({ message, sendControl }) {
       <ThinkingBlock thinking={message.thinking} />
       <Markdown>{message.content}</Markdown>
       <CardGrid cards={message.cards} sendControl={sendControl} />
+      <ChatSources search={message.search} />
     </div>
   );
 }

@@ -199,6 +199,9 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
           sse({ type: "content", delta: data });
         } else if (event === "tool") {
           sse({ type: "tool", ...data });
+        } else if (event === "search") {
+          assistant.search = data;
+          sse({ type: "search", ...data });
         } else if (event === "debug") {
           sse({ type: "debug", ...data });
         } else if (event === "entities") {
@@ -213,6 +216,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       persist();
       sse({ type: "done", message: assistant, title: conv.title });
     } catch (e: any) {
+      if (assistant.search?.phase === "start") assistant.search.phase = "error";
       persist();
       sse({ type: "error", message: String(e?.message ?? e) });
     } finally {

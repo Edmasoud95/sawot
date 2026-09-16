@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { useDebugStore } from "./debugStore";
 import { useVoiceStore } from "./store";
+import { updateVoiceSearch } from "./lib/voiceSearch";
 import {
   listConversations,
   createConversation,
@@ -18,6 +19,7 @@ export const useChatStore = create<any>()((set, get) => ({
   streamText: "",
   streamThinking: "",
   streamTools: [],
+  streamSearch: null,
   streamCards: [],
   pendingAttachments: [],
   sidebarOpen: window.matchMedia("(min-width: 640px)").matches,
@@ -127,6 +129,7 @@ export const useChatStore = create<any>()((set, get) => ({
       streamText: "",
       streamThinking: "",
       streamTools: [],
+      streamSearch: null,
       streamCards: [],
       pendingAttachments: [],
     });
@@ -153,6 +156,8 @@ export const useChatStore = create<any>()((set, get) => ({
           set((s) => ({ streamText: s.streamText + event.delta }));
         } else if (event.type === "tool") {
           set((s) => ({ streamTools: [...s.streamTools, event] }));
+        } else if (event.type === "search") {
+          set((s) => ({ streamSearch: updateVoiceSearch(s.streamSearch, event) }));
         } else if (event.type === "entities") {
           set({ streamCards: event.entities });
         } else if (event.type === "done") {
@@ -176,6 +181,7 @@ export const useChatStore = create<any>()((set, get) => ({
             streamText: "",
             streamThinking: "",
             streamTools: [],
+            streamSearch: null,
             streamCards: [],
           }));
         } else if (event.type === "error" && !doneFired) {
@@ -186,7 +192,11 @@ export const useChatStore = create<any>()((set, get) => ({
                   ...s.active,
                   messages: [
                     ...s.active.messages,
-                    { role: "assistant", content: `⚠ ${event.message}` },
+                    { role: "assistant", content: `⚠ ${event.message}`,
+                      ...(s.streamSearch ? { search: { ...s.streamSearch,
+                        phase: s.streamSearch.phase === "start" ? "error" : s.streamSearch.phase,
+                      } } : {}),
+                    },
                   ],
                 }
               : s.active,

@@ -11,6 +11,7 @@ import { extname, join } from "node:path";
 
 import { executeTool, toOpenAiTools, touchedIdsFor, type Tool } from "./tools.js";
 import { createChatCompletion } from "./reasoningFallback.js";
+import { voiceSearchSources } from "./search.js";
 
 export const SAFE_ID = /^[0-9a-f]{12}$/;
 const HISTORY_LIMIT = 30;
@@ -204,6 +205,7 @@ export async function* runChat(
   let finished = false;
   const fullContent: string[] = [];
   const fullThinking: string[] = [];
+  const sources = new Map<string, ReturnType<typeof voiceSearchSources>[number]>();
 
   const turnStart = performance.now();
   for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -293,6 +295,8 @@ export async function* runChat(
       let args: any = {};
       let result: any = undefined;
       const toolStart = performance.now();
+      const webTool = ["web_search", "fetch_page", "find_in_page"].includes(c.name);
+      if (webTool) yield ["search", { tool: c.name, phase: "start", sources: [...sources.values()] }];
       try {
         args = JSON.parse(c.arguments || "{}");
       } catch (e: any) {
@@ -301,6 +305,14 @@ export async function* runChat(
       yield ["debug", { event: "tool_call", data: { name: c.name, args } }];
       if (result === undefined) {
         result = await executeTool(tools, c.name, args);
+      }
+      if (webTool) {
+        for (const source of voiceSearchSources(c.name, result)) {
+          const previous = sources.get(source.url);
+          if (!previous && sources.size >= 40) continue;
+          sources.set(source.url, { ...previous, ...source, read: previous?.read || source.read });
+        }
+        yield ["search", { tool: c.name, phase: result?.error ? "error" : "complete", sources: [...sources.values()] }];
       }
       const resultJson = JSON.stringify(result);
       yield ["debug", { event: "tool_result", data: { name: c.name, ok: !(result && typeof result === "object" && "error" in result),
