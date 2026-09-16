@@ -106,6 +106,12 @@ Git commands. Commit and push when requested, with accurate descriptions of the
 changes and verification. Keep generated builds, downloaded models, and local
 runtime data out of commits.
 
+Use Conventional Commits for all new commits: `type(scope): description`
+(scope is optional). Follow the types, examples, and breaking-change guidance
+in [CONTRIBUTING.md](CONTRIBUTING.md#commit-messages). Use the same format for
+pull request titles when they become squash commit messages. This applies
+going forward; do not rewrite published history just to rename old commits.
+
 Never commit or print secrets from `.env`, `config.yaml`, `settings.json`, `certs/`,
 or provider credentials. Public provider responses must not expose API keys.
 Use example configuration files for documentation. Follow SECURITY.md: this service
