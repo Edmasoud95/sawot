@@ -229,7 +229,8 @@ def _tts_select_app(monkeypatch, tmp_path, factory=None, persist=None):
         def __init__(self, name):
             self.name = name
         def voices(self):
-            return ["default", "alice"] if self.name.startswith("chatterbox") else ["af_heart", "am_adam"]
+            from server.voices import cloned_voices
+            return ["default", *cloned_voices()] if self.name.startswith("chatterbox") else ["af_heart", "am_adam"]
         @property
         def default_voice(self):
             return self.voices()[0]
@@ -248,6 +249,10 @@ def test_select_tts_swaps_engine_persists_and_updates_voices(monkeypatch, tmp_pa
     client = TestClient(app)
     assert client.get("/api/voices").json() == {"engine": "kokoro", "voices": ["af_heart", "am_adam"], "default": "af_heart", "clones": []}
 
+    voices = tmp_path / "tts" / "voices"
+    voices.mkdir(parents=True, exist_ok=True)
+    (voices / "alice.wav").write_bytes(b"")
+
     resp = client.post("/api/models/tts/chatterbox-nano/select")
     assert resp.status_code == 200, resp.text
     assert resp.json()["active"] == "chatterbox-nano"
@@ -255,7 +260,7 @@ def test_select_tts_swaps_engine_persists_and_updates_voices(monkeypatch, tmp_pa
     by_id = {m["id"]: m for m in client.get("/api/models").json()["models"] if m["kind"] == "tts"}
     assert by_id["chatterbox-nano"]["active"] is True and by_id["kokoro"]["active"] is False
     assert by_id["chatterbox-nano"]["selectable"] is False and by_id["kokoro"]["selectable"] is False  # kokoro not downloaded here
-    assert client.get("/api/voices").json() == {"engine": "chatterbox-nano", "voices": ["default", "alice"], "default": "default", "clones": []}
+    assert client.get("/api/voices").json() == {"engine": "chatterbox-nano", "voices": ["default", "alice"], "default": "default", "clones": ["alice"]}
     assert client.post("/api/models/tts/chatterbox-turbo/select").status_code == 409  # not downloaded
 
 

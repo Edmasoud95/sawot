@@ -94,6 +94,8 @@ async def _main() -> None:
         tts_factory=tts_factory,
         persist_tts=_persist("tts"),
     )
+    # Only the managed holders should retain engines while the server runs.
+    del stt, tts
     port = int(os.environ.get("SAWOT_SIDECAR_PORT", "8766"))
     logger.info("sidecar listening on http://127.0.0.1:%d", port)
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port))
