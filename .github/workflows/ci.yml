@@ -30,23 +30,17 @@ jobs:
           npm run typecheck
           npm run build
 
-      - name: Voice activity and expression tests
+      - name: Backend and frontend regression tests
         working-directory: ts-backend
-        run: |
-          node --import tsx tests/activity.test.ts
-          node --import tsx tests/temperature.test.ts
-          node --import tsx tests/chatPrompt.test.ts
-          node --import tsx tests/search.test.ts
-          node --import tsx tests/findInPage.test.ts
-          node --import tsx tests/voiceSearch.test.ts
-          node --import tsx ../web/tests/voiceSearch.test.ts
-          node --import tsx tests/chatRoutes.test.ts
-          node --import tsx tests/chatDebug.test.ts
-          node --import tsx tests/debugContext.test.ts
-          node --import tsx ../web/tests/debugStore.test.ts
-          node --import tsx tests/personality.test.ts
-          node --import tsx ../web/tests/orbExpression.test.ts
-          node --import tsx ../web/tests/inkSimulation.test.ts
+        run: node --import tsx --test tests/*.test.ts ../web/tests/*.test.ts
+
+  windows-proxy-script:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Firewall script regression tests (isolated OS commands)
+        shell: powershell
+        run: ./scripts/tests/windowsHttps.test.ps1
 
   python:
     runs-on: ubuntu-latest
