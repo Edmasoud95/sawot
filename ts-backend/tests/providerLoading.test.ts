@@ -7,7 +7,7 @@ import { registerSettingsRoutes } from "../src/settings.js";
 
 function servers() {
   const hanging = createServer(() => { /* never respond */ });
-  const healthy = createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "deepseek-v4" }] })); });
+  const healthy = createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "deepseek-v4" }, { id: "text-embedding-3-small" }, { id: "tts-1" }, { id: "custom-image", architecture: { output_modalities: ["image"] } }] })); });
   return Promise.all([hanging, healthy].map((s) => new Promise<number>((resolve) => s.listen(0, () => resolve((s.address() as any).port))))).then(([h, k]) => ({
     hangingUrl: `http://127.0.0.1:${h}/v1`, healthyUrl: `http://127.0.0.1:${k}/v1`, close: () => { hanging.closeAllConnections?.(); hanging.close(); healthy.close(); },
   }));

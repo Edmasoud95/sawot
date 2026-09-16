@@ -7,7 +7,7 @@ import { ProviderRegistry, probeEndpoint } from "../src/providers.js";
 // local model host, next to one that answers at once.
 function servers() {
   const hanging = createServer(() => { /* never respond */ });
-  const healthy = createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "deepseek-v4" }] })); });
+  const healthy = createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "deepseek-v4" }, { id: "text-embedding-3-small" }, { id: "tts-1" }, { id: "custom-image", architecture: { output_modalities: ["image"] } }] })); });
   return Promise.all([hanging, healthy].map((s) => new Promise<number>((resolve) => s.listen(0, () => resolve((s.address() as any).port))))).then(([h, k]) => ({
     hangingUrl: `http://127.0.0.1:${h}/v1`, healthyUrl: `http://127.0.0.1:${k}/v1`, close: () => { hanging.closeAllConnections?.(); hanging.close(); healthy.close(); },
   }));
@@ -37,5 +37,15 @@ test("probing a new provider endpoint also gives up instead of hanging", async (
     const t = Date.now();
     await assert.rejects(probeEndpoint(s.hangingUrl, undefined, 300), /timed out/i);
     assert.ok(Date.now() - t < 1500);
+  } finally { s.close(); }
+});
+
+test("provider probing and seeded caches only publish chat model choices", async () => {
+  const s = await servers();
+  try {
+    assert.deepEqual(await probeEndpoint(s.healthyUrl), ["deepseek-v4"]);
+    const registry = new ProviderRegistry({ id: "local", name: "Local", baseUrl: s.healthyUrl });
+    registry.setModels("local", ["deepseek-v4", "text-embedding-3-small", "gpt-image-1"]);
+    assert.deepEqual(registry.listing()[0].models, ["deepseek-v4"]);
   } finally { s.close(); }
 });

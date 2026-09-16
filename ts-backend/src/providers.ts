@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { chatModelIds } from "./chatModels.js";
 
 /** An OpenAI-compatible chat endpoint: the built-in local server from
  *  config.yaml, or a user-added provider persisted in settings.json. */
@@ -55,9 +56,8 @@ async function fetchModelIds(baseUrl: string, apiKey?: string, timeoutMs = MODEL
   }
   if (!resp.ok) throw new Error("endpoint returned " + resp.status);
   const data: any = await resp.json();
-  const ids = (data.data ?? []).map((m: any) => m.id).filter(Boolean);
   if (!Array.isArray(data.data)) throw new Error("no model list in response");
-  return ids;
+  return chatModelIds(data.data);
 }
 
 /** List models on an endpoint before it becomes a provider — used by the
@@ -172,7 +172,7 @@ export class ProviderRegistry {
 
   /** Record a list obtained elsewhere (the add-provider probe). */
   setModels(id: string, models: string[]): void {
-    if (this.providers.has(id)) this.cache.set(id, { models });
+    if (this.providers.has(id)) this.cache.set(id, { models: chatModelIds(models.map((id) => ({ id }))) });
   }
 
   /** Every provider with its last known models, without any network call. */
