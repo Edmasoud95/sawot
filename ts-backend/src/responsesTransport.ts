@@ -134,7 +134,7 @@ function isReasoningParamRejected(err: unknown): boolean {
 }
 
 /** chat.completions.create, fulfilled by the Responses API. */
-export async function createViaResponses<T = any>(client: OpenAI, params: Record<string, any>): Promise<T> {
+export async function createViaResponses<T = any>(client: OpenAI, params: Record<string, any>, options?: { signal?: AbortSignal }): Promise<T> {
   const { model, messages, tools, stream, tool_choice, temperature, max_tokens, max_completion_tokens, reasoning_effort } = params;
   const body: Msg = {
     model,
@@ -149,7 +149,7 @@ export async function createViaResponses<T = any>(client: OpenAI, params: Record
   if (maxOut !== undefined) body.max_output_tokens = maxOut;
   if (stream) body.stream = true;
 
-  const send = async (b: Msg) => (client as any).responses.create(b);
+  const send = async (b: Msg) => (client as any).responses.create(b, options);
   let result: any;
   try {
     result = await send(body);

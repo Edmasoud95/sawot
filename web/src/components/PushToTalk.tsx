@@ -4,8 +4,8 @@ const LABELS = {
   connecting: "Connecting…",
   idle: "Hold to talk",
   recording: "Release to send",
-  thinking: "Thinking…",
-  speaking: "Speaking…",
+  thinking: "Hold to interrupt",
+  speaking: "Hold to interrupt",
 };
 
 export default function PushToTalk({ onStart, onStop }) {
@@ -15,9 +15,9 @@ export default function PushToTalk({ onStart, onStop }) {
   return (
     <div className="talk-dock">
       <button
-        aria-label="Hold to talk"
-        title="Hold to talk"
-        disabled={status === "connecting" || busy}
+        aria-label={busy ? "Hold to interrupt" : "Hold to talk"}
+        title={busy ? "Hold to interrupt · Escape to stop" : "Hold to talk"}
+        disabled={status === "connecting"}
         onKeyDown={(e) => {
           if ((e.key === " " || e.key === "Enter") && !e.repeat) {
             e.preventDefault();
@@ -32,6 +32,7 @@ export default function PushToTalk({ onStart, onStop }) {
         }}
         onBlur={onStop}
         onPointerDown={(e) => {
+          if (e.button !== 0 || !e.isPrimary) return;
           e.preventDefault();
           onStart();
         }}

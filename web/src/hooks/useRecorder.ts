@@ -1,14 +1,16 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { audioContext, meterFrom } from "../lib/audio";
 import { levelBus } from "../lib/levelBus";
 
 export function useRecorder(onUtterance) {
   const recorderRef = useRef(null);
   const sessionRef = useRef(0);
+  const deliveryRef = useRef(0);
 
   async function start() {
     if (recorderRef.current) return; // already recording (e.g. second pointer)
     const session = ++sessionRef.current;
+    const delivery = ++deliveryRef.current;
     const ctx = audioContext();
     await ctx.resume();
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -23,9 +25,12 @@ export function useRecorder(onUtterance) {
     recorder.ondataavailable = (e) => chunks.push(e.data);
     recorder.onstop = async () => {
       stream.getTracks().forEach((t) => t.stop());
-      levelBus.value = 0;
+      if (delivery === deliveryRef.current) levelBus.value = 0;
       const blob = new Blob(chunks, { type: "audio/webm" });
-      if (blob.size > 0) onUtterance(await blob.arrayBuffer());
+      if (blob.size > 0) {
+        const buffer = await blob.arrayBuffer();
+        if (delivery === deliveryRef.current) onUtterance(buffer);
+      }
     };
     recorder.start();
     recorderRef.current = recorder;
@@ -37,5 +42,11 @@ export function useRecorder(onUtterance) {
     recorderRef.current = null;
   }
 
-  return { start, stop };
+  function cancel() {
+    deliveryRef.current++;
+    stop();
+  }
+
+  useEffect(() => () => cancel(), []);
+  return { start, stop, cancel };
 }

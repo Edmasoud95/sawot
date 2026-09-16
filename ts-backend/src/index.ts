@@ -15,7 +15,8 @@ import { BraveSearchClient, buildSearchTools } from "./search.js";
 import { loadConfig } from "./config.js";
 import { HomeAssistant } from "./ha.js";
 import { InferenceClient } from "./inference.js";
-import { runVoiceTurn, type SendFn } from "./pipeline.js";
+import { VoiceSession } from "./voiceSession.js";
+import { runVoiceTurn } from "./pipeline.js";
 import { ProviderRegistry, qualifyModel } from "./providers.js";
 import { registerSettingsRoutes, SettingsStore, type SettingsState } from "./settings.js";
 import { buildHaTools } from "./tools.js";
@@ -181,12 +182,17 @@ async function main() {
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws: any) => {
-      const history: any[] = [];
+      let pendingTurnId: number | null = null;
+      let legacyTurnId = 0;
       const controls = config.allowedControls ?? DEFAULT_ALLOWED_CONTROLS;
-      const send: SendFn = async (kind, payload) => {
-        if (kind === "wav") ws.send(payload);
-        else ws.send(JSON.stringify({ type: kind, ...payload }));
-      };
+      const session = new VoiceSession((turnId, kind, payload) => {
+        if (ws.readyState !== 1) return;
+        if (kind === "wav") {
+          ws.send(JSON.stringify({ type: "audio", turnId }));
+          ws.send(payload);
+        } else ws.send(JSON.stringify({ type: kind, ...payload, turnId }));
+      });
+      ws.on("close", () => session.cancel());
       const getCards = (ids: string[]) => ha.getCards(ids);
 
       ws.on("message", (data: any, isBinary: boolean) => {
@@ -195,11 +201,22 @@ async function main() {
           const llm = registry.resolve(state.model);
           const turnAgent = new Agent(llm.client, llm.model, [...tools, ...searchTools], systemPrompt);
           turnAgent.setDetailedDrawings(state.detailedDrawings);
-          runVoiceTurn(
-            inference, turnAgent, Buffer.from(data), history, send, state.voice, getCards, llm,
-          ).catch((e) => send("error", { message: String(e?.message ?? e) }));
+          const turnId = pendingTurnId ?? --legacyTurnId;
+          pendingTurnId = null;
+          void session.start(turnId, (history, send, signal) => runVoiceTurn(
+            inference, turnAgent, Buffer.from(data), history, send, state.voice, getCards, llm, signal,
+          ));
         } else {
-          handleControl(ws, ha, data.toString(), controls);
+          let message: any;
+          try { message = JSON.parse(data.toString()); } catch { return; }
+          if (message?.type === "cancel") {
+            pendingTurnId = null;
+            session.cancel();
+          } else if (message?.type === "voice_start" && Number.isSafeInteger(message.turnId) && message.turnId > 0) {
+            pendingTurnId = message.turnId;
+          } else {
+            handleControl(ws, ha, data.toString(), controls);
+          }
         }
       });
     });

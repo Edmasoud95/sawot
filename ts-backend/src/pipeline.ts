@@ -20,18 +20,23 @@ export async function runVoiceTurn(
   voice: string,
   getCards?: (ids: string[]) => Promise<any[]>,
   provider?: { providerId: string; providerName: string },
+  signal?: AbortSignal,
 ): Promise<void> {
+  const transportSend = send;
+  send = (kind, payload) => { if (!signal?.aborted) return transportSend(kind, payload); };
+  if (signal?.aborted) return;
   await send("debug", { event: "context", data: {
     model: agent.currentModel, providerId: provider?.providerId, providerName: provider?.providerName, voice,
   } });
   const t0 = performance.now();
   let text: string;
   try {
-    text = await inference.transcribe(audio);
+    text = await inference.transcribe(audio, undefined, signal);
   } catch (e) {
     await send("error", { message: speechError(e) });
     return;
   }
+  if (signal?.aborted) return;
   await send("debug", {
     event: "stt",
     data: { text, latency_ms: Math.round(performance.now() - t0) },
@@ -90,20 +95,22 @@ export async function runVoiceTurn(
   // tags; asking per turn keeps a switch made in Settings honoured at once.
   let speechEngine: string | null = null;
   try {
-    speechEngine = (await inference.voices()).engine;
+    speechEngine = (await inference.voices(signal)).engine;
   } catch { /* sidecar offline: no tags */ }
+  if (signal?.aborted) return;
   await send("debug", { event: "speech", data: { engine: speechEngine, voice } });
 
   const checkpoint = history.length;
   let reply: string;
   try {
-    reply = await agent.run(history, text, onAgentEvent, { expressions: true, speechEngine });
+    reply = await agent.run(history, text, onAgentEvent, { expressions: true, speechEngine, signal });
   } catch {
     history.splice(checkpoint);
     await send("error", { message: "LLM backend offline" });
     return;
   }
 
+  if (signal?.aborted) return;
   await send("assistant_text", { text: stripSpeechTags(reply) });
   if (getCards && touched.length) {
     try {
@@ -113,11 +120,12 @@ export async function runVoiceTurn(
     }
   }
 
+  if (signal?.aborted) return;
   const t1 = performance.now();
   const spoken = forSpeech(reply, speechEngine);
   let wav: Buffer;
   try {
-    wav = await inference.synthesize(spoken, voice);
+    wav = await inference.synthesize(spoken, voice, signal);
   } catch (e) {
     await send("error", { message: speechError(e) });
     return;

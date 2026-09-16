@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { VoiceSocket } from "../lib/socket";
-import { playWav } from "../lib/audio";
+import { playWav, stopPlayback } from "../lib/audio";
 import { useRecorder } from "./useRecorder";
 import { useDebugStore } from "../debugStore";
 import { useVoiceStore } from "../store";
@@ -8,9 +8,10 @@ import { useChatStore } from "../chatStore";
 
 export function useVoice() {
   const socketRef = useRef(null);
+  const interactionRef = useRef(0);
   const debugTurnRef = useRef<number | null>(null);
 
-  const finishDebug = (outcome: "completed" | "failed", error?: string, id = debugTurnRef.current) => {
+  const finishDebug = (outcome: "completed" | "failed" | "cancelled", error?: string, id = debugTurnRef.current) => {
     if (id !== null) useDebugStore.getState().finishTurn(id, outcome, error);
   };
 
@@ -18,6 +19,9 @@ export function useVoice() {
     const socket = new VoiceSocket({
       onOpen: () => useVoiceStore.getState().setStatus("idle"),
       onClose: () => {
+        interactionRef.current++;
+        stopPlayback();
+        recorder.cancel();
         finishDebug("failed", "Voice connection closed");
         debugTurnRef.current = null;
         useVoiceStore.getState().setStatus("connecting");
@@ -63,6 +67,7 @@ export function useVoice() {
         }
       },
       onAudio: (buf) => {
+        const interaction = interactionRef.current;
         const debugTurn = debugTurnRef.current;
         if (useVoiceStore.getState().debugEnabled) useDebugStore.getState().logMessage("in", `audio ${buf.byteLength} bytes`);
         useVoiceStore.getState().setStatus("speaking");
@@ -70,6 +75,7 @@ export function useVoice() {
           finishDebug("completed", undefined, debugTurn);
           useVoiceStore.getState().setStatus("idle");
         }).catch(() => {
+          if (interaction !== interactionRef.current) return;
           finishDebug("failed", "Audio playback failed", debugTurn);
           useVoiceStore.getState().clearSearch();
           useVoiceStore.getState().clearExpression();
@@ -78,7 +84,7 @@ export function useVoice() {
       },
     });
     socketRef.current = socket;
-    return () => socket.close(); // StrictMode-safe: no reconnect after close()
+    return () => { interactionRef.current++; stopPlayback(); socket.close(); };
   }, []);
 
   const recorder = useRecorder((arrayBuffer) => {
@@ -98,15 +104,44 @@ export function useVoice() {
     }
   });
 
+  const interrupt = () => {
+    interactionRef.current++;
+    stopPlayback();
+    recorder.cancel();
+    socketRef.current?.cancelTurn();
+    finishDebug("cancelled");
+    debugTurnRef.current = null;
+    const s = useVoiceStore.getState();
+    s.clearSearch();
+    s.clearExpression();
+    s.setStatus(socketRef.current?.ready ? "idle" : "connecting");
+  };
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if ((event.target as HTMLElement)?.closest?.('[role="dialog"]') || document.querySelector('dialog[open], :popover-open')) return;
+      const status = useVoiceStore.getState().status;
+      if (!["thinking", "speaking", "recording"].includes(status)) return;
+      event.preventDefault();
+      interrupt();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return {
     startTalking: async () => {
       const s = useVoiceStore.getState();
-      if (!socketRef.current?.ready || s.status === "speaking") return;
+      if (!socketRef.current?.ready || s.status === "recording") return;
+      interrupt();
+      const interaction = interactionRef.current;
       s.clearCaptions();
       s.setStatus("recording");
       try {
         await recorder.start();
       } catch {
+        if (interaction !== interactionRef.current) return;
         s.setAssistantCaption("Microphone unavailable — check permissions.");
         s.setStatus("idle");
       }

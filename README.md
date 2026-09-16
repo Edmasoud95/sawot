@@ -280,7 +280,11 @@ on your LAN (use `https://` when TLS is configured).
 ### Voice
 
 Hold the button, speak, release. Captions for what you said and what the
-assistant replied appear under the orb during a turn. With TLS configured
+assistant replied appear under the orb during a turn. Hold the microphone again
+while the assistant is thinking or speaking to interrupt and record your next
+question, or press Escape to stop without recording. Interruption cancels pending
+model and speech requests and discards late results; an already dispatched device
+action cannot be undone. Hands-free listening is not enabled. With TLS configured
 (self-signed cert in `certs/`), use `https://` — required for phone microphone
 access (accept the certificate warning once per device).
 

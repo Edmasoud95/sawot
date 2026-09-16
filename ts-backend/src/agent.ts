@@ -126,9 +126,12 @@ export class Agent {
     history: HistoryMessage[],
     userText: string,
     onEvent?: (event: string, data: any) => void | Promise<void>,
-    options: { expressions?: boolean; speechEngine?: string | null } = {},
+    options: { expressions?: boolean; speechEngine?: string | null; signal?: AbortSignal } = {},
   ): Promise<string> {
+    const checkCancelled = () => options.signal?.throwIfAborted();
+    checkCancelled();
     const emit = async (event: string, data: any) => {
+      checkCancelled();
       if (!onEvent) return;
       try {
         await onEvent(event, data);
@@ -150,12 +153,14 @@ export class Agent {
 
     const turnStart = performance.now();
     for (let round = 1; round <= Agent.MAX_ROUNDS; round++) {
+      checkCancelled();
       const t0 = performance.now();
       const response = await createChatCompletion<any>(this.client, {
         model: this.model,
         messages: [{ role: "system", content: this.system + searchPrompt + (options.expressions ? expressionPrompt(drawing) : "") + speechTagPrompt(options.speechEngine) }, ...history] as any,
         tools: toOpenAiTools(modelTools) as any,
-      });
+      }, { signal: options.signal });
+      checkCancelled();
       const msg = response.choices[0].message;
       await emit("llm_round", {
         round,
@@ -203,6 +208,7 @@ export class Agent {
         try {
           args = JSON.parse(tc.function.arguments || "{}");
           await emit("tool_call", { name: tc.function.name, args });
+          checkCancelled();
           if (options.expressions && tc.function.name === ORB_TOOL_NAME) {
             const chosen = expressionFromToolArgs(args, drawing);
             if (chosen.kind === "none") result = { error: "nothing shown: give kind plus a catalogue name, a short text, or sketch strokes" };
@@ -211,9 +217,11 @@ export class Agent {
             result = await executeTool(this.tools, tc.function.name, args);
           }
         } catch (e: any) {
+          checkCancelled();
           await emit("tool_call", { name: tc.function.name, args: tc.function.arguments });
           result = { error: "invalid tool arguments: " + (e?.message ?? e) };
         }
+        checkCancelled();
         if (options.expressions && tc.function.name === "get_entities") {
           const entities = Array.isArray(result) ? result : result?.entities;
           if (Array.isArray(entities)) for (const entity of entities) {

@@ -29,25 +29,45 @@ export function meterFrom(node) {
 
 let activePlayback = null;
 
-export async function playWav(arrayBuffer, onEnded) {
-  const context = audioContext();
-  await context.resume();
-  const buffer = await context.decodeAudioData(arrayBuffer.slice(0));
-  if (activePlayback) {
-    activePlayback.onended = null;
-    try {
-      activePlayback.stop();
-    } catch {
-      /* already stopped */
-    }
+let playbackEpoch = 0;
+
+export function stopPlayback() {
+  playbackEpoch++;
+  const source = activePlayback;
+  activePlayback = null;
+  if (source) {
+    source.onended = null;
+    try { source.stop(); } catch { /* already stopped */ }
+    source.disconnect();
+    if (currentSource === source) currentSource = null;
   }
+  levelBus.value = 0;
+}
+
+export async function playWav(arrayBuffer, onEnded) {
+  stopPlayback();
+  const epoch = playbackEpoch;
+  const context = audioContext();
+  let buffer;
+  try {
+    await context.resume();
+    if (epoch !== playbackEpoch) return;
+    buffer = await context.decodeAudioData(arrayBuffer.slice(0));
+  } catch (error) {
+    if (epoch !== playbackEpoch) return;
+    throw error;
+  }
+  if (epoch !== playbackEpoch) return;
   const source = context.createBufferSource();
   activePlayback = source;
   source.buffer = buffer;
   meterFrom(source);
   source.connect(context.destination);
   source.onended = () => {
-    if (activePlayback === source) activePlayback = null;
+    if (epoch !== playbackEpoch || activePlayback !== source) return;
+    activePlayback = null;
+    source.disconnect();
+    if (currentSource === source) currentSource = null;
     levelBus.value = 0;
     onEnded();
   };

@@ -23,13 +23,14 @@ export class InferenceClient {
     return resp.json();
   }
 
-  async transcribe(audio: Buffer, language?: string): Promise<string> {
+  async transcribe(audio: Buffer, language?: string, signal?: AbortSignal): Promise<string> {
     const form = new FormData();
     form.append("file", new Blob([new Uint8Array(audio)]), "audio.webm");
     form.append("model", "whisper-1");
     if (language) form.append("language", language);
     const resp = await fetch(this.baseUrl + "/v1/audio/transcriptions", {
       method: "POST",
+      signal,
       body: form,
     });
     if (!resp.ok) await fail(resp, "transcribe");
@@ -38,15 +39,16 @@ export class InferenceClient {
   }
 
   /** Voices the sidecar's active TTS engine offers, with its default. */
-  async voices(): Promise<{ engine: string | null; voices: string[]; default: string | null }> {
-    const resp = await fetch(this.baseUrl + "/api/voices");
+  async voices(signal?: AbortSignal): Promise<{ engine: string | null; voices: string[]; default: string | null }> {
+    const resp = await fetch(this.baseUrl + "/api/voices", { signal });
     if (!resp.ok) throw new Error("voices failed: " + resp.status);
     return resp.json();
   }
 
-  async synthesize(text: string, voice?: string): Promise<Buffer> {
+  async synthesize(text: string, voice?: string, signal?: AbortSignal): Promise<Buffer> {
     const resp = await fetch(this.baseUrl + "/v1/audio/speech", {
       method: "POST",
+      signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ input: text, voice, response_format: "wav" }),
     });
