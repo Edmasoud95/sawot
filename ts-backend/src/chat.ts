@@ -88,9 +88,9 @@ export class ChatStore {
     return join(this.root, cid + ".json");
   }
 
-  create(model: string, homeAssistant = false): any {
+  create(model: string, homeAssistant = false, webSearch = true): any {
     const now = Date.now() / 1000;
-    const conv = { id: newId(), title: "New chat", model, homeAssistant, created: now, updated: now, messages: [] };
+    const conv = { id: newId(), title: "New chat", model, homeAssistant, webSearch, created: now, updated: now, messages: [] };
     this.save(conv);
     return conv;
   }
@@ -101,6 +101,7 @@ export class ChatStore {
     try {
       const conv = JSON.parse(readFileSync(p, "utf8"));
       conv.homeAssistant = Boolean(conv.homeAssistant);
+      conv.webSearch = conv.webSearch !== false;
       return conv;
     } catch {
       return null;
@@ -134,6 +135,7 @@ export class ChatStore {
         out.push({
           id: conv.id, title: conv.title, model: conv.model,
           homeAssistant: Boolean(conv.homeAssistant),
+          webSearch: conv.webSearch !== false,
           created: conv.created, updated: conv.updated,
         });
       } catch {

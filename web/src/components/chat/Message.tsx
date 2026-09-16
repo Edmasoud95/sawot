@@ -76,7 +76,15 @@ function CodeBlock({ children, ...props }) {
   );
 }
 
-const MD_COMPONENTS = { pre: CodeBlock };
+function ScrollableTable({ children, node: _node, ...props }) {
+  return (
+    <div className="chat-table-scroll" role="region" aria-label="Scrollable table" tabIndex={0}>
+      <table {...props}>{children}</table>
+    </div>
+  );
+}
+
+const MD_COMPONENTS = { pre: CodeBlock, table: ScrollableTable };
 
 export function Markdown({ children }) {
   return (

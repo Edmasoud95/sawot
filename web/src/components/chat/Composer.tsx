@@ -1,17 +1,14 @@
 import { useRef, useState } from "react";
 import { useChatStore } from "../../chatStore";
 import { uploadFile } from "../../lib/chatApi";
-import { useModels } from "./useModels";
+import ModelPicker from "../ModelPicker";
+import AttachmentPicker from "./AttachmentPicker";
+import ToolsMenu from "./ToolsMenu";
+import { useModels, useProviders } from "./useModels";
 
-const ACCEPT = "image/*,.pdf,.txt,.md,.csv,.json,.py,.js,.ts,.yaml,.yml,.html,.css";
 const MAX_HEIGHT = 184; // ~8 lines of mono at 0.85rem
 const VISION_RE = /vl|vision/i;
 
-const Paperclip = () => (
-  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-  </svg>
-);
 const ArrowUp = () => (
   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
     <path d="M12 19V5M5 12l7-7 7 7" />
@@ -38,11 +35,13 @@ export default function Composer() {
   const startStream = useChatStore((s) => s.startStream);
   const stopStream = useChatStore((s) => s.stopStream);
   const models = useModels();
+  const providers = useProviders();
+  const renameModel = useChatStore((s) => s.renameModel);
 
   const [text, setText] = useState("");
   const [uploading, setUploading] = useState(false);
   const textareaRef = useRef(null);
-  const fileRef = useRef(null);
+  const [uploadError, setUploadError] = useState("");
 
   const autoGrow = () => {
     const el = textareaRef.current;
@@ -54,7 +53,7 @@ export default function Composer() {
   const canSend = text.trim().length > 0 || pendingAttachments.length > 0;
 
   const send = () => {
-    if (streaming || !canSend) return;
+    if (streaming || uploading || !canSend) return;
     startStream(text.trim());
     setText("");
     const el = textareaRef.current;
@@ -68,19 +67,25 @@ export default function Composer() {
     }
   };
 
-  const onFiles = async (e) => {
-    const files = [...e.target.files];
-    e.target.value = "";
-    if (!files.length) return;
+  const onFiles = async (files: File[]) => {
+    if (!files.length || uploading) return;
+    const conversationId = useChatStore.getState().activeId;
     setUploading(true);
-    for (const file of files) {
-      try {
-        addAttachment(await uploadFile(file));
-      } catch (err) {
-        console.error("upload failed", err);
+    setUploadError("");
+    const failures: string[] = [];
+    try {
+      for (const file of files) {
+        try {
+          const attachment = await uploadFile(file);
+          if (useChatStore.getState().activeId === conversationId) addAttachment(attachment);
+        } catch (err) {
+          failures.push(`${file.name}: ${err instanceof Error ? err.message : "Upload failed"}`);
+        }
       }
+      setUploadError(failures.join(" · "));
+    } finally {
+      setUploading(false);
     }
-    setUploading(false);
   };
 
   const hasImage = pendingAttachments.some((a) => a.kind === "image");
@@ -90,6 +95,8 @@ export default function Composer() {
 
   return (
     <div className="composer shrink-0 px-4 pb-1 pt-2 sm:px-6">
+      {uploading && <p role="status" className="attachment-feedback">Uploading attachments…</p>}
+      {uploadError && <p role="alert" className="attachment-feedback">{uploadError}</p>}
       {showVisionWarning && (
         <div className="mx-auto mb-2 flex max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-aurora-ember/30 bg-aurora-ember/10 px-3 py-1.5 font-mono text-[0.65rem] text-aurora-ember">
           <span>model may not support images</span>
@@ -119,7 +126,7 @@ export default function Composer() {
                     aria-label={`Remove ${a.name}`}
                     className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full border border-white/15 bg-ink-900 text-zinc-400 transition-colors duration-200 hover:bg-white/10 hover:text-zinc-100"
                   >
-                    ×
+                    <span className="ui-text-icon" aria-hidden="true">×</span>
                   </button>
                 </span>
               ) : (
@@ -136,57 +143,46 @@ export default function Composer() {
                     aria-label={`Remove ${a.name}`}
                     className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-white/10 hover:text-zinc-200"
                   >
-                    ×
+                    <span className="ui-text-icon" aria-hidden="true">×</span>
                   </button>
                 </span>
               )
             )}
           </div>
         )}
-        <div className="flex items-end gap-2 px-2.5 py-2">
-          <input
-            ref={fileRef}
-            type="file"
-            multiple
-            accept={ACCEPT}
-            onChange={onFiles}
-            className="hidden"
-          />
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={uploading}
-            aria-label="Attach files"
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-zinc-500 transition-colors duration-300 hover:bg-white/[0.06] hover:text-zinc-200 disabled:animate-pulse-dot disabled:opacity-50"
-          >
-            <Paperclip />
-          </button>
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            value={text}
-            onChange={(e) => {
-              setText(e.target.value);
-              autoGrow();
-            }}
-            onKeyDown={onKeyDown}
-            placeholder="Message the assistant…"
-            aria-label="Message"
-            className="max-h-[184px] min-h-9 flex-1 resize-none self-center bg-transparent py-2 font-sans text-[0.95rem] leading-snug text-zinc-200 outline-none placeholder:text-zinc-500"
-          />
+        <textarea
+          ref={textareaRef}
+          rows={2}
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            autoGrow();
+          }}
+          onKeyDown={onKeyDown}
+          placeholder="Message the assistant…"
+          aria-label="Message"
+          className="block w-full max-h-[184px] min-h-[64px] resize-none self-center bg-transparent px-4 pt-3 pb-2 font-sans text-base leading-snug text-zinc-200 outline-none placeholder:text-zinc-500"
+        />
+        <div className="flex items-center gap-2 px-2.5 pb-2">
+          <AttachmentPicker key={active?.id} disabled={uploading} onFiles={onFiles} />
+          <ToolsMenu key={`tools-${active?.id}`} />
+          <div className="ml-auto min-w-0">
+            <ModelPicker presentation="sheet" value={active?.model || ""} providers={providers} onChange={renameModel} />
+          </div>
           {streaming ? (
             <button
               onClick={stopStream}
               aria-label="Stop generating"
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-aurora-ember/50 bg-aurora-ember/15 text-aurora-ember transition-colors duration-300 hover:bg-aurora-ember/25"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-aurora-ember/50 bg-aurora-ember/15 text-aurora-ember transition-colors duration-300 hover:bg-aurora-ember/25"
             >
               <Stop />
             </button>
           ) : (
             <button
               onClick={send}
-              disabled={!canSend}
+              disabled={!canSend || uploading}
               aria-label="Send message"
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-aurora-teal/50 bg-aurora-teal/15 text-aurora-teal transition-colors duration-300 hover:bg-aurora-teal/25 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-aurora-teal/50 bg-aurora-teal/15 text-aurora-teal transition-colors duration-300 hover:bg-aurora-teal/25 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
             >
               <ArrowUp />
             </button>

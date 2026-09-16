@@ -38,7 +38,7 @@ const Check = () => (
 const railBtn =
   "icon-button";
 
-export default function Sidebar() {
+export default function Sidebar({ panelRef, mobile }) {
   const conversations = useChatStore((s) => s.conversations);
   const activeId = useChatStore((s) => s.activeId);
   const sidebarOpen = useChatStore((s) => s.sidebarOpen);
@@ -48,6 +48,11 @@ export default function Sidebar() {
   const [confirmId, setConfirmId] = useState(null);
 
   const setOpen = (sidebarOpen) => useChatStore.setState({ sidebarOpen });
+  const startNew = () => {
+    useChatStore.getState().stopStream();
+    void newConversation();
+    if (mobile) setOpen(false);
+  };
 
   const pick = (id) => {
     openConversation(id);
@@ -61,7 +66,7 @@ export default function Sidebar() {
         <button onClick={() => setOpen(true)} aria-label="Open sidebar" className={railBtn}>
           <ChevronRight />
         </button>
-        <button onClick={() => newConversation()} aria-label="New chat" className={railBtn}>
+        <button onClick={startNew} aria-label="New chat" className={railBtn}>
           <Plus />
         </button>
       </div>
@@ -77,18 +82,19 @@ export default function Sidebar() {
         aria-hidden="true"
         className="absolute inset-0 z-20 bg-black/40 backdrop-blur-[2px] sm:hidden"
       />
-      <aside className="chat-sidebar">
+      <aside id="chat-history" ref={panelRef} role={mobile ? "dialog" : undefined}
+        aria-modal={mobile ? true : undefined} aria-label="Chat history" className="chat-sidebar">
         <div className="flex items-center justify-between px-4 pb-3 pt-1">
-          <h2 className="eyebrow">
+          {mobile ? <h1 className="brand" aria-label="SAWOT">sawot<span aria-hidden="true">•</span></h1> : <h2 className="eyebrow">
             Conversations
-          </h2>
+          </h2>}
           <button onClick={() => setOpen(false)} aria-label="Collapse sidebar" className={railBtn}>
             <ChevronLeft />
           </button>
         </div>
         <div className="px-4 pb-3">
           <button
-            onClick={() => newConversation()}
+            onClick={startNew}
             className="new-chat-button"
           >
             <Plus /> New conversation
@@ -104,16 +110,16 @@ export default function Sidebar() {
             <li key={c.id} className="group relative">
               <button
                 onClick={() => pick(c.id)}
-                className={`flex w-full items-baseline gap-2 rounded-lg px-2.5 py-3 pr-9 text-left transition-colors duration-200 ${
+                className={`flex w-full items-baseline gap-2 rounded-lg px-2.5 py-3 pr-12 text-left transition-colors duration-200 ${
                   c.id === activeId
                     ? "bg-white/[0.07] text-zinc-100"
                     : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
                 }`}
               >
-                <span className="min-w-0 flex-1 truncate text-[0.8rem] leading-snug">
+                <span className="min-w-0 flex-1 truncate text-base leading-snug">
                   {c.title}
                 </span>
-                <span className="shrink-0 text-xs text-zinc-500">
+                <span className="shrink-0 text-sm text-zinc-500">
                   {relTime(c.updated)}
                 </span>
               </button>
@@ -128,7 +134,7 @@ export default function Sidebar() {
                 }}
                 onBlur={() => setConfirmId((id) => (id === c.id ? null : id))}
                 aria-label={confirmId === c.id ? "Confirm delete" : `Delete ${c.title}`}
-                className={`absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md transition-all duration-200 ${
+                className={`absolute right-1.5 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-md transition-all duration-200 ${
                   confirmId === c.id
                     ? "bg-aurora-ember/15 text-aurora-ember opacity-100"
                     : "text-zinc-600 opacity-0 hover:text-zinc-300 focus-visible:opacity-100 group-hover:opacity-100"

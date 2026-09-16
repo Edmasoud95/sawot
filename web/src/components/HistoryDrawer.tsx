@@ -42,7 +42,7 @@ function Trace({ trace }) {
   );
 }
 
-export default function HistoryDrawer() {
+export default function HistoryDrawer({ mobileMenu = false }) {
   const history = useVoiceStore((s) => s.history);
   const drawerOpen = useVoiceStore((s) => s.drawerOpen);
   const toggleDrawer = useVoiceStore((s) => s.toggleDrawer);
@@ -57,12 +57,12 @@ export default function HistoryDrawer() {
   // Park the panel off-screen via GSAP itself — a Tailwind translate class
   // would be read as a pixel `x` offset that xPercent then adds to.
   useLayoutEffect(() => {
-    gsap.set(panel.current, { xPercent: 100, autoAlpha: 0 });
-  }, []);
+    gsap.set(panel.current, { xPercent: mobileMenu ? -100 : 100, autoAlpha: 0 });
+  }, [mobileMenu]);
 
   useLayoutEffect(() => {
     gsap.to(panel.current, {
-      xPercent: drawerOpen ? 0 : 100,
+      xPercent: drawerOpen ? 0 : mobileMenu ? -100 : 100,
       autoAlpha: drawerOpen ? 1 : 0,
       duration: 0.55,
       ease: "power4.out",
@@ -72,20 +72,20 @@ export default function HistoryDrawer() {
       duration: 0.4,
       ease: "power2.out",
     });
-  }, [drawerOpen]);
+  }, [drawerOpen, mobileMenu]);
 
   return (
     <>
       <button
         ref={trigger}
         onClick={toggleDrawer}
-        aria-label="Toggle conversation history"
+        aria-label={mobileMenu ? "Open voice history" : "Toggle conversation history"}
         title="History"
         aria-expanded={drawerOpen}
-        className="header-button"
+        className={mobileMenu ? "icon-button chat-history-menu" : "header-button"}
       >
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-          <path d="M3 11a9 9 0 1 1 3 8M3 5v6h6M12 7v5l3 2" />
+        <svg viewBox="0 0 24 24" width={mobileMenu ? 20 : 16} height={mobileMenu ? 20 : 16} fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+          <path d={mobileMenu ? "M4 6h16M4 12h16M4 18h16" : "M3 11a9 9 0 1 1 3 8M3 5v6h6M12 7v5l3 2"} />
         </svg>
       </button>
       <div
@@ -101,11 +101,13 @@ export default function HistoryDrawer() {
         aria-label="Voice history"
         inert={!drawerOpen}
         className="history-panel absolute inset-y-0 right-0 z-40 w-[min(85vw,380px)] overflow-y-auto border-l border-white/10 bg-ink-900/90 p-7 pt-[calc(72px+env(safe-area-inset-top))] backdrop-blur-2xl"
+        style={mobileMenu ? { left: 0, right: "auto", width: "min(85vw, 280px)", padding: "max(18px, env(safe-area-inset-top)) 24px 24px" } : undefined}
       >
         <div className="mb-6 flex items-center justify-between">
-          <h2 className="history-title">Voice history</h2>
-          <button onClick={toggleDrawer} aria-label="Close history" className="icon-button">×</button>
+          {mobileMenu ? <h1 className="brand" aria-label="SAWOT">sawot<span aria-hidden="true">•</span></h1> : <h2 className="history-title">Voice history</h2>}
+          <button onClick={toggleDrawer} aria-label="Close history" className="icon-button"><span className="ui-text-icon" aria-hidden="true">×</span></button>
         </div>
+        {mobileMenu && <h2 className="eyebrow mb-4">Voice history</h2>}
         <div className="mb-6">
           <button
             onClick={toggleDebug}

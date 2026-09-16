@@ -1,12 +1,12 @@
 export const FIELD_CLS =
-  "w-full min-w-0 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[0.85rem] text-zinc-200 outline-none backdrop-blur transition-colors duration-300 hover:border-white/25 focus:border-aurora-teal/50 disabled:opacity-50";
+  "w-full min-w-0 min-h-11 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-base text-zinc-200 outline-none backdrop-blur transition-colors duration-300 hover:border-white/25 focus:border-aurora-teal/50 disabled:opacity-50";
 
 export const BUTTON_CLS =
-  "rounded-full border border-white/10 bg-white/[0.04] px-4 py-1.5 text-[0.8rem] text-zinc-200 transition-colors duration-300 hover:border-aurora-teal/50 hover:text-zinc-100 disabled:opacity-50";
+  "min-h-11 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-base text-zinc-200 transition-colors duration-300 hover:border-aurora-teal/50 hover:text-zinc-100 disabled:opacity-50";
 
 export function SectionTitle({ children }) {
   return (
-    <h3 className="font-mono text-[0.65rem] uppercase tracking-[0.25em] text-zinc-500">
+    <h3 className="font-mono text-sm uppercase tracking-[0.25em] text-zinc-500">
       {children}
     </h3>
   );
@@ -16,9 +16,9 @@ export function Toggle({ label, hint, checked, onChange }) {
   return (
     <div className="flex items-start justify-between gap-4">
       <span className="flex flex-col gap-1">
-        <span className="text-[0.85rem] font-medium text-zinc-200">{label}</span>
+        <span className="text-base font-medium text-zinc-200">{label}</span>
         {hint && (
-          <span className="text-[0.78rem] leading-snug text-zinc-500">{hint}</span>
+          <span className="text-sm leading-snug text-zinc-500">{hint}</span>
         )}
       </span>
       <button
@@ -26,12 +26,11 @@ export function Toggle({ label, hint, checked, onChange }) {
         aria-checked={checked}
         aria-label={label}
         onClick={() => onChange(!checked)}
-        className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition-colors duration-300 ${
-          checked ? "bg-aurora-teal/70" : "bg-white/10"
-        }`}
+        className="relative h-11 w-11 shrink-0 rounded-full"
       >
-        <span
-          className={`absolute left-0 top-1 h-4 w-4 rounded-full bg-white shadow transition-transform duration-300 ${
+        <span aria-hidden="true" className={`absolute left-0 top-2.5 h-6 w-11 rounded-full transition-colors duration-300 ${checked ? "bg-aurora-teal/70" : "bg-white/10"}`} />
+        <span aria-hidden="true"
+          className={`absolute left-0 top-3.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-300 ${
             checked ? "translate-x-6" : "translate-x-1"
           }`}
         />
@@ -43,7 +42,7 @@ export function Toggle({ label, hint, checked, onChange }) {
 export function Select({ label, value, options, onChange, disabled = false, labels = null, ariaLabel = label }) {
   return (
     <label className="flex flex-col gap-1.5">
-      {label && <span className="text-[0.85rem] font-medium text-zinc-200">{label}</span>}
+      {label && <span className="text-base font-medium text-zinc-200">{label}</span>}
       <select
         aria-label={ariaLabel}
         value={value}
@@ -85,7 +84,7 @@ export function Disclosure({ id, title, summary, open, onToggle, children }) {
         aria-controls={`${id}-body`}
         className="settings-row-head"
       >
-        <span className="text-[0.9rem] font-medium text-zinc-100">{title}</span>
+        <span className="text-base font-medium text-zinc-100">{title}</span>
         <span className="settings-row-summary">
           <span className="truncate">{summary}</span>
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className={`shrink-0 transition-transform duration-300 ${open ? "rotate-90" : ""}`}>

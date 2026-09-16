@@ -84,20 +84,17 @@ export const useChatStore = create<any>()((set, get) => ({
     }
   },
 
-  setHomeAssistant: async (homeAssistant) => {
+  setTool: async (tool: "homeAssistant" | "webSearch", enabled: boolean) => {
     const { activeId } = get();
     if (!activeId) return;
-    try {
-      const updated = await patchConversation(activeId, { homeAssistant });
-      set((s) => ({
-        active: s.active ? { ...s.active, homeAssistant: updated.homeAssistant } : s.active,
-        conversations: s.conversations.map((c) =>
-          c.id === activeId ? { ...c, homeAssistant: updated.homeAssistant } : c
-        ),
-      }));
-    } catch (e) {
-      console.error("setHomeAssistant failed", e);
-    }
+    const updated = await patchConversation(activeId, { [tool]: enabled });
+    set((s) => ({
+      active: s.activeId === activeId && s.active
+        ? { ...s.active, [tool]: updated[tool] } : s.active,
+      conversations: s.conversations.map((c) =>
+        c.id === activeId ? { ...c, [tool]: updated[tool] } : c
+      ),
+    }));
   },
 
   addAttachment: (attachment) =>

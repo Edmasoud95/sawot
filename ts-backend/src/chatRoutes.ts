@@ -75,7 +75,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
   app.post("/api/chat/conversations", async (req: any) => {
     const body = req.body ?? {};
     const model = body.model || ctx.getDefaultModel();
-    return ctx.store.create(model, Boolean(body.homeAssistant));
+    return ctx.store.create(model, Boolean(body.homeAssistant), body.webSearch !== false);
   });
 
   app.get("/api/chat/conversations/:cid", async (req: any, reply: any) => {
@@ -91,6 +91,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     if ("title" in body) conv.title = String(body.title).slice(0, 80);
     if ("model" in body) conv.model = String(body.model);
     if ("homeAssistant" in body) conv.homeAssistant = Boolean(body.homeAssistant);
+    if ("webSearch" in body) conv.webSearch = Boolean(body.webSearch);
     ctx.store.save(conv);
     return conv;
   });
@@ -172,14 +173,15 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     try {
       const history = toOpenAiMessages(conv.messages, ctx.uploadDir);
       const homeAssistant = Boolean(conv.homeAssistant);
-      const tools = [...ctx.searchTools, ...(homeAssistant ? ctx.haTools : [])];
+      const searchTools = conv.webSearch !== false ? ctx.searchTools : [];
+      const tools = [...searchTools, ...(homeAssistant ? ctx.haTools : [])];
       const system = buildChatSystemPrompt({
         name: ctx.name,
         instructions: ctx.getChatInstructions(),
         today: todayLabel(),
         homeAssistant,
         entitySummary: ctx.getEntitySummary(),
-        search: ctx.searchTools.length > 0,
+        search: searchTools.length > 0,
       });
       const getCards = homeAssistant && ctx.ha ? (ids: string[]) => ctx.ha!.getCards(ids) : undefined;
       const llm = ctx.resolve(conv.model);

@@ -149,3 +149,38 @@ test("text chat executes find_in_page and gives matching passages to the model",
     assert.equal(sseEvents(res.body).find(e => e.type === "done").message.content, "The warranty lasts two years.");
   } finally { await app.close(); }
 });
+
+test("web search defaults on for existing chats and persists per conversation", async () => {
+  const { app, ctx } = harness();
+  try {
+    const conv = (await app.inject({ method: "POST", url: "/api/chat/conversations", payload: {} })).json();
+    assert.equal(conv.webSearch, true);
+    const legacy = { ...conv };
+    delete legacy.webSearch;
+    ctx.store.save(legacy);
+    assert.equal(ctx.store.get(conv.id).webSearch, true);
+    const patched = await app.inject({ method: "PATCH", url: `/api/chat/conversations/${conv.id}`, payload: { webSearch: false } });
+    assert.equal(patched.json().webSearch, false);
+    assert.equal(ctx.store.get(conv.id).webSearch, false);
+    assert.equal(ctx.store.list().find(c => c.id === conv.id).webSearch, false);
+    const other = (await app.inject({ method: "POST", url: "/api/chat/conversations", payload: { webSearch: false } })).json();
+    assert.equal(other.webSearch, false);
+    await app.inject({ method: "PATCH", url: `/api/chat/conversations/${conv.id}`, payload: { webSearch: true } });
+    assert.equal(ctx.store.get(conv.id).webSearch, true);
+    assert.equal(ctx.store.get(other.id).webSearch, false);
+  } finally { await app.close(); }
+});
+
+test("disabling web search removes search tools and instructions while retaining Home Assistant", async () => {
+  const requests: any[] = [];
+  const { app } = harness({
+    resolve: () => ({ client: recordingClient(requests), model: "m" }),
+    haTools: [haTool], searchTools: [searchTool],
+  });
+  try {
+    const conv = (await app.inject({ method: "POST", url: "/api/chat/conversations", payload: { homeAssistant: true, webSearch: false } })).json();
+    await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "hello" } });
+    assert.deepEqual(requests[0].tools.map((t: any) => t.function.name), ["get_entities"]);
+    assert.doesNotMatch(requests[0].messages[0].content, /You have web tools/);
+  } finally { await app.close(); }
+});

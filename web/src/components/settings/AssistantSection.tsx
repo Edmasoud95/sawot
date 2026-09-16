@@ -48,7 +48,7 @@ function Personality({ value, prompt, onChange }) {
         labels={Object.fromEntries(PERSONALITY_OPTIONS.map((o) => [o.value, o.label]))}
         onChange={(personality) => onChange({ personality })}
       />
-      <p className="-mt-1 text-[0.78rem] leading-snug text-zinc-500">{current.hint}</p>
+      <p className="-mt-1 text-sm leading-snug text-zinc-500">{current.hint}</p>
       {value === "custom" && (
         <>
           <textarea
@@ -61,7 +61,7 @@ function Personality({ value, prompt, onChange }) {
             disabled={busy}
             className={`${FIELD_CLS} resize-y leading-snug`}
           />
-          {formError && <p className="text-[0.75rem] leading-snug text-red-400/90">{formError}</p>}
+          {formError && <p className="text-sm leading-snug text-red-400/90">{formError}</p>}
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" onClick={refine} disabled={busy} className={BUTTON_CLS}>
               {busy ? "Asking the model…" : draft.trim() ? "Refine with model" : "Write one for me"}
@@ -74,7 +74,7 @@ function Personality({ value, prompt, onChange }) {
             >
               Save personality
             </button>
-            {dirty && !busy && <span className="text-[0.72rem] text-zinc-500">Unsaved changes</span>}
+            {dirty && !busy && <span className="text-sm text-zinc-500">Unsaved changes</span>}
           </div>
         </>
       )}
@@ -97,7 +97,7 @@ function ChatInstructions({ value, onChange }) {
         maxLength={2000}
         className={`${FIELD_CLS} resize-y leading-snug`}
       />
-      <p className="-mt-1 text-[0.78rem] leading-snug text-zinc-500">
+      <p className="-mt-1 text-sm leading-snug text-zinc-500">
         Applies to Chat only. Voice keeps its personality above.
       </p>
       <div className="flex flex-wrap items-center gap-2">
@@ -109,7 +109,7 @@ function ChatInstructions({ value, onChange }) {
         >
           Save instructions
         </button>
-        {dirty && <span className="text-[0.72rem] text-zinc-500">Unsaved changes</span>}
+        {dirty && <span className="text-sm text-zinc-500">Unsaved changes</span>}
       </div>
     </div>
   );
@@ -135,7 +135,7 @@ export default function AssistantSection({ data, update }) {
               onChange={(model) => update({ model })}
             />
             {data.models_error && (
-              <p className="text-[0.75rem] leading-snug text-red-400/90">
+              <p className="text-sm leading-snug text-red-400/90">
                 Can't reach the local model server — showing the last saved model.
               </p>
             )}

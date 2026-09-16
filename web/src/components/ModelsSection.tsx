@@ -21,35 +21,35 @@ function ModelCard({ m, onDownload, onSelect, switching }) {
     >
       <div className="model-card-title">
         <span className="model-card-name">
-          <span className="text-[0.9rem] font-medium text-zinc-100">
+          <span className="text-base font-medium text-zinc-100">
             {m.label}
           </span>
           {m.recommended && (
-            <span className="shrink-0 rounded-full bg-white/[0.06] px-2 py-0.5 font-mono text-[0.55rem] uppercase tracking-wider text-zinc-400">
+            <span className="shrink-0 rounded-full bg-white/[0.06] px-2 py-0.5 font-mono text-sm uppercase tracking-wider text-zinc-400">
               recommended
             </span>
           )}
         </span>
         {active && (
-          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-aurora-teal/15 px-2.5 py-1 text-[0.7rem] font-medium text-aurora-teal">
+          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-aurora-teal/15 px-2.5 py-1 text-sm font-medium text-aurora-teal">
             <span className="h-1.5 w-1.5 rounded-full bg-aurora-teal" />
             Active
           </span>
         )}
       </div>
       {m.description && (
-        <span className="text-[0.78rem] leading-snug text-zinc-500">
+        <span className="text-sm leading-snug text-zinc-500">
           {m.description}
         </span>
       )}
       <div className="flex items-center justify-between gap-3 pt-1">
         {loading ? (
-          <span className="flex items-center gap-1.5 text-[0.78rem] text-aurora-teal">
+          <span className="flex items-center gap-1.5 text-sm text-aurora-teal">
             <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-aurora-teal" />
             Loading model…
           </span>
         ) : m.state === "downloaded" ? (
-          <span className="flex items-center gap-1.5 text-[0.78rem] text-zinc-400">
+          <span className="flex items-center gap-1.5 text-sm text-zinc-400">
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
               <path d="M4 12.5l5 5L20 6.5" />
             </svg>
@@ -63,22 +63,22 @@ function ModelCard({ m, onDownload, onSelect, switching }) {
                 style={{ width: `${pct}%` }}
               />
             </div>
-            <span className="font-mono text-[0.65rem] text-zinc-400">{pct}%</span>
+            <span className="font-mono text-sm text-zinc-400">{pct}%</span>
           </div>
         ) : (
           <button
             onClick={() => onDownload(m)}
-            className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[0.78rem] text-zinc-200 transition-colors hover:border-aurora-teal/50 hover:text-zinc-100"
+            className="min-h-11 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-base text-zinc-200 transition-colors hover:border-aurora-teal/50 hover:text-zinc-100"
           >
             {m.state === "error" ? "Retry download" : "Download"}
           </button>
         )}
-        <span className="shrink-0 font-mono text-[0.65rem] text-zinc-500">
+        <span className="shrink-0 font-mono text-sm text-zinc-500">
           ~{m.size_mb} MB
         </span>
       </div>
       {m.error && (
-        <span className="text-[0.75rem] leading-tight text-red-400">{m.error}</span>
+        <span className="text-sm leading-tight text-red-400">{m.error}</span>
       )}
     </Card>
   );
@@ -138,7 +138,7 @@ export function ModelList({ models, switching, selectError, download, select }) 
   return (
     <div className="flex flex-col gap-3">
       {selectError && (
-        <p className="text-[0.75rem] leading-snug text-red-400/90">{selectError}</p>
+        <p className="text-sm leading-snug text-red-400/90">{selectError}</p>
       )}
       {models.map((m) => (
         <ModelCard
@@ -161,13 +161,13 @@ export default function ModelsSection({ active = true, onSwitched = null }) {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-3">
-        <h3 className="font-mono text-[0.65rem] uppercase tracking-[0.25em] text-zinc-500">
+        <h3 className="font-mono text-sm uppercase tracking-[0.25em] text-zinc-500">
           Speech-to-text
         </h3>
         <ModelList {...speech} models={stt} />
       </div>
       <div className="flex flex-col gap-3">
-        <h3 className="font-mono text-[0.65rem] uppercase tracking-[0.25em] text-zinc-500">
+        <h3 className="font-mono text-sm uppercase tracking-[0.25em] text-zinc-500">
           Text-to-speech
         </h3>
         <ModelList {...speech} models={tts} />

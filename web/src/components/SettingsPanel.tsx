@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import gsap from "gsap";
 import { loadProviderModels } from "./chat/useModels";
 import { useDialogFocus } from "../hooks/useDialogFocus";
+import { useSwipeNavigation } from "../hooks/useSwipeNavigation";
 import { useVoiceStore } from "../store";
 import GeneralSection from "./settings/GeneralSection";
 import AssistantSection from "./settings/AssistantSection";
@@ -14,19 +15,26 @@ const SECTIONS = [
   { key: "assistant", label: "Assistant" },
   { key: "speech", label: "Speech" },
 ];
+const SECTION_ORDER = SECTIONS.map((section) => section.key);
 
 export default function SettingsPanel() {
   const [open, setOpen] = useState(false);
   const [section, setSection] = useState("general");
+  const swipe = useSwipeNavigation(open, section, SECTION_ORDER, setSection, true);
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const panel = useRef(null);
+  const content = useRef<HTMLDivElement>(null);
   const scrim = useRef(null);
   const debugEnabled = useVoiceStore((s) => s.debugEnabled);
   const toggleDebug = useVoiceStore((s) => s.toggleDebug);
   const trigger = useRef(null);
   const closeBtn = useRef(null);
+
+  useLayoutEffect(() => {
+    if (content.current) content.current.scrollTop = 0;
+  }, [section]);
 
   // Park the dialog hidden via GSAP itself, mirroring HistoryDrawer — keeping
   // it mounted lets open/close tween instead of popping in and out.
@@ -148,6 +156,7 @@ export default function SettingsPanel() {
       <div className="settings-layer pointer-events-none fixed inset-0 z-50 grid place-items-center">
         <div
           ref={panel}
+          {...swipe}
           inert={!open}
           role="dialog"
           aria-modal="true"
@@ -164,7 +173,7 @@ export default function SettingsPanel() {
           </header>
           <div className="settings-body">
             <SectionNav sections={SECTIONS} value={section} onChange={setSection} />
-            <div className="settings-content modal-scroll" role="tabpanel" aria-labelledby={`settings-tab-${section}`}>
+            <div ref={content} className="settings-content modal-scroll" role="tabpanel" aria-labelledby={`settings-tab-${section}`}>
               <div className="settings-page">
                 {section === "general" && (
                   <GeneralSection
