@@ -277,6 +277,18 @@ on your LAN (use `https://` when TLS is configured).
 
 ## Usage
 
+### Add to your phone's home screen
+
+Open SAWOT at its HTTPS address on your LAN, using a certificate your phone
+trusts. On iPhone, use Safari's **Share → Add to Home Screen** (keep **Open as
+Web App** enabled if shown). On Android, use Chrome's menu → **Add to Home
+screen** or **Install app**. Launching the SAWOT icon opens a standalone window
+without browser tabs or an address bar; the phone's status bar may remain visible.
+
+The app still needs a connection to your SAWOT server. If you previously saved
+a plain bookmark, remove that shortcut and add it again to pick up the app icon
+and standalone launch settings.
+
 ### Voice
 
 Hold the button, speak, release. Captions for what you said and what the
