@@ -6,7 +6,7 @@ import { useSwipeNavigation } from "../hooks/useSwipeNavigation";
 import { useVoiceStore } from "../store";
 import ConnectionsSection from "./settings/ConnectionsSection";
 import { OPEN_CONNECTIONS_EVENT } from "../lib/settingsNavigation";
-import GeneralSection from "./settings/GeneralSection";
+import AdvancedSection from "./settings/AdvancedSection";
 import AssistantSection from "./settings/AssistantSection";
 import SpeechSection from "./settings/SpeechSection";
 import SectionNav from "./settings/SectionNav";
@@ -16,7 +16,7 @@ const SECTIONS = [
   { key: "connections", label: "Connections" },
   { key: "assistant", label: "Assistant" },
   { key: "speech", label: "Speech" },
-  { key: "general", label: "General" },
+  { key: "advanced", label: "Advanced" },
 ];
 const SECTION_ORDER = SECTIONS.map((section) => section.key);
 
@@ -195,7 +195,7 @@ export default function SettingsPanel() {
                     initialConnection={initialConnection} removeProvider={removeProvider}
                     onProvidersChanged={(body) => { mergeSettings(body); refreshProviders(body.providers ?? []); }} />
                 )}
-                {section === "general" && <GeneralSection debugEnabled={debugEnabled} toggleDebug={toggleDebug} />}
+                {section === "advanced" && <AdvancedSection debugEnabled={debugEnabled} toggleDebug={toggleDebug} />}
                 {section === "assistant" && <AssistantSection data={data} update={update} />}
                 {section === "speech" && (
                   <SpeechSection

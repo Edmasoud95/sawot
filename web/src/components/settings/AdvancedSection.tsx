@@ -1,6 +1,6 @@
 import { SectionTitle, Toggle } from "./fields";
 
-export default function GeneralSection({ debugEnabled, toggleDebug }) {
+export default function AdvancedSection({ debugEnabled, toggleDebug }) {
   return <div className="flex flex-col gap-3">
     <SectionTitle>Developer</SectionTitle>
     <Toggle label="Debug bar"
