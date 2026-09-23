@@ -1,3 +1,5 @@
+import { migrateHaUrl } from "./connections.js";
+import { SettingsStore, migrateCredentials } from "./settingsStore.js";
 import { normalizePersonality } from "./agent.js";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -97,14 +99,16 @@ export function loadConfig(path = "config.yaml", env: NodeJS.ProcessEnv = proces
     return value === undefined || value === null ? DEFAULTS[p.join(".")] : value;
   };
 
-  const token = env.HA_TOKEN;
-  if (!token) throw new Error("HA_TOKEN is not set (put it in .env or the environment)");
-  const haUrl = get("home_assistant", "url");
-  if (!haUrl) throw new Error("HA_URL is not set (home_assistant.url in config.yaml or the HA_URL environment variable)");
-
+  const dataDir = env.SAWOT_DATA_DIR ?? resolve(cfgDir);
+  const haUrl = migrateHaUrl(new SettingsStore(join(dataDir, "settings.json")), get("home_assistant", "url"));
+  const credentials = migrateCredentials(new SettingsStore(join(dataDir, "settings.json")), {
+    haToken: env.HA_TOKEN ?? "",
+    hfToken: env.HF_TOKEN || env.HUGGING_FACE_HUB_TOKEN || "",
+    braveApiKey: String(get("search", "brave_api_key") ?? ""),
+  });
   return {
-    haUrl: String(haUrl).replace(/\/+$/, ""),
-    haToken: token,
+    haUrl,
+    haToken: credentials.haToken,
     llmUrl: String(get("llm", "url")).replace(/\/+$/, ""),
     llmModel: String(get("llm", "model")),
     sttModel: String(get("stt", "model")),
@@ -114,7 +118,7 @@ export function loadConfig(path = "config.yaml", env: NodeJS.ProcessEnv = proces
     assistantName: String(get("assistant", "name")),
     assistantPersonality: normalizePersonality(get("assistant", "personality")),
     assistantPersonalityPrompt: String(get("assistant", "personality_prompt") ?? ""),
-    braveApiKey: String(get("search", "brave_api_key") ?? "").trim(),
+    braveApiKey: credentials.braveApiKey,
     host: String(get("server", "host")),
     port: Number(get("server", "port")),
     allowedOrigins: parseAllowedOrigins(env.SAWOT_ALLOWED_ORIGINS !== undefined
@@ -124,6 +128,6 @@ export function loadConfig(path = "config.yaml", env: NodeJS.ProcessEnv = proces
     sslCertfile: get("tls", "certfile") as string | undefined,
     sslKeyfile: get("tls", "keyfile") as string | undefined,
     sidecarUrl: env.SAWOT_SIDECAR_URL ?? "http://127.0.0.1:8766",
-    dataDir: env.SAWOT_DATA_DIR ?? resolve(cfgDir),
+    dataDir,
   };
 }

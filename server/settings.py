@@ -1,4 +1,7 @@
 import json
+import os
+import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,6 +11,41 @@ KOKORO_VOICES = [
     "am_adam", "am_michael", "am_onyx",
     "bf_emma", "bf_isabella", "bm_george", "bm_lewis",
 ]
+
+
+def merge_settings(path: Path, patch: dict) -> None:
+    """Serialize read/merge/atomic-write with the TypeScript settings writer."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock = Path(str(path) + ".lock")
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            lock.mkdir(mode=0o700)
+            break
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Settings are busy. Retry; if this persists, stop SAWOT and remove settings.json.lock.") from None
+            time.sleep(.01)
+    temporary = None
+    try:
+        data = {}
+        if path.exists():
+            try:
+                data = json.loads(path.read_text())
+                if not isinstance(data, dict):
+                    raise ValueError()
+            except (OSError, ValueError):
+                raise RuntimeError("Cannot read settings.json; restore or repair the file.") from None
+        data.update(patch)
+        with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix=path.name + ".", suffix=".tmp", delete=False) as handle:
+            temporary = Path(handle.name)
+            json.dump(data, handle, indent=2)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        lock.rmdir()
 
 
 class SettingsStore:
@@ -27,7 +65,7 @@ class SettingsStore:
         return {}
 
     def save(self, data: dict) -> None:
-        self._path.write_text(json.dumps(data, indent=2))
+        merge_settings(self._path, data)
 
 
 @dataclass

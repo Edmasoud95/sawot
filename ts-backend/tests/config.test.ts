@@ -46,7 +46,7 @@ test("environment overrides yaml keys", () => {
 test("works from the environment alone when no yaml exists", () => {
   const missing = join(mkdtempSync(join(tmpdir(), "sawot-cfg-")), "config.yaml");
   const cfg = loadConfig(missing, {
-    HA_TOKEN: "t", HA_URL: "http://ha.local:8123", LLM_URL: "http://host.docker.internal:1234/v1", SAWOT_DATA_DIR: "/data",
+    HA_TOKEN: "t", HA_URL: "http://ha.local:8123", LLM_URL: "http://host.docker.internal:1234/v1", SAWOT_DATA_DIR: join(missing, "..", "volume"),
   });
   assert.equal(cfg.haUrl, "http://ha.local:8123");
   assert.equal(cfg.llmUrl, "http://host.docker.internal:1234/v1");
@@ -55,7 +55,7 @@ test("works from the environment alone when no yaml exists", () => {
   assert.equal(cfg.ttsVoice, "af_heart");
   assert.equal(cfg.host, "0.0.0.0");
   assert.equal(cfg.port, 8765);
-  assert.equal(cfg.dataDir, "/data");
+  assert.equal(cfg.dataDir, join(missing, "..", "volume"));
 });
 
 test("data dir defaults to the config file's directory", () => {
@@ -64,10 +64,11 @@ test("data dir defaults to the config file's directory", () => {
   assert.equal(cfg.dataDir, join(path, ".."));
 });
 
-test("missing HA_URL and HA_TOKEN are reported by name", () => {
+test("HA_URL and HA_TOKEN can be configured after startup", () => {
   const missing = join(mkdtempSync(join(tmpdir(), "sawot-cfg-")), "config.yaml");
-  assert.throws(() => loadConfig(missing, { HA_TOKEN: "t" }), /HA_URL/);
-  assert.throws(() => loadConfig(missing, { HA_URL: "http://ha" }), /HA_TOKEN/);
+  assert.equal(loadConfig(missing, { HA_TOKEN: "t" }).haUrl, "");
+  const fresh = join(mkdtempSync(join(tmpdir(), "sawot-cfg-")), "config.yaml");
+  assert.equal(loadConfig(fresh, { HA_URL: "http://ha" }).haToken, "");
 });
 
 test("the Brave key comes from yaml or the environment and defaults to empty", () => {

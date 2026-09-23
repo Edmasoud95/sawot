@@ -1,5 +1,5 @@
 # Quick start:
-#   cp .env.example .env      # set HA_URL and HA_TOKEN
+#   cp .env.example .env      # optionally set your model-server URL
 #   docker compose up -d
 # then open http://localhost:8765 and download the speech models from Settings.
 #
@@ -12,8 +12,12 @@ services:
     ports:
       - "8765:8765"
     environment:
-      HA_URL: ${HA_URL:?set HA_URL in .env}
-      HA_TOKEN: ${HA_TOKEN:?set HA_TOKEN in .env}
+      # Upgrade migration only; configure Home Assistant and credentials in Settings.
+      HA_URL: ${HA_URL:-}
+      HA_TOKEN: ${HA_TOKEN:-}
+      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
       LLM_URL: ${LLM_URL:-http://host.docker.internal:1234/v1}
       LLM_MODEL: ${LLM_MODEL:-}
       ASSISTANT_PERSONALITY: ${ASSISTANT_PERSONALITY:-sassy}

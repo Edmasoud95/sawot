@@ -2,7 +2,7 @@
 """SAWOT setup wizard: configure and download models.
 
 Walks through configuration (Home Assistant, model server) and downloads the
-speech-to-text and text-to-speech models, then writes config.yaml and .env.
+speech-to-text and text-to-speech models, then writes config.yaml. Credentials are entered in Settings.
 
 Usage:
     .venv/bin/python scripts/setup.py
@@ -31,8 +31,7 @@ def ask_yesno(prompt, default=True):
 
 
 def choose(prompt, options, default_id):
-    print(f"
-{prompt}")
+    print(f"\n{prompt}")
     for i, opt in enumerate(options, 1):
         tag = "  (recommended)" if opt.recommended else ""
         print(f"  {i}. {opt.label}  ~{opt.size_mb} MB{tag}")
@@ -50,8 +49,7 @@ def choose(prompt, options, default_id):
 
 
 def download_model(spec):
-    print(f"
-Downloading {spec.label} (~{spec.size_mb} MB)...")
+    print(f"\nDownloading {spec.label} (~{spec.size_mb} MB)...")
     try:
         download(spec)  # tqdm_class=None => real progress bar
         print(f"OK: {spec.label}")
@@ -81,9 +79,7 @@ server:
   port: 8765
 """
     (ROOT / "config.yaml").write_text(yaml_text)
-    (ROOT / ".env").write_text(f"HA_TOKEN={cfg['ha_token']}
-")
-    print("\nWrote config.yaml and .env")
+    print("\nWrote config.yaml. Enter credentials in Settings → Connections.")
     print("Models will be stored in", MODELS_DIR)
 
 
@@ -99,7 +95,6 @@ def main():
 
     print("\n--- Configuration ---")
     ha_url = ask("Home Assistant URL", "http://192.168.1.10:8123")
-    ha_token = ask("Home Assistant long-lived access token")
     lm_url = ask("Model server URL (any OpenAI-compatible /v1 endpoint)", "http://192.168.1.11:1234/v1")
     lm_model = ask("Model name", "gemma-4")
 
@@ -110,7 +105,7 @@ def main():
         ok_tts = download_model(tts)
 
     write_config(dict(
-        ha_url=ha_url, ha_token=ha_token, lm_url=lm_url, lm_model=lm_model,
+        ha_url=ha_url, lm_url=lm_url, lm_model=lm_model,
         stt=stt, voice=voice,
     ))
 

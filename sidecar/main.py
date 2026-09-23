@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 
 from sidecar.app import create_sidecar_app
 from server.config import load_config
+from server.settings import merge_settings
 from server.models import get_model, is_downloaded
 from server.stt import MissingSTT, make_stt_engine
 from server.tts import make_tts_engine
@@ -38,12 +39,7 @@ def _persist(kind: str):
     """Write the selected model into settings.json, preserving the
     TypeScript backend's keys."""
     def write(model_id: str) -> None:
-        try:
-            data = json.loads(SETTINGS_PATH.read_text())
-        except (OSError, ValueError):
-            data = {}
-        data[f"{kind}_model"] = model_id
-        SETTINGS_PATH.write_text(json.dumps(data, indent=2))
+        merge_settings(SETTINGS_PATH, {f"{kind}_model": model_id})
     return write
 
 

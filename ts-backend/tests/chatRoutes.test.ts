@@ -29,6 +29,7 @@ function harness(opts: Partial<ChatCtx> = {}) {
     store: new ChatStore(join(dir, "conversations")),
     resolve: () => { throw new Error("no model in this test"); },
     haTools: [],
+    isHomeAssistantConfigured: () => true,
     searchTools: [],
     ha: null,
     uploadDir: join(dir, "uploads"),
@@ -282,4 +283,34 @@ test("deleting during generation does not recreate the conversation", async () =
     release(); await running;
     assert.equal(ctx.store.get(conv.id), null);
   } finally { release(); await app.close(); }
+});
+
+test('unconfigured Home Assistant cannot be enabled and stale chat flags offer no home tools', async () => {
+  let configured = false;
+  const requests: any[] = [];
+  const { app, ctx } = harness({
+    isHomeAssistantConfigured: () => configured,
+    haTools: [{ name: 'get_entities', description: 'HA tool', parameters: {}, handler: async () => [] }],
+    resolve: () => ({ client: recordingClient(requests), model: 'm' }),
+  });
+  try {
+    assert.equal((await app.inject('/api/chat/tools')).json().homeAssistant, false);
+    let res = await app.inject({ method: 'POST', url: '/api/chat/conversations', payload: { homeAssistant: true } });
+    assert.equal(res.statusCode, 409);
+    const conv = ctx.store.create('m', true);
+    conv.title = 'Saved conversation';
+    ctx.store.save(conv);
+    res = await app.inject({ method: 'PATCH', url: `/api/chat/conversations/${conv.id}`, payload: { homeAssistant: true } });
+    assert.equal(res.statusCode, 409);
+    res = await app.inject({ method: 'POST', url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: 'Hello' } });
+    assert.ok(sseEvents(res.body).some(e => e.type === 'done'));
+    assert.ok(!(requests[0].tools ?? []).some((tool: any) => tool.function.name === 'get_entities'));
+    configured = true;
+    assert.equal((await app.inject('/api/chat/tools')).json().homeAssistant, true);
+    res = await app.inject({ method: 'PATCH', url: `/api/chat/conversations/${conv.id}`, payload: { homeAssistant: true } });
+    assert.equal(res.statusCode, 200);
+    configured = false;
+    res = await app.inject({ method: 'PATCH', url: `/api/chat/conversations/${conv.id}`, payload: { homeAssistant: false } });
+    assert.equal(res.statusCode, 200);
+  } finally { await app.close(); }
 });

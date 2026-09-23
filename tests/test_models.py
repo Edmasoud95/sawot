@@ -41,7 +41,7 @@ def test_is_downloaded_checks_local_files(tmp_path, monkeypatch):
 def test_download_fetches_only_listed_gguf_file(monkeypatch):
     files = []
 
-    def fake_hf(repo_id, filename, local_dir, tqdm_class=None):
+    def fake_hf(repo_id, filename, local_dir, tqdm_class=None, token=None):
         files.append((repo_id, filename, local_dir, tqdm_class))
 
     monkeypatch.setattr(models, "hf_hub_download", fake_hf)
@@ -57,7 +57,7 @@ def test_download_fetches_only_listed_gguf_file(monkeypatch):
 def test_download_tts_calls_hf_hub_download(monkeypatch):
     files = []
 
-    def fake_hf(repo_id, filename, local_dir, tqdm_class=None):
+    def fake_hf(repo_id, filename, local_dir, tqdm_class=None, token=None):
         files.append((repo_id, filename))
 
     monkeypatch.setattr(models, "hf_hub_download", fake_hf)
@@ -69,7 +69,7 @@ def test_download_tts_calls_hf_hub_download(monkeypatch):
 
 
 def test_download_maps_gated_repo_to_actionable_error(monkeypatch):
-    def gated(repo_id, filename, local_dir, tqdm_class=None):
+    def gated(repo_id, filename, local_dir, tqdm_class=None, token=None):
         raise RuntimeError("403 Client Error. Cannot access gated repo for url ...")
 
     monkeypatch.setattr(models, "hf_hub_download", gated)
@@ -372,3 +372,19 @@ def test_failed_switch_and_failed_reload_leave_a_clear_placeholder(monkeypatch, 
     with pytest.raises(ModelNotDownloaded, match="no text-to-speech model is loaded"):
         state.tts.synthesize("hi")
     assert client.get("/api/voices").json() == {"engine": None, "voices": [], "default": None, "clones": []}
+
+
+def test_download_uses_saved_hugging_face_token_and_honors_removal(tmp_path, monkeypatch):
+    import json
+    import server.models as models
+    monkeypatch.setenv("SAWOT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("HF_TOKEN", "old-fixture")
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"hfToken": "saved-fixture"}))
+    calls = []
+    monkeypatch.setattr(models, "hf_hub_download", lambda **kwargs: calls.append(kwargs))
+    models.download(models.STT_MODELS[0])
+    assert calls[-1]["token"] == "saved-fixture"
+    settings.write_text(json.dumps({"hfToken": ""}))
+    models.download(models.STT_MODELS[0])
+    assert calls[-1]["token"] is False

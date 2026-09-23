@@ -10,9 +10,10 @@ Authentication is planned but not yet implemented. The server:
 - exposes a WebSocket and REST API that can **control your Home Assistant
   devices** (lights, switches, climate, media players, locks, and more)
 - stores chat history and uploads on disk under `data/`
-- stores API keys for custom LLM providers **in plaintext** in
-  `settings.json` (they are never returned by the API, but anyone with file
-  access can read them)
+- stores Home Assistant, Brave Search, Hugging Face, and custom provider
+  credentials **in plaintext** in
+  `settings.json` (they are never returned by the API; new backend writes
+  restrict the file to its owner, but filesystem access still needs protection)
 
 Anyone who can reach the server on the network can issue device commands and
 read conversation history. Treat it as a **trusted-LAN-only** service.

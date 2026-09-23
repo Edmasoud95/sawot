@@ -32,6 +32,7 @@ export interface ChatCtx {
   getContextInfo?: (model: string) => Promise<ContextInfo>;
   /** Home Assistant tools, offered only when the conversation asks for them. */
   haTools: Tool[];
+  isHomeAssistantConfigured?: () => boolean;
   /** Shared web tools, including find_in_page; empty without a search key. */
   searchTools: Tool[];
   ha: HomeAssistant | null;
@@ -77,10 +78,14 @@ async function maybeTitle(ctx: ChatCtx, conv: any): Promise<void> {
 }
 
 export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
+  const homeConfigured = () => ctx.isHomeAssistantConfigured?.() ?? ctx.ha?.isConfigured() ?? false;
+  const setupRequired = { detail: "Set up Home Assistant in Settings → Connections before enabling it." };
+  app.get("/api/chat/tools", async () => ({ homeAssistant: homeConfigured() }));
   app.get("/api/chat/conversations", async () => ctx.store.list());
 
-  app.post("/api/chat/conversations", async (req: any) => {
+  app.post("/api/chat/conversations", async (req: any, reply: any) => {
     const body = req.body ?? {};
+    if (body.homeAssistant && !homeConfigured()) return reply.code(409).send(setupRequired);
     const model = body.model || ctx.getDefaultModel();
     return ctx.store.create(model, Boolean(body.homeAssistant), body.webSearch !== false);
   });
@@ -95,6 +100,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     const conv = ctx.store.get(req.params.cid);
     if (!conv) return reply.code(404).send({ detail: "not found" });
     const body = req.body ?? {};
+    if (body.homeAssistant && !homeConfigured()) return reply.code(409).send(setupRequired);
     if ("title" in body) conv.title = String(body.title).slice(0, 80);
     if ("model" in body) conv.model = String(body.model);
     if ("homeAssistant" in body) conv.homeAssistant = Boolean(body.homeAssistant);
@@ -210,7 +216,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       const pending = command && body.attachments?.length
         ? [{ role: "user", content: "", attachments: body.attachments }] : [];
       const history = toOpenAiMessages([...conv.messages, ...pending], ctx.uploadDir);
-      const homeAssistant = Boolean(conv.homeAssistant);
+      const homeAssistant = Boolean(conv.homeAssistant) && homeConfigured();
       const searchTools = conv.webSearch !== false ? ctx.searchTools : [];
       const tools = [...searchTools, ...(homeAssistant ? ctx.haTools : [])];
       const system = buildChatSystemPrompt({

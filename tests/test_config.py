@@ -37,7 +37,7 @@ def test_load_config(tmp_path, monkeypatch):
     assert cfg.port == 9999
 
 
-def test_load_config_missing_token_raises(tmp_path, monkeypatch):
+def test_load_config_without_token_permits_settings_setup(tmp_path, monkeypatch):
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(textwrap.dedent("""
         home_assistant:
@@ -52,8 +52,7 @@ def test_load_config_missing_token_raises(tmp_path, monkeypatch):
         server: {}
     """))
     monkeypatch.delenv("HA_TOKEN", raising=False)
-    with pytest.raises(RuntimeError, match="HA_TOKEN"):
-        load_config(str(cfg_file))
+    assert load_config(str(cfg_file)).ha_token == ""
 
 
 def test_load_config_parses_optional_tls(tmp_path, monkeypatch):
@@ -189,9 +188,34 @@ def test_environment_overrides_yaml(tmp_path, monkeypatch):
     assert cfg.llm_model == "from-yaml"
 
 
-def test_load_config_missing_ha_url_raises(tmp_path, monkeypatch):
+def test_load_config_missing_ha_url_permits_setup(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HA_TOKEN", "t")
     monkeypatch.delenv("HA_URL", raising=False)
-    with pytest.raises(RuntimeError, match="HA_URL"):
-        load_config()
+    assert load_config().ha_url == ""
+
+
+def test_saved_token_wins_over_environment_and_can_be_removed(tmp_path):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text("home_assistant:\n  url: http://ha.local\n")
+    settings = tmp_path / "settings.json"
+    settings.write_text('{"haToken": "saved-fixture"}')
+    assert load_config(cfg_file, env={"HA_TOKEN": "old"}).ha_token == "saved-fixture"
+    settings.write_text('{"haToken": ""}')
+    assert load_config(cfg_file, env={"HA_TOKEN": "old"}).ha_token == ""
+
+
+def test_saved_token_uses_data_directory(tmp_path):
+    (tmp_path / "settings.json").write_text('{"haToken": "volume-fixture"}')
+    cfg = load_config({"home_assistant": {"url": "http://ha.local"}},
+                      env={"SAWOT_DATA_DIR": str(tmp_path)})
+    assert cfg.ha_token == "volume-fixture"
+
+
+def test_saved_ha_url_wins_over_environment(tmp_path):
+    (tmp_path / "settings.json").write_text('{"haUrl": "https://saved.invalid/ha"}')
+    config = tmp_path / "config.yaml"
+    cfg = load_config(config, env={"HA_URL": "http://legacy.invalid"})
+    assert cfg.ha_url == "https://saved.invalid/ha"
+    (tmp_path / "settings.json").write_text('{"haUrl": ""}')
+    assert load_config(config, env={"HA_URL": "http://legacy.invalid"}).ha_url == ""

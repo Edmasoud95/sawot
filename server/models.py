@@ -15,6 +15,7 @@ from typing import Callable
 from huggingface_hub import hf_hub_download, snapshot_download
 
 from server.settings import KOKORO_VOICES
+from server.credentials import hugging_face_token
 
 logger = logging.getLogger("voice.models")
 
@@ -133,6 +134,7 @@ def download(spec: ModelSpec, on_update: Callable[[int, int], None] | None = Non
     """Download a model into the local `models/` directory (blocking)."""
     tqdm_cls = _make_tqdm(on_update) if on_update is not None else None
     target = tts_dir(spec) if spec.kind == "tts" else MODELS_DIR / f"stt/{spec.id}"
+    token = hugging_face_token()
     try:
         if spec.files:
             # Specific files only — e.g. one GGUF quant out of a repo of many.
@@ -142,12 +144,14 @@ def download(spec: ModelSpec, on_update: Callable[[int, int], None] | None = Non
                     filename=filename,
                     local_dir=str(target),
                     tqdm_class=tqdm_cls,
+                    token=token,
                 )
         else:
             snapshot_download(
                 repo_id=spec.repo,
                 local_dir=str(target),
                 tqdm_class=tqdm_cls,
+                token=token,
             )
     except Exception as exc:
         msg = str(exc)
@@ -155,7 +159,7 @@ def download(spec: ModelSpec, on_update: Callable[[int, int], None] | None = Non
             raise RuntimeError(
                 f"This model is gated on Hugging Face: accept access at "
                 f"https://huggingface.co/{spec.repo} while signed in, make the "
-                f"token available (`hf auth login` or HF_TOKEN in .env), then retry."
+                f"token available in Settings → Connections, then retry."
             ) from exc
         raise
 

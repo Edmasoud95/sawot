@@ -1,4 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { normalizeHaUrl } from "./connections.js";
+import { SettingsStore, CREDENTIAL_KEYS, type Credentials } from "./settingsStore.js";
+export { SettingsStore } from "./settingsStore.js";
 import type { FastifyInstance } from "fastify";
 
 import { buildSystemPrompt, normalizePersonality, PERSONA, PERSONALITIES, PERSONALITY_PROMPT_MAX, type Agent, type Personality } from "./agent.js";
@@ -31,25 +33,6 @@ async function activeVoices(ctx: SettingsCtx): Promise<{ engine: string | null; 
   return { engine: null, voices: KOKORO_VOICES, default: KOKORO_VOICES[0] };
 }
 
-export class SettingsStore {
-  constructor(private path: string) {}
-
-  load(): Record<string, any> {
-    try {
-      if (existsSync(this.path)) return JSON.parse(readFileSync(this.path, "utf8"));
-    } catch {
-      /* corrupt file => empty */
-    }
-    return {};
-  }
-
-  save(data: Record<string, any>): void {
-    // Merge over what's on disk — the Python sidecar keeps its own keys
-    // (e.g. stt_model) in the same file.
-    writeFileSync(this.path, JSON.stringify({ ...this.load(), ...data }, null, 2));
-  }
-}
-
 export interface SettingsState {
   model: string; // provider-qualified ("local::qwen3-8b")
   voice: string;
@@ -72,6 +55,7 @@ export interface SettingsCtx {
   name: string;
   setSystemPrompt: (prompt: string) => void;
   inference: InferenceClient;
+  onCredentialsChanged?: (credentials: Credentials & { haUrl: string }) => void;
 }
 
 function refinePrompt(name: string): string {
@@ -107,6 +91,7 @@ async function settingsPayload(ctx: SettingsCtx): Promise<Record<string, any>> {
   const active = await activeVoices(ctx);
   const voice = resolveVoice(active.voices, ctx.state.voice, active.default);
   if (voice !== ctx.state.voice) { ctx.state.voice = voice; persist(ctx); }
+  const saved = ctx.store.load();
   const data: Record<string, any> = {
     model: ctx.state.model,
     voice: ctx.state.voice,
@@ -114,6 +99,8 @@ async function settingsPayload(ctx: SettingsCtx): Promise<Record<string, any>> {
     personalityPrompt: ctx.state.personalityPrompt,
     chatInstructions: ctx.state.chatInstructions,
     detailedDrawings: ctx.state.detailedDrawings,
+    haUrl: saved.haUrl ?? "",
+    credentials: Object.fromEntries(CREDENTIAL_KEYS.map(key => [key, Boolean(saved[key])])),
     models,
     providers,
     voices: active.voices,
@@ -141,6 +128,18 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
 
   app.post("/api/settings", async (req: any, reply: any) => {
     const body = req.body ?? {};
+    const credentials: Partial<Credentials> & { haUrl?: string } = {};
+    if (Object.hasOwn(body, "haUrl")) {
+      try { credentials.haUrl = normalizeHaUrl(body.haUrl); }
+      catch (error) { return reply.code(400).send({ detail: (error as Error).message }); }
+    }
+    for (const key of CREDENTIAL_KEYS) {
+      if (!Object.hasOwn(body, key)) continue;
+      if (typeof body[key] !== "string" || body[key].length > 8192 || /[\x00-\x1f\x7f]/.test(body[key])) {
+        return reply.code(400).send({ detail: key + " must be a single line of text, at most 8192 characters" });
+      }
+      credentials[key] = body[key].trim();
+    }
     const model = body.model;
     const voice = body.voice;
     // `sassy` is the pre-custom boolean; older clients may still send it.
@@ -191,6 +190,11 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
     }
     if (chatInstructions !== undefined) ctx.state.chatInstructions = chatInstructions.trim();
 
+    if (Object.keys(credentials).length) {
+      ctx.store.save(credentials);
+      const saved = ctx.store.load();
+      ctx.onCredentialsChanged?.({ haUrl: saved.haUrl ?? "", haToken: saved.haToken ?? "", braveApiKey: saved.braveApiKey ?? "", hfToken: saved.hfToken ?? "" });
+    }
     persist(ctx);
     return settingsPayload(ctx);
   });

@@ -1,4 +1,5 @@
 import os
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
@@ -85,7 +86,7 @@ def load_config(
 ) -> Config:
     """Load configuration from a YAML path or mapping, with environment
     variables (see ENV_KEYS) overriding the file. A missing file is fine when
-    the environment supplies HA_URL and HA_TOKEN.
+    using defaults. Home Assistant connection settings live in settings.json.
 
     This function is side-effect free: it does not load `.env` — call
     `load_dotenv()` at the entrypoint if you rely on that.
@@ -100,12 +101,24 @@ def load_config(
         value = _lookup(raw, path)
         return DEFAULTS.get(path) if value is None else value
 
-    token = token or env.get("HA_TOKEN")
-    if not token:
-        raise RuntimeError("HA_TOKEN is not set (put it in .env or the environment)")
-    ha_url = get(("home_assistant", "url"))
-    if not ha_url:
-        raise RuntimeError("HA_URL is not set (home_assistant.url in config.yaml or the HA_URL environment variable)")
+    base_dir = Path(".") if isinstance(source, Mapping) else Path(source).resolve().parent
+    settings_path = Path(env.get("SAWOT_DATA_DIR", base_dir)) / "settings.json"
+    saved = {}
+    if (not isinstance(source, Mapping) or "SAWOT_DATA_DIR" in env) and settings_path.exists():
+        try:
+            saved = json.loads(settings_path.read_text())
+            if not isinstance(saved, dict):
+                raise ValueError()
+        except (OSError, ValueError):
+            raise RuntimeError("Cannot read settings.json; restore or repair the file.") from None
+    if token is None:
+        # Legacy fallback allows the sidecar to start before backend migration.
+        token = saved.get("haToken", env.get("HA_TOKEN", ""))
+    if not isinstance(token, str):
+        raise RuntimeError("Invalid credential setting: haToken")
+    ha_url = saved.get("haUrl", get(("home_assistant", "url")) or "")
+    if not isinstance(ha_url, str):
+        raise RuntimeError("Invalid connection setting: haUrl")
 
     return Config(
         ha_url=str(ha_url).rstrip("/"),

@@ -179,7 +179,7 @@ You need:
   opening the UI. Home control and search require tool calling; pictures
   require image input support.
 - **Internet access for initial installation and model downloads.** Some
-  models require accepting Hugging Face access terms and providing `HF_TOKEN`.
+  models require accepting Hugging Face access terms and saving a Hugging Face token in Settings.
   Local inference can run without cloud services after its dependencies and
   model assets are cached; hosted models and web search remain online features.
 - **Storage for models and conversations.** The catalogue estimates about
@@ -202,7 +202,7 @@ cd sawot
 cp .env.example .env
 ```
 
-Edit `.env` and set `HA_URL` and `HA_TOKEN`. Set `LLM_URL` to your model server's
+Set `LLM_URL` in `.env` to your model server's
 OpenAI-compatible base URL, including `/v1`, and optionally set `LLM_MODEL` to
 its exact model ID. The Compose default is
 `http://host.docker.internal:1234/v1`; `host.docker.internal` addresses the
@@ -218,8 +218,6 @@ services:
   sawot:
     environment:
       SAWOT_ALLOWED_ORIGINS: "http://localhost:8765"
-      BRAVE_API_KEY: "${BRAVE_API_KEY:-}"
-      HF_TOKEN: "${HF_TOKEN:-}"
 ```
 
 The origin must exactly match the address you open in the browser. For phone
@@ -227,8 +225,8 @@ access, replace or extend it with your trusted HTTPS origin; see
 [Phone access](#phone-access-and-https). Separate multiple origins with commas,
 without paths or trailing slashes.
 
-The base Compose file does not forward these three variables. Adding a key to
-`.env` alone does not pass it into the container; the override above does.
+The base Compose file does not forward `SAWOT_ALLOWED_ORIGINS`. The override
+above enables it. Configure credentials in Settings after starting the app.
 
 ```bash
 mkdir -p data/data/uploads
@@ -282,12 +280,12 @@ mkdir -p data/uploads
 
 ### 2. Configure a localhost installation
 
-Edit `.env`: set `HA_URL`, `HA_TOKEN`, and your `LLM_URL`/`LLM_MODEL` if desired.
-Environment values override the corresponding YAML values, including `HA_URL`.
+Edit `.env`: set `LLM_URL`/`LLM_MODEL` if desired. Configure Home Assistant
+from Settings after starting the app.
 
 In `config.yaml`:
 
-- Replace the example Home Assistant and model-server addresses.
+- Replace the example model-server address.
 - Set `server.host` to `127.0.0.1` for access only from this machine.
 - Set `server.allowed_origins` to `["http://localhost:8765"]`.
 - **Remove or comment out the example `tls:` block** for this HTTP localhost
@@ -314,8 +312,9 @@ repeat both build commands and restart it.
 
 ## First run
 
-1. Open **Settings → General** to add custom model providers if needed. Use the
-   provider's OpenAI-compatible base URL and API key.
+1. Open **Settings → Connections** to enter your Home Assistant server URL and long-lived access token.
+   Add custom model providers under **AI providers** using their OpenAI-compatible
+   base URL and API key.
 2. In **Settings → Assistant**, select a model with tool calling for voice/home
    tasks. Choose the personality and optional drawing detail. Chat also has its
    own model picker and instructions.
@@ -325,9 +324,10 @@ repeat both build commands and restart it.
    Kokoro may fetch assets during the first startup if they are not cached yet.
 4. Grant microphone permission and try a general question. For pictures, choose
    a model that accepts images before attaching them.
-5. For search, set `BRAVE_API_KEY` and restart the backend (recreate the container
-   for changed Compose environment values). Enable search in the chat's tools
-   menu when wanted.
+5. For search, save your Brave Search API key in **Settings → Connections**.
+   Changes apply to new requests without a restart. Enable search in the chat's
+   tools menu when wanted. Optional Hugging Face tokens for gated model downloads
+   are configured in the same section.
 
 A responsive `/health` endpoint confirms the backend is running; it does not
 prove that speech models, your LLM, or Home Assistant are ready.
@@ -377,14 +377,14 @@ persist in `settings.json` and are applied at runtime.
 
 | Purpose | YAML key | Environment variable |
 | --- | --- | --- |
-| Home Assistant | `home_assistant.url` | `HA_URL` |
-| Home Assistant token | Environment only | `HA_TOKEN` |
+| Home Assistant connection | Settings → Connections (legacy: `home_assistant.url`) | `HA_URL` (migration only) |
+
 | Built-in LLM server/model | `llm.url`, `llm.model` | `LLM_URL`, `LLM_MODEL` |
 | Speech recognition | `stt.model`, `stt.language` | `STT_MODEL`, `STT_LANGUAGE` |
 | Kokoro voice/language | `tts.voice`, `tts.lang_code` | `TTS_VOICE`, `TTS_LANG_CODE` |
 | Name/personality | `assistant.name`, `assistant.personality` | `ASSISTANT_NAME`, `ASSISTANT_PERSONALITY` |
 | Custom personality | `assistant.personality_prompt` | `ASSISTANT_PERSONALITY_PROMPT` |
-| Brave Search key | `search.brave_api_key` | `BRAVE_API_KEY` |
+
 | Bind address/port | `server.host`, `server.port` | `SERVER_HOST`, `SERVER_PORT` |
 | Voice browser origins | `server.allowed_origins` (list) | `SAWOT_ALLOWED_ORIGINS` (comma-separated) |
 | Direct HTTPS | `tls.certfile`, `tls.keyfile` | `TLS_CERTFILE`, `TLS_KEYFILE` |
@@ -393,8 +393,26 @@ persist in `settings.json` and are applied at runtime.
 | Sidecar listening port | — | `SAWOT_SIDECAR_PORT` |
 
 `controls` in YAML overrides the direct device-control service whitelist.
-Custom providers and their credentials are managed in Settings. Provider API
-keys are stored on disk and omitted from public provider responses.
+Home Assistant, Brave Search, Hugging Face, and AI providers are
+managed in Settings → Connections and stored in `settings.json`. Credential fields show only
+whether a key is configured; saved secrets are never sent back to the browser.
+Blank replacement fields leave keys unchanged; **Remove** clears a saved key.
+Home Assistant’s URL and token can be saved together. Chat’s Home Assistant
+toggle is unavailable until both are configured, with a shortcut to setup.
+The info button beside each connection explains what to enter and how to get it.
+
+On upgrade, the backend imports the Home Assistant URL from `HA_URL` or
+`home_assistant.url`, plus legacy `HA_TOKEN`, `BRAVE_API_KEY`, `HF_TOKEN`
+(or `HUGGING_FACE_HUB_TOKEN`), and YAML `search.brave_api_key` values only when
+the corresponding saved setting is absent. Saved values always win, including
+explicit removals. After the first successful startup, remove the old credential
+entries from `.env`, YAML, and deployment environment configuration. Compose
+forwards optional legacy variables for migration; none are required for startup.
+A cached `hf auth login` is used only if no Hugging Face setting exists; removing
+a saved token disables that fallback too.
+Both processes coordinate settings writes using `settings.json.lock`. If a crash
+leaves that directory behind and saves report that settings are busy, stop SAWOT,
+remove the stale lock directory, and start it again.
 For Docker, explicitly forward additional environment variables in Compose;
 its `.env` file is an interpolation source, not an automatic container env file.
 

@@ -54,7 +54,7 @@ test("status describes current context and repeated commands never reach the mod
 });
 
 test("status counts instructions, enabled tool schemas, history and text attachments", async t => {
-  const h = setup(t, { getChatInstructions: () => "instruction ".repeat(200) });
+  const h = setup(t, { getChatInstructions: () => "instruction ".repeat(200), isHomeAssistantConfigured: () => true });
   const first = await h.status();
   const conv = h.store.get(h.conv.id);
   conv.homeAssistant = true;

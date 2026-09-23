@@ -31,11 +31,26 @@ export class HomeAssistant {
 
   constructor(private baseUrl: string, private token: string) {}
 
+  setToken(token: string): void {
+    this.setConnection(this.baseUrl, token);
+  }
+
+  setConnection(baseUrl: string, token: string): void {
+    this.baseUrl = baseUrl;
+    this.token = token;
+    this.areas.clear();
+  }
+
+  isConfigured(): boolean { return Boolean(this.baseUrl && this.token); }
+
   private headers(extra: Record<string, string> = {}) {
+    if (!this.baseUrl || !this.token) throw new Error("Configure the Home Assistant URL and token in Settings.");
     return { Authorization: "Bearer " + this.token, ...extra };
   }
 
   async loadAreas(): Promise<void> {
+    const token = this.token;
+    const baseUrl = this.baseUrl;
     const template =
       "{% for s in states %}{{ s.entity_id }}|{{ area_name(s.entity_id) or '' }}\n{% endfor %}";
     const resp = await fetch(this.baseUrl + "/api/template", {
@@ -45,6 +60,7 @@ export class HomeAssistant {
     });
     if (!resp.ok) throw new Error("HA template failed: " + resp.status);
     const text = await resp.text();
+    if (this.token !== token || this.baseUrl !== baseUrl) return;
     this.areas = new Map();
     for (const line of text.trim().split("\n")) {
       const [id, area] = line.split("|");

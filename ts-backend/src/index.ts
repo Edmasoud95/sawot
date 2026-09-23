@@ -148,10 +148,34 @@ async function main() {
     state,
     registry,
     fallbackModel,
-    summary,
+    get summary() { return summary; },
     name: config.assistantName,
     setSystemPrompt,
     inference,
+    onCredentialsChanged(credentials) {
+      if (config.braveApiKey !== credentials.braveApiKey) {
+        config.braveApiKey = credentials.braveApiKey;
+        searchTools.splice(0, searchTools.length, ...(credentials.braveApiKey
+          ? buildSearchTools(new BraveSearchClient(credentials.braveApiKey)) : []));
+      }
+      if (config.haToken !== credentials.haToken || config.haUrl !== credentials.haUrl) {
+        config.haToken = credentials.haToken;
+        config.haUrl = credentials.haUrl;
+        ha.setConnection(credentials.haUrl, credentials.haToken);
+        summary = "(device list unavailable — use get_entities tool)";
+        setSystemPrompt(buildSystemPrompt(summary, state.personality, config.assistantName, state.personalityPrompt));
+        // Populate area names and the device list for the new account, without delaying Save.
+        if (credentials.haToken && credentials.haUrl) void (async () => {
+          try {
+            await ha.loadAreas();
+            const fresh = await ha.entitySummary();
+            if (config.haToken !== credentials.haToken || config.haUrl !== credentials.haUrl) return;
+            summary = fresh;
+            setSystemPrompt(buildSystemPrompt(summary, state.personality, config.assistantName, state.personalityPrompt));
+          } catch { /* Keep the tool-based fallback when HA is unavailable. */ }
+        })();
+      }
+    },
   });
 
   const chatCtx: ChatCtx = {

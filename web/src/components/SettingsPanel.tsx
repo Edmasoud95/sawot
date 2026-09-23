@@ -4,6 +4,8 @@ import { loadProviderModels } from "./chat/useModels";
 import { useDialogFocus } from "../hooks/useDialogFocus";
 import { useSwipeNavigation } from "../hooks/useSwipeNavigation";
 import { useVoiceStore } from "../store";
+import ConnectionsSection from "./settings/ConnectionsSection";
+import { OPEN_CONNECTIONS_EVENT } from "../lib/settingsNavigation";
 import GeneralSection from "./settings/GeneralSection";
 import AssistantSection from "./settings/AssistantSection";
 import SpeechSection from "./settings/SpeechSection";
@@ -11,16 +13,18 @@ import SectionNav from "./settings/SectionNav";
 import Toast from "./settings/Toast";
 
 const SECTIONS = [
-  { key: "general", label: "General" },
+  { key: "connections", label: "Connections" },
   { key: "assistant", label: "Assistant" },
   { key: "speech", label: "Speech" },
+  { key: "general", label: "General" },
 ];
 const SECTION_ORDER = SECTIONS.map((section) => section.key);
 
 export default function SettingsPanel() {
   const [open, setOpen] = useState(false);
-  const [section, setSection] = useState("general");
+  const [section, setSection] = useState("connections");
   const swipe = useSwipeNavigation(open, section, SECTION_ORDER, setSection, true);
+  const [initialConnection, setInitialConnection] = useState<string | null>(null);
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -80,7 +84,6 @@ export default function SettingsPanel() {
   }, []);
   useEffect(() => {
     if (!open) return;
-    setSection("general");
     setError("");
     fetch("/api/settings")
       .then((r) => r.json())
@@ -91,6 +94,16 @@ export default function SettingsPanel() {
       })
       .catch(() => setError("Couldn't load settings — is the server running?"));
   }, [open, refreshProviders]);
+
+  useEffect(() => {
+    const showConnections = (event: Event) => {
+      setInitialConnection((event as CustomEvent).detail?.connection ?? null);
+      setSection("connections");
+      setOpen(true);
+    };
+    window.addEventListener(OPEN_CONNECTIONS_EVENT, showConnections);
+    return () => window.removeEventListener(OPEN_CONNECTIONS_EVENT, showConnections);
+  }, []);
 
   const close = useCallback(() => setOpen(false), []);
   useDialogFocus(open, panel, trigger, close);
@@ -122,13 +135,15 @@ export default function SettingsPanel() {
       const body = await res.json();
       if (!res.ok) {
         setError(body.detail || "Couldn't save that change — try again.");
-        return;
+        return false;
       }
       mergeSettings(body);
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
+      return true;
     } catch {
       setError("Couldn't save — is the server running?");
+      return false;
     }
   }
 
@@ -136,7 +151,7 @@ export default function SettingsPanel() {
     <>
       <button
         ref={trigger}
-        onClick={() => setOpen(!open)}
+        onClick={() => { setInitialConnection(null); setSection("connections"); setOpen(!open); }}
         aria-label="Settings"
         title="Settings"
         aria-expanded={open}
@@ -175,15 +190,12 @@ export default function SettingsPanel() {
             <SectionNav sections={SECTIONS} value={section} onChange={setSection} />
             <div ref={content} className="settings-content modal-scroll" role="tabpanel" aria-labelledby={`settings-tab-${section}`}>
               <div className="settings-page">
-                {section === "general" && (
-                  <GeneralSection
-                    data={data}
-                    debugEnabled={debugEnabled}
-                    toggleDebug={toggleDebug}
-                    removeProvider={removeProvider}
-                    onProvidersChanged={(body) => { mergeSettings(body); refreshProviders(body.providers ?? []); }}
-                  />
+                {section === "connections" && (
+                  <ConnectionsSection key={`${open}-${initialConnection}`} data={data} update={update}
+                    initialConnection={initialConnection} removeProvider={removeProvider}
+                    onProvidersChanged={(body) => { mergeSettings(body); refreshProviders(body.providers ?? []); }} />
                 )}
+                {section === "general" && <GeneralSection debugEnabled={debugEnabled} toggleDebug={toggleDebug} />}
                 {section === "assistant" && <AssistantSection data={data} update={update} />}
                 {section === "speech" && (
                   <SpeechSection
