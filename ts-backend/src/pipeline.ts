@@ -2,6 +2,8 @@ import type { TemperatureReading } from "./temperature.js";
 import type { Agent, HistoryMessage } from "./agent.js";
 import { InferenceError, type InferenceClient } from "./inference.js";
 import { forSpeech, stripSpeechTags } from "./speechTags.js";
+import type OpenAI from "openai";
+import { conversationErrorMessage, isContextOverflow } from "./conversationError.js";
 
 /** The sidecar's own explanation when it gave one, else a generic message. */
 function speechError(e: unknown): string {
@@ -14,24 +16,27 @@ export type SendFn = (kind: string, payload: any) => void | Promise<void>;
 export async function runVoiceTurn(
   inference: InferenceClient,
   agent: Agent,
-  audio: Buffer,
+  audio: Buffer | null,
   history: HistoryMessage[],
   send: SendFn,
   voice: string,
   getCards?: (ids: string[]) => Promise<any[]>,
-  provider?: { providerId: string; providerName: string },
+  provider?: { providerId: string; providerName: string; contextWindow?: number },
   signal?: AbortSignal,
+  images: OpenAI.Chat.Completions.ChatCompletionContentPartImage[] = [],
 ): Promise<void> {
   const transportSend = send;
   send = (kind, payload) => { if (!signal?.aborted) return transportSend(kind, payload); };
   if (signal?.aborted) return;
   await send("debug", { event: "context", data: {
     model: agent.currentModel, providerId: provider?.providerId, providerName: provider?.providerName, voice,
+    contextWindow: provider?.contextWindow,
   } });
   const t0 = performance.now();
   let text: string;
   try {
-    text = await inference.transcribe(audio, undefined, signal);
+    text = audio ? await inference.transcribe(audio, undefined, signal)
+      : images.length ? "Describe these pictures." : "";
   } catch (e) {
     await send("error", { message: speechError(e) });
     return;
@@ -103,10 +108,12 @@ export async function runVoiceTurn(
   const checkpoint = history.length;
   let reply: string;
   try {
-    reply = await agent.run(history, text, onAgentEvent, { expressions: true, speechEngine, signal });
-  } catch {
+    reply = await agent.run(history, text, onAgentEvent, { expressions: true, speechEngine, signal, images });
+  } catch (error) {
     history.splice(checkpoint);
-    await send("error", { message: "LLM backend offline" });
+    await send("error", { message: isContextOverflow(error) ? conversationErrorMessage(error, "voice") : images.length
+      ? "Couldn’t read the pictures. Check that your selected model supports images, then try again."
+      : "LLM backend offline" });
     return;
   }
 

@@ -40,3 +40,21 @@ test('cancelled response frames cannot reach UI or leak into a new turn', () => 
   wire.event({ type: 'assistant_text', turnId: second, text: 'closed' });
   assert.equal(events.length, 1);
 });
+
+test('pictures are bound to their voice turn and never carried into the next one', () => {
+  const client = new VoiceSocket({ onOpen() {}, onClose() {}, onEvent() {}, onAudio() {} });
+  const wire = Socket.instances.at(-1)!;
+  client.sendAudio(new ArrayBuffer(1), ['123456abcdef']);
+  assert.deepEqual(JSON.parse(wire.sent[0]).imageIds, ['123456abcdef']);
+  client.cancelTurn();
+  client.sendAudio(new ArrayBuffer(1));
+  assert.deepEqual(JSON.parse(wire.sent.at(-2)).imageIds, []);
+  const audioTurn = JSON.parse(wire.sent.at(-2)).turnId;
+  client.sendImages(['abcdef123456']);
+  const pictures = JSON.parse(wire.sent.at(-1));
+  assert.equal(pictures.type, 'voice_images');
+  assert.deepEqual(pictures.imageIds, ['abcdef123456']);
+  assert.ok(pictures.turnId > audioTurn);
+  client.close();
+  assert.throws(() => client.sendImages(['abcdef123456']), /closed/);
+});

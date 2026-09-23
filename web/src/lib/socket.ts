@@ -61,12 +61,19 @@ export class VoiceSocket {
     if (this.ready) this.ws.send(JSON.stringify(message));
   }
 
-  sendAudio(arrayBuffer: ArrayBuffer) {
+  sendAudio(arrayBuffer: ArrayBuffer, imageIds: string[] = []) {
     if (!this.ready) throw new Error("Voice connection is closed");
     this.activeTurnId = ++this.nextTurnId;
     this.audioTurnId = null;
-    this.ws.send(JSON.stringify({ type: "voice_start", turnId: this.activeTurnId }));
+    this.ws.send(JSON.stringify({ type: "voice_start", turnId: this.activeTurnId, imageIds }));
     this.ws.send(arrayBuffer);
+  }
+
+  sendImages(imageIds: string[]) {
+    if (!this.ready) throw new Error("Voice connection is closed");
+    this.activeTurnId = ++this.nextTurnId;
+    this.audioTurnId = null;
+    this.ws.send(JSON.stringify({ type: "voice_images", turnId: this.activeTurnId, imageIds }));
   }
 
   cancelTurn() {

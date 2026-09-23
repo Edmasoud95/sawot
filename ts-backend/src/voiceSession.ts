@@ -1,5 +1,6 @@
 import type { HistoryMessage } from './agent.js';
 import type { SendFn } from './pipeline.js';
+import { conversationErrorMessage } from './conversationError.js';
 
 /** Owns cancellation and committed conversation history for one connection. */
 export class VoiceSession {
@@ -27,7 +28,7 @@ export class VoiceSession {
       await run(history, send, controller.signal);
       if (this.active === controller) this.history = history;
     } catch (error) {
-      if (!controller.signal.aborted) await send('error', { message: String(error instanceof Error ? error.message : error) });
+      if (!controller.signal.aborted) await send('error', { message: conversationErrorMessage(error, 'voice') });
     }
   }
 }

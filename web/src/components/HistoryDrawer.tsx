@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef } from "react";
 import gsap from "gsap";
 import { useVoiceStore } from "../store";
 import { useDialogFocus } from "../hooks/useDialogFocus";
+import { API_BASE } from "../lib/config";
 
 // One line per pipeline event, dense and scannable.
 function traceLine({ event, data }) {
@@ -145,6 +146,9 @@ export default function HistoryDrawer({ mobileMenu = false }) {
               >
                 {turn.text}
               </p>
+              {!!turn.pictures?.length && <div className="voice-history-pictures">
+                {turn.pictures.map(picture => <img key={picture.id} src={`${API_BASE}/api/chat/uploads/${picture.id}`} alt={picture.name} />)}
+              </div>}
               {debugEnabled &&
                 turn.role === "user" &&
                 turn.traceId != null &&

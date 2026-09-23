@@ -8,7 +8,9 @@ import { InkSimulation } from "../lib/inkSimulation";
 const STATES = {
   connecting: { speed: 0.22, energy: 0.1, colors: ["#4a5f88", "#7d87ac", "#c2cfe6"] },
   idle: { speed: 0.34, energy: 0.2, colors: ["#1f4f8f", "#6d8ad2", "#bfe0fb"] },
-  recording: { speed: 0.42, energy: 0.3, colors: ["#1d6284", "#66b2c2", "#cdf0ee"] },
+  starting: { speed: 0.28, energy: 0.16, colors: ["#375779", "#829cb8", "#c9dfec"] },
+  listening: { speed: 0.3, energy: 0.24, colors: ["#165e68", "#65b4ac", "#c3f0df"] },
+  recording: { speed: 0.46, energy: 0.38, colors: ["#176c78", "#74c7bd", "#d4f7e8"] },
   thinking: { speed: 0.9, energy: 0.8, colors: ["#4a4592", "#927cc8", "#dcd4f6"] },
   // Speech is luminous from within rather than hard white on the surface.
   speaking: { speed: 0.8, energy: 0.6, colors: ["#2a5d9d", "#7fa6db", "#cfe4fa"] },
@@ -104,11 +106,13 @@ function Ink({ reducedMotion }: { reducedMotion: boolean }) {
     if (!live) return;
     const dt = Math.min(delta, 0.05);
     const blend = reducedMotion ? 1 : 1 - Math.exp(-dt * 3);
-    const rawLevel = THREE.MathUtils.clamp(levelBus.value, 0, 1);
-    // Bring out quiet syllables in playback; microphone feedback stays subtle.
+    const microphoneActive = status === "recording" || status === "listening";
+    const rawLevel = THREE.MathUtils.clamp(microphoneActive ? levelBus.microphone : levelBus.value, 0, 1);
+    // Keep speech visible in the ink while playback remains the stronger response.
     const audioTarget = status === "speaking"
       ? Math.min(1, Math.pow(rawLevel, 0.65) * 1.65)
-      : status === "recording" ? rawLevel * 0.12 : 0;
+      : microphoneActive
+        ? Math.min(0.55, Math.pow(rawLevel, 0.75) * 0.65) : 0;
     const response = 1 - Math.exp(-dt * (audioTarget > live.uLevel.value ? 28 : 8));
     live.uLevel.value = reducedMotion ? 0 : THREE.MathUtils.lerp(live.uLevel.value, audioTarget, response);
     speed.current = THREE.MathUtils.lerp(speed.current, target.speed + live.uLevel.value * 1.7, blend);

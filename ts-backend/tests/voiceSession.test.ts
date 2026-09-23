@@ -2,6 +2,16 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as sessionModule from '../src/voiceSession.js';
 
+test('voice explains context overflow and preserves previously committed history', async () => {
+  const sent: any[] = [];
+  const session = new sessionModule.VoiceSession((...args: any[]) => { sent.push(args); });
+  await session.start(1, async history => { history.push({ role: 'user', content: 'Remember me' }); });
+  await session.start(2, async () => { throw { status: 400, error: { code: 'context_length_exceeded' } }; });
+  assert.equal(sent[0][1], 'error');
+  assert.match(sent[0][2].message, /conversation.*too long/i);
+  await session.start(3, async history => { assert.equal(history[0].content, 'Remember me'); });
+});
+
 test('a cancelled turn cannot send or commit history after a newer turn', async () => {
   assert.equal(typeof sessionModule.VoiceSession, 'function');
   const sent: any[] = [];

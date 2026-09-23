@@ -15,7 +15,7 @@ import { useModeSwipe } from "./hooks/useModeSwipe";
 import { useVoiceStore } from "./store";
 
 export default function App() {
-  const { startTalking, stopTalking, sendControl } = useVoice();
+  const { tapMicrophone, endSession, sendControl, pictures, sendPictures } = useVoice();
   const mode = useVoiceStore((s) => s.mode);
   const debugEnabled = useVoiceStore((s) => s.debugEnabled);
   const hasCaptions = useVoiceStore((s) => !!(s.userCaption || s.assistantCaption));
@@ -58,7 +58,7 @@ export default function App() {
               {hasCaptions && <Captions />}
             </div>
           </div>
-          <PushToTalk onStart={startTalking} onStop={stopTalking} />
+          <PushToTalk onTap={tapMicrophone} onEnd={endSession} pictures={pictures} onSendPictures={sendPictures} />
         </div>
       )}
       <DebugBar />

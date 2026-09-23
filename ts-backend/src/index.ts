@@ -9,6 +9,7 @@ import proxy from "@fastify/http-proxy";
 
 import { Agent, buildSystemPrompt, normalizePersonality } from "./agent.js";
 import { registerVoiceRoutes } from "./voiceRoutes.js";
+import { registerDictationRoutes } from "./dictationRoutes.js";
 import { ChatStore } from "./chat.js";
 import { registerChatRoutes, type ChatCtx } from "./chatRoutes.js";
 import { BraveSearchClient, buildSearchTools } from "./search.js";
@@ -18,6 +19,7 @@ import { InferenceClient } from "./inference.js";
 import { VoiceSession } from "./voiceSession.js";
 import { isAllowedVoiceOrigin } from "./voiceOrigin.js";
 import { runVoiceTurn } from "./pipeline.js";
+import { loadVoiceImages } from "./voiceImages.js";
 import { ProviderRegistry, qualifyModel } from "./providers.js";
 import { registerSettingsRoutes, SettingsStore, type SettingsState } from "./settings.js";
 import { buildHaTools } from "./tools.js";
@@ -90,6 +92,7 @@ async function main() {
   // Voice cloning lives in the sidecar (it owns models/tts/voices/); the
   // upload is relayed rather than proxied, see voiceRoutes.ts.
   registerVoiceRoutes(app, config.sidecarUrl);
+  registerDictationRoutes(app, config.sidecarUrl);
 
   const inference = new InferenceClient(config.sidecarUrl);
   const ha = new HomeAssistant(config.haUrl, config.haToken);
@@ -154,6 +157,8 @@ async function main() {
   const chatCtx: ChatCtx = {
     store: new ChatStore(join(dataDir, "data", "conversations")),
     resolve: (model) => registry.resolve(model),
+    getContextWindow: (model) => registry.contextWindowFor(model),
+    getContextInfo: (model) => registry.contextInfoFor(model),
     haTools: tools,
     searchTools,
     ha,
@@ -187,6 +192,7 @@ async function main() {
     }
     wss.handleUpgrade(req, socket, head, (ws: any) => {
       let pendingTurnId: number | null = null;
+      let pendingImageIds: unknown;
       let legacyTurnId = 0;
       const controls = config.allowedControls ?? DEFAULT_ALLOWED_CONTROLS;
       const session = new VoiceSession((turnId, kind, payload) => {
@@ -199,25 +205,43 @@ async function main() {
       ws.on("close", () => session.cancel());
       const getCards = (ids: string[]) => ha.getCards(ids);
 
+      const startTurn = (turnId: number, audio: Buffer | null, imageIds: unknown) => {
+        const selectedModel = state.model;
+        const llm = registry.resolve(selectedModel);
+        const turnAgent = new Agent(llm.client, llm.model, [...tools, ...searchTools], systemPrompt);
+        turnAgent.setDetailedDrawings(state.detailedDrawings);
+        const voice = state.voice;
+        void session.start(turnId, async (history, send, signal) => {
+          const [images, contextWindow] = await Promise.all([
+            loadVoiceImages(imageIds, chatCtx.uploadDir), registry.contextWindowFor(selectedModel),
+          ]);
+          if (signal.aborted) return;
+          await runVoiceTurn(inference, turnAgent, audio, history, send, voice, getCards, { ...llm, contextWindow }, signal, images);
+        });
+      };
+
       ws.on("message", (data: any, isBinary: boolean) => {
         if (isBinary) {
           // Freeze the settings for this request, including every model round.
-          const llm = registry.resolve(state.model);
-          const turnAgent = new Agent(llm.client, llm.model, [...tools, ...searchTools], systemPrompt);
-          turnAgent.setDetailedDrawings(state.detailedDrawings);
           const turnId = pendingTurnId ?? --legacyTurnId;
+          const imageIds = pendingImageIds;
           pendingTurnId = null;
-          void session.start(turnId, (history, send, signal) => runVoiceTurn(
-            inference, turnAgent, Buffer.from(data), history, send, state.voice, getCards, llm, signal,
-          ));
+          pendingImageIds = undefined;
+          startTurn(turnId, Buffer.from(data), imageIds);
         } else {
           let message: any;
           try { message = JSON.parse(data.toString()); } catch { return; }
           if (message?.type === "cancel") {
             pendingTurnId = null;
+            pendingImageIds = undefined;
             session.cancel();
           } else if (message?.type === "voice_start" && Number.isSafeInteger(message.turnId) && message.turnId > 0) {
             pendingTurnId = message.turnId;
+            pendingImageIds = message.imageIds;
+          } else if (message?.type === "voice_images" && Number.isSafeInteger(message.turnId) && message.turnId > 0) {
+            pendingTurnId = null;
+            pendingImageIds = undefined;
+            startTurn(message.turnId, null, message.imageIds);
           } else {
             handleControl(ws, ha, data.toString(), controls);
           }

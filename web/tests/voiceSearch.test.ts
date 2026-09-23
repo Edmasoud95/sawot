@@ -20,11 +20,11 @@ test("sources accumulate across searches, deduplicate pages and preserve Read st
   assert.equal(useVoiceStore.getState().search.sources.length, 2);
 });
 
-test("source state clears on recording, disconnect and caption reset, and stays through playback", () => {
+test("source state clears on disconnect and caption reset, and stays through playback", () => {
   const s = useVoiceStore.getState();
   assert.equal(typeof s.showSearch, "function");
   s.clearCaptions();
-  for (const status of ["recording", "connecting"]) {
+  for (const status of ["connecting"]) {
     s.showSearch({ tool: "web_search", phase: "complete", sources: [source] });
     s.setStatus("speaking");
     s.setStatus("idle");
@@ -86,4 +86,40 @@ test("find_in_page uses the existing source row and retains favicon metadata", a
   s.showSearch({ tool: "find_in_page", phase: "complete", sources: [{ ...source, read: true }] });
   assert.equal(useVoiceStore.getState().search.sources[0].read, true);
   assert.equal(useVoiceStore.getState().search.sources[0].favicon, favicon);
+});
+
+for (const withSearch of [false, true]) {
+  test(`previous answer sources persist until replacement (new search: ${withSearch})`, () => {
+    const s = useVoiceStore.getState();
+    s.clearCaptions();
+    s.showSearch({ tool: "web_search", phase: "complete", sources: [source] });
+    s.setAssistantCaption("Previous answer");
+    for (const status of ["speaking", "starting", "listening", "recording", "thinking"]) {
+      s.setStatus(status);
+      assert.deepEqual(useVoiceStore.getState().search?.sources, [source]);
+    }
+    s.beginResponse();
+    const next = { ...source, url: "https://next.example/" };
+    if (withSearch) {
+      s.showSearch({ tool: "web_search", phase: "start" });
+      s.showSearch({ tool: "web_search", phase: "complete", sources: [next] });
+    }
+    assert.equal(useVoiceStore.getState().assistantCaption, "Previous answer");
+    assert.deepEqual(useVoiceStore.getState().search?.sources, [source]);
+    s.setAssistantCaption("Next answer");
+    assert.equal(useVoiceStore.getState().assistantCaption, "Next answer");
+    assert.deepEqual(useVoiceStore.getState().search?.sources ?? [], withSearch ? [next] : []);
+  });
+}
+
+test("interrupted searches do not leak into the next answer", () => {
+  const s = useVoiceStore.getState();
+  s.clearCaptions();
+  s.showSearch({ tool: "web_search", phase: "complete", sources: [source] });
+  s.setAssistantCaption("Previous answer");
+  s.beginResponse();
+  s.showSearch({ tool: "web_search", phase: "complete", sources: [{ ...source, url: "https://cancelled.example/" }] });
+  s.beginResponse();
+  s.setAssistantCaption("Answer without search");
+  assert.equal(useVoiceStore.getState().search, null);
 });

@@ -23,7 +23,7 @@ function Favicon({ src }: { src?: string }) {
 
 export default function VoiceSources() {
   const search: VoiceSearch | null = useVoiceStore((s) => s.search);
-  // Unmount the popover on a new recording, disconnect, or pipeline error.
+  // Keep sources alongside their answer until the next response replaces it.
   return search ? <SourceRow search={search} /> : null;
 }
 

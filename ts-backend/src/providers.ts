@@ -43,6 +43,11 @@ function slugify(name: string): string {
 /** How long to wait for a provider's model list. A sleeping local model host
  *  otherwise blocks the whole settings payload for the TCP connect timeout. */
 export const MODEL_LIST_TIMEOUT_MS = 5000;
+export const DEFAULT_CONTEXT_WINDOW = 128000;
+export interface ContextInfo {
+  tokens: number;
+  source: "loaded" | "model" | "default";
+}
 
 async function fetchModelIds(baseUrl: string, apiKey?: string, timeoutMs = MODEL_LIST_TIMEOUT_MS): Promise<string[]> {
   const headers: Record<string, string> = {};
@@ -154,6 +159,38 @@ export class ProviderRegistry {
     // provider with the bare model name, like unqualified legacy ids do.
     const providerId = this.providers.has(prefix) ? prefix : this.defaultId;
     return { client: this.clientFor(providerId), model: bare, providerId, providerName: this.providers.get(providerId)!.name };
+  }
+
+  /** Context metadata only: the provider enforces its actual limit. Refresh
+   * local metadata each turn because LM Studio can reload at a different size.
+   * Other OpenAI-compatible servers may not implement this native endpoint. */
+  async contextWindowFor(model: string): Promise<number> {
+    return (await this.contextInfoFor(model)).tokens;
+  }
+
+  async contextInfoFor(model: string): Promise<ContextInfo> {
+    const fallback: ContextInfo = { tokens: DEFAULT_CONTEXT_WINDOW, source: "default" };
+    const resolved = this.resolve(model);
+    const provider = this.providers.get(resolved.providerId)!;
+    if (!provider.builtin) return fallback;
+    try {
+      const response = await fetch(new URL("/api/v1/models", provider.baseUrl), {
+        headers: provider.apiKey ? { Authorization: "Bearer " + provider.apiKey } : {},
+        signal: AbortSignal.timeout(Math.min(this.timeoutMs, 1500)),
+      });
+      if (!response.ok) return fallback;
+      const data: any = await response.json();
+      if (!Array.isArray(data.models)) return fallback;
+      const modelInfo = data.models.find((m: any) => m?.key === resolved.model
+        || (Array.isArray(m?.loaded_instances) && m.loaded_instances.some((i: any) => i?.id === resolved.model)));
+      const valid = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+      const instances = Array.isArray(modelInfo?.loaded_instances) ? modelInfo.loaded_instances : [];
+      const matched = instances.filter((i: any) => i?.id === resolved.model);
+      const loaded = (matched.length ? matched : instances).map((i: any) => i?.config?.context_length).filter(valid);
+      if (loaded.length) return { tokens: Math.min(...loaded), source: "loaded" };
+      if (valid(modelInfo?.max_context_length)) return { tokens: modelInfo.max_context_length, source: "model" };
+    } catch { /* Metadata must not prevent a model request. */ }
+    return fallback;
   }
 
   async modelsFor(id: string): Promise<string[]> {

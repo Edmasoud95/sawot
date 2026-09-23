@@ -28,10 +28,33 @@ export function meterFrom(node) {
 }
 
 let activePlayback = null;
+let activeCue: OscillatorNode | null = null;
+
+/** A soft two-note lift marks actual microphone readiness, away from the thumb. */
+export function playReadyCue() {
+  if (activeCue) { try { activeCue.stop(); } catch {} }
+  const context = audioContext();
+  const tone = context.createOscillator();
+  const gain = context.createGain();
+  activeCue = tone;
+  const now = context.currentTime;
+  tone.type = "sine";
+  tone.frequency.setValueAtTime(660, now);
+  tone.frequency.exponentialRampToValueAtTime(880, now + .07);
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(.035, now + .015);
+  gain.gain.exponentialRampToValueAtTime(.0001, now + .1);
+  tone.connect(gain);
+  gain.connect(context.destination);
+  tone.onended = () => { tone.disconnect(); gain.disconnect(); if (activeCue === tone) activeCue = null; };
+  tone.start(now);
+  tone.stop(now + .11);
+}
 
 let playbackEpoch = 0;
 
 export function stopPlayback() {
+  if (activeCue) { try { activeCue.stop(); } catch {} activeCue = null; }
   playbackEpoch++;
   const source = activePlayback;
   activePlayback = null;

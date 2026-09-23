@@ -75,7 +75,7 @@ function CameraPreview({ onPhoto, onFallback }: { onPhoto: (file: File) => void;
   );
 }
 
-export default function AttachmentPicker({ disabled, onFiles }: { disabled: boolean; onFiles: (files: File[]) => void }) {
+export default function AttachmentPicker({ disabled, onFiles, imagesOnly = false }: { disabled: boolean; onFiles: (files: File[]) => void; imagesOnly?: boolean }) {
   const [open, setOpen] = useState(false);
   const [camera, setCamera] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -113,13 +113,13 @@ export default function AttachmentPicker({ disabled, onFiles }: { disabled: bool
 
   return <>
     <input ref={photos} type="file" accept="image/*" multiple hidden onChange={selected} aria-label="Choose photos" />
-    <input ref={files} type="file" accept={ACCEPT} multiple hidden onChange={selected} aria-label="Choose files" />
+    <input ref={files} type="file" accept={imagesOnly ? "image/png,image/jpeg,image/webp,image/gif" : ACCEPT} multiple hidden onChange={selected} aria-label="Choose files" />
     <input ref={nativeCamera} type="file" accept="image/*" capture="environment" hidden onChange={selected} aria-label="Take photo with phone camera" />
     <button ref={trigger} type="button" onClick={() => setOpen(true)} disabled={disabled}
-      aria-label="Attach files" aria-haspopup="dialog" aria-expanded={open}
-      className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-zinc-500 transition-colors duration-300 hover:bg-white/[0.06] hover:text-zinc-200 disabled:animate-pulse-dot disabled:opacity-50">
+      aria-label={imagesOnly ? "Add pictures" : "Attach files"} aria-haspopup="dialog" aria-expanded={open}
+      className={imagesOnly ? "voice-picture-button" : "grid h-11 w-11 shrink-0 place-items-center rounded-full text-zinc-500 transition-colors duration-300 hover:bg-white/[0.06] hover:text-zinc-200 disabled:animate-pulse-dot disabled:opacity-50"}>
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+        {imagesOnly ? <><rect x="3" y="3" width="18" height="18" rx="4" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m3 17 5-5 4 4 4-6 5 7" /></> : <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />}
       </svg>
     </button>
     {open && <dialog ref={dialog} className="model-sheet attachment-sheet" aria-labelledby={title} onCancel={close}
@@ -129,7 +129,7 @@ export default function AttachmentPicker({ disabled, onFiles }: { disabled: bool
         if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close();
       }}>
       <div className="model-sheet-heading">
-        <h2 id={title}>Add attachment</h2>
+        <h2 id={title}>{imagesOnly ? "Add pictures" : "Add attachment"}</h2>
         <button type="button" aria-label="Close attachments" onClick={close}><span className="ui-text-icon" aria-hidden="true">×</span></button>
       </div>
       {camera ? <CameraPreview onPhoto={(file) => { close(); onFiles([file]); }} onFallback={() => pick(nativeCamera.current)} />
