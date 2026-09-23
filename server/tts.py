@@ -96,6 +96,9 @@ class ChatterboxTTS:
         self.model_id = model_id
         self._model = ChatterboxTurboTTS.from_local(str(tts_dir(spec)), device, nano=model_id.endswith("nano"))
         self._voice = "default"
+        # Chatterbox replaces .conds when given a reference clip. Keep the
+        # model's built-in conditionals so switching back to default works.
+        self._default_conds = self._model.conds
         # The first generation pays for kernel compilation and lazy loads
         # (over a minute on a cold GPU); take that hit at load time, not on
         # the first spoken reply.
@@ -106,6 +109,8 @@ class ChatterboxTTS:
 
     def close(self) -> None:
         """Drop the model so its VRAM can be reclaimed before another loads."""
+        if hasattr(self, "_default_conds"):
+            del self._default_conds
         if hasattr(self, "_model"):
             del self._model
 
@@ -122,6 +127,8 @@ class ChatterboxTTS:
         name = voice or self._voice
         clip = voices_dir() / f"{name}.wav"
         prompt = str(clip) if name != "default" and clip.exists() else None
+        if prompt is None:
+            self._model.conds = self._default_conds
         # Chatterbox's own loudness step multiplies the float32 clip by a
         # numpy float64 gain, which numpy 2 promotes to float64 and the model
         # then rejects ("expected scalar type Float but found Double"). Clips

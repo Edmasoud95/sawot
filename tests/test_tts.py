@@ -37,10 +37,15 @@ class FakeTurbo:
 
     def __init__(self):
         self.calls = []
+        self.conds = object()
+        self.conditions_used = []
 
     def generate(self, text, audio_prompt_path=None, **kw):
         import torch
+        if audio_prompt_path:
+            self.conds = ("clone", audio_prompt_path)
         self.calls.append((text, audio_prompt_path))
+        self.conditions_used.append(self.conds)
         self.kwargs = kw
         return torch.zeros(1, 2400)
 
@@ -52,6 +57,7 @@ def _chatterbox(tmp_path, monkeypatch):
     tts = ChatterboxTTS.__new__(ChatterboxTTS)
     tts._model = FakeTurbo()
     tts._voice = "default"
+    tts._default_conds = tts._model.conds
     tts.model_id = "chatterbox-nano"
     return tts
 
@@ -79,6 +85,20 @@ def test_chatterbox_voices_are_reference_clips_plus_default(tmp_path, monkeypatc
     assert tts._model.kwargs.get("norm_loudness") is False, "the engine's float64-promoting loudness step is skipped"
     tts.synthesize("hi", voice="nobody")
     assert tts._model.calls[-1] == ("hi", None), "unknown voices fall back to the built-in one"
+
+
+@needs_torch
+def test_chatterbox_restores_builtin_voice_after_clone(tmp_path, monkeypatch):
+    tts = _chatterbox(tmp_path / "tts", monkeypatch)
+    builtin_conds = tts._model.conds
+    clips = tmp_path / "tts" / "voices"
+    clips.mkdir(parents=True)
+    (clips / "alice.wav").write_bytes(b"RIFF")
+
+    tts.synthesize("first", voice="alice")
+    assert tts._model.conditions_used[-1] != builtin_conds
+    tts.synthesize("second", voice="default")
+    assert tts._model.conditions_used[-1] is builtin_conds
 
 
 def test_kokoro_exposes_its_curated_voices():
