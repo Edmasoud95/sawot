@@ -6,6 +6,7 @@ import ChatHeader from "./ChatHeader";
 import MessageList from "./MessageList";
 import Composer from "./Composer";
 import Welcome from "./Welcome";
+import CommandResultDrawer from "./CommandResultDrawer";
 
 export default function ChatView({ sendControl, mobile }) {
   const active = useChatStore((s) => s.active);
@@ -48,6 +49,7 @@ export default function ChatView({ sendControl, mobile }) {
           <Welcome onStart={() => newConversation()} />
         )}
       </div>
+      <CommandResultDrawer />
     </div>
   );
 }

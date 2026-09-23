@@ -119,10 +119,10 @@ export async function* chunksFromEvents(events: AsyncIterable<any>): AsyncGenera
       case "response.failed":
       case "response.incomplete": {
         const reason = ev.response?.error?.message ?? ev.response?.incomplete_details?.reason ?? ev.type;
-        throw new Error("Responses API: " + reason);
+        throw Object.assign(new Error("Responses API: " + reason), { code: ev.response?.error?.code });
       }
       case "error":
-        throw new Error("Responses API: " + (ev.message ?? ev.error?.message ?? "stream error"));
+        throw Object.assign(new Error("Responses API: " + (ev.message ?? ev.error?.message ?? "stream error")), { code: ev.code ?? ev.error?.code });
     }
   }
 }

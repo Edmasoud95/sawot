@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createChatCompletion, isReasoningToolConflict, learnedTransports, resetReasoningFallback, setTransport } from "../src/reasoningFallback.js";
+import { conversationErrorMessage } from "../src/conversationError.js";
+
+test("first-time Responses fallback preserves context overflow details", async () => {
+  const { client } = astraClient();
+  client.responses.create = async () => { throw Object.assign(new Error("Input rejected"), { code: "context_length_exceeded" }); };
+  await assert.rejects(createChatCompletion(client, { model: "gpt-6-astra", messages: [] }),
+    error => /conversation.*too long/i.test(conversationErrorMessage(error)));
+});
 
 const NONE_REJECTED = "400 Unsupported value: 'reasoning_effort' does not support 'none' with this model. Supported values are: 'low', 'medium', 'high', and 'xhigh'.";
 const CONFLICT = "400 Function tools with reasoning_effort are not supported for gpt-6-astra in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.";

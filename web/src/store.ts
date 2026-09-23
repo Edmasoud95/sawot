@@ -9,7 +9,9 @@ import { updateVoiceSearch } from "./lib/voiceSearch";
 export { levelBus } from "./lib/levelBus";
 
 export const useVoiceStore = create<any>()((set) => ({
-  status: "connecting", // connecting | idle | recording | thinking | speaking
+  status: "connecting", // connecting | idle | starting | listening | recording | thinking | speaking
+  sessionActive: false,
+  setSessionActive: (sessionActive: boolean) => set({ sessionActive }),
   userCaption: "",
   assistantCaption: "",
   history: [], // [{ role: "user" | "assistant", text, traceId? }]
@@ -21,19 +23,25 @@ export const useVoiceStore = create<any>()((set) => ({
   nextTraceId: 1,
   expression: null,
   search: null,
+  pendingSearch: null,
 
-  setStatus: (status) => set({ status, ...(["recording", "connecting"].includes(status) ? { expression: null, search: null } : {}) }),
-  showSearch: (event) => set((s) => ({ search: updateVoiceSearch(s.search, event) })),
-  clearSearch: () => set({ search: null }),
+  setStatus: (status) => set({ status, ...(["starting", "listening", "recording", "connecting"].includes(status) ? { expression: null } : {}), ...(status === "connecting" ? { search: null, pendingSearch: null } : {}) }),
+  // Retain the displayed answer's sources while the next turn is generated.
+  beginResponse: () => set({ pendingSearch: null }),
+  showSearch: (event) => set((s) => {
+    const pendingSearch = updateVoiceSearch(s.pendingSearch, event);
+    return { pendingSearch, ...(!s.assistantCaption ? { search: pendingSearch } : {}) };
+  }),
+  clearSearch: () => set({ search: null, pendingSearch: null }),
   showActivity: (activity) => set((s) => ({ expression: expressionFromActivity(s.expression, activity) })),
   showReading: (reading) => set((s) => ({ expression: expressionFromReading(s.expression, reading) })),
   showExpression: (payload) => set((s) => ({ expression: expressionFromPayload(s.expression, payload) })),
   clearExpression: (expected?) => set((s) => !expected || s.expression === expected ? { expression: null } : {}),
   setUserCaption: (text) => set({ userCaption: text }),
-  setAssistantCaption: (text) => set({ assistantCaption: text }),
-  clearCaptions: () => set({ userCaption: "", assistantCaption: "", search: null }),
-  addTurn: (role, text, traceId = null) =>
-    set((s) => ({ history: [...s.history, { role, text, traceId }] })),
+  setAssistantCaption: (text) => set((s) => ({ assistantCaption: text, search: s.pendingSearch })),
+  clearCaptions: () => set({ userCaption: "", assistantCaption: "", search: null, pendingSearch: null }),
+  addTurn: (role, text, traceId = null, pictures = []) =>
+    set((s) => ({ history: [...s.history, { role, text, traceId, pictures }] })),
   toggleDrawer: () => set((s) => ({ drawerOpen: !s.drawerOpen })),
   setMode: (mode) =>
     set(() => {

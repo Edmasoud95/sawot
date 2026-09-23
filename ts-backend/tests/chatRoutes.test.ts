@@ -16,8 +16,9 @@ test("conversations carry a Home Assistant flag that defaults to off", () => {
   assert.equal(off.homeAssistant, false);
   const on = store.create("local::m", true);
   assert.equal(on.homeAssistant, true);
+  for (const conv of [off, on]) { conv.messages.push({ role: "user", content: "Hi" }); store.save(conv); }
   // A file written before the flag existed reads as off.
-  writeFileSync(join(root, "abcdefabcdef.json"), JSON.stringify({ id: "abcdefabcdef", title: "Old", model: "m", created: 1, updated: 1, messages: [] }));
+  writeFileSync(join(root, "abcdefabcdef.json"), JSON.stringify({ id: "abcdefabcdef", title: "Old", model: "m", created: 1, updated: 1, messages: [{ role: "user", content: "Hi" }] }));
   const listing = store.list();
   assert.deepEqual(listing.map((c) => [c.id, c.homeAssistant]).sort(), [[off.id, false], [on.id, true], ["abcdefabcdef", false]].sort());
 });
@@ -50,7 +51,7 @@ test("the flag is set on create and toggled by patch", async () => {
     res = await app.inject({ method: "POST", url: "/api/chat/conversations", payload: { homeAssistant: true } });
     const id = res.json().id;
     assert.equal(res.json().homeAssistant, true);
-    res = await app.inject({ method: "PATCH", url: `/api/chat/conversations/${id}`, payload: { homeAssistant: false } });
+    res = await app.inject({ method: "PATCH", url: `/api/chat/conversations/${id}`, payload: { homeAssistant: false, draftText: "Test my setting" } });
     assert.equal(res.json().homeAssistant, false);
     res = await app.inject({ method: "GET", url: `/api/chat/conversations/${id}` });
     assert.equal(res.json().homeAssistant, false, "the change is persisted");
@@ -68,6 +69,39 @@ function recordingClient(requests: any[]) {
 function sseEvents(body: string): any[] {
   return body.split("\n").filter((l) => l.startsWith("data: ")).map((l) => JSON.parse(l.slice(6)));
 }
+
+test("chat sends older exchanges beyond the former 30-message cutoff", async () => {
+  const requests: any[] = [];
+  const { app, ctx } = harness({ resolve: () => ({ client: recordingClient(requests), model: "m" }) });
+  try {
+    const conv = ctx.store.create("m");
+    conv.title = "Existing chat";
+    conv.messages = Array.from({ length: 40 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `message ${i}` }));
+    ctx.store.save(conv);
+    const res = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "Continue" } });
+    assert.ok(sseEvents(res.body).some(e => e.type === "done"));
+    assert.equal(requests[0].messages.length, 42);
+    assert.equal(requests[0].messages[1].content, "message 0");
+    assert.equal(ctx.store.get(conv.id).messages.length, 42);
+  } finally { await app.close(); }
+});
+
+test("chat explains provider context overflow without deleting saved messages", async () => {
+  const client = { chat: { completions: { create: async () => {
+    throw Object.assign(new Error("provider rejected input"), { status: 400, code: "context_length_exceeded" });
+  } } } };
+  const { app, ctx } = harness({ resolve: () => ({ client, model: "m" }) });
+  try {
+    const conv = ctx.store.create("m");
+    conv.messages.push({ role: "user", content: "Keep this" }, { role: "assistant", content: "Remembered" });
+    ctx.store.save(conv);
+    const res = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "Continue" } });
+    const error = sseEvents(res.body).find(e => e.type === "error");
+    assert.match(error.message, /conversation.*too long/i);
+    assert.match(error.message, /new conversation/i);
+    assert.equal(ctx.store.get(conv.id).messages[0].content, "Keep this");
+  } finally { await app.close(); }
+});
 
 const haTool = { name: "get_entities", description: "", parameters: {}, handler: async () => [] };
 const searchTool = { name: "web_search", description: "", parameters: {}, handler: async () => ({ results: [] }) };
@@ -159,7 +193,7 @@ test("web search defaults on for existing chats and persists per conversation", 
     delete legacy.webSearch;
     ctx.store.save(legacy);
     assert.equal(ctx.store.get(conv.id).webSearch, true);
-    const patched = await app.inject({ method: "PATCH", url: `/api/chat/conversations/${conv.id}`, payload: { webSearch: false } });
+    const patched = await app.inject({ method: "PATCH", url: `/api/chat/conversations/${conv.id}`, payload: { webSearch: false, draftText: "Test web search" } });
     assert.equal(patched.json().webSearch, false);
     assert.equal(ctx.store.get(conv.id).webSearch, false);
     assert.equal(ctx.store.list().find(c => c.id === conv.id).webSearch, false);
@@ -183,4 +217,69 @@ test("disabling web search removes search tools and instructions while retaining
     assert.deepEqual(requests[0].tools.map((t: any) => t.function.name), ["get_entities"]);
     assert.doesNotMatch(requests[0].messages[0].content, /You have web tools/);
   } finally { await app.close(); }
+});
+
+test("history excludes empty chats and short drafts, restores qualifying drafts, and promotes sent messages", async () => {
+  const { app, ctx } = harness();
+  try {
+    const conv = (await app.inject({ method: "POST", url: "/api/chat/conversations", payload: {} })).json();
+    const url = `/api/chat/conversations/${conv.id}`;
+    const history = async () => (await app.inject({ method: "GET", url: "/api/chat/conversations" })).json();
+    assert.deepEqual(await history(), [], "opening a chat must not add history");
+    for (const draftText of ["", "hello", "hello there", "   \n  "]) {
+      await app.inject({ method: "PATCH", url, payload: { draftText } });
+      assert.deepEqual(await history(), []);
+    }
+    await app.inject({ method: "PATCH", url, payload: { draftText: "Plan my weekend" } });
+    assert.equal((await history())[0].title, "Draft: Plan my weekend");
+    assert.equal((await history())[0].isDraft, true);
+    assert.equal(ctx.store.get(conv.id).draftText, "Plan my weekend");
+    await app.inject({ method: "PATCH", url, payload: { draftText: "Plan my" } });
+    assert.deepEqual(await history(), [], "shortening the draft hides it again");
+    await app.inject({ method: "PATCH", url, payload: { draftText: "Plan my weekend" } });
+    await app.inject({ method: "POST", url: `${url}/messages`, payload: { content: "Hi" } });
+    assert.equal((await history()).length, 1, "a single sent word counts even if the model fails");
+    assert.equal((await history())[0].isDraft, false);
+    assert.equal(ctx.store.get(conv.id).draftText, "");
+  } finally { await app.close(); }
+});
+
+test("finishing a response preserves a draft typed while the model was replying", async () => {
+  let release: () => void;
+  let started: () => void;
+  const waiting = new Promise<void>(resolve => { release = resolve; });
+  const ready = new Promise<void>(resolve => { started = resolve; });
+  const client = { chat: { completions: { create: async () => (async function* () {
+    started!();
+    await waiting;
+    yield { choices: [{ delta: { content: "Answer" } }] };
+  })() } } };
+  const { app, ctx } = harness({ resolve: () => ({ client, model: "m" }) });
+  try {
+    const conv = ctx.store.create("m");
+    const sending = app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "Hi" } }).then(res => res);
+    await ready;
+    await app.inject({ method: "PATCH", url: `/api/chat/conversations/${conv.id}`, payload: { draftText: "My next question" } });
+    release!();
+    await sending;
+    assert.equal(ctx.store.get(conv.id).draftText, "My next question");
+  } finally { release!(); await app.close(); }
+});
+
+test("deleting during generation does not recreate the conversation", async () => {
+  let entered!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>(r => { entered = r; });
+  const wait = new Promise<void>(r => { release = r; });
+  const client = { chat: { completions: { create: async () => { entered(); await wait; return once("late reply"); } } } };
+  const { app, ctx } = harness({ resolve: () => ({ client, model: "m" }) });
+  try {
+    const conv = ctx.store.create("m"); conv.title = "Existing chat"; ctx.store.save(conv);
+    const response = app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "Hello" } });
+    const running = response.then(r => r);
+    await started;
+    assert.equal((await app.inject({ method: "DELETE", url: `/api/chat/conversations/${conv.id}` })).statusCode, 204);
+    release(); await running;
+    assert.equal(ctx.store.get(conv.id), null);
+  } finally { release(); await app.close(); }
 });

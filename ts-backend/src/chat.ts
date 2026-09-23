@@ -14,7 +14,6 @@ import { createChatCompletion } from "./reasoningFallback.js";
 import { voiceSearchSources } from "./search.js";
 
 export const SAFE_ID = /^[0-9a-f]{12}$/;
-const HISTORY_LIMIT = 30;
 const MAX_ROUNDS = 5;
 const FENCE = "```";
 
@@ -42,7 +41,8 @@ function findFile(dir: string, prefix: string, excludeSuffix?: string): string |
 
 export function toOpenAiMessages(messages: any[], uploadDir: string): any[] {
   const out: any[] = [];
-  for (const m of messages.slice(-HISTORY_LIMIT)) {
+  for (const m of messages) {
+    if (m.command) continue;
     if (m.role === "assistant") {
       out.push({ role: "assistant", content: m.content ?? "" });
       continue;
@@ -101,6 +101,7 @@ export class ChatStore {
     if (!existsSync(p)) return null;
     try {
       const conv = JSON.parse(readFileSync(p, "utf8"));
+      conv.messages = (conv.messages ?? []).filter((m: any) => !m.command);
       conv.homeAssistant = Boolean(conv.homeAssistant);
       conv.webSearch = conv.webSearch !== false;
       return conv;
@@ -113,12 +114,31 @@ export class ChatStore {
     writeFileSync(this.path(conv.id), JSON.stringify(conv, null, 2));
   }
 
-  delete(cid: string): void {
-    try {
-      unlinkSync(this.path(cid));
-    } catch {
-      /* already gone */
+  delete(cid: string, uploadDir?: string): void {
+    if (!SAFE_ID.test(cid)) throw new Error("Invalid conversation ID");
+    const path = this.path(cid);
+    if (!existsSync(path)) return;
+    // Read raw records, including hidden drafts and legacy command attachments.
+    const ids = (conv: any): Set<string> => new Set([
+      ...(conv.uploadIds ?? []),
+      ...(conv.messages ?? []).flatMap((m: any) => (m.attachments ?? []).map((a: any) => a.id)),
+    ].filter((id: unknown) => typeof id === "string" && SAFE_ID.test(id)));
+    const owned = ids(JSON.parse(readFileSync(path, "utf8")));
+    if (uploadDir && owned.size) {
+      // Fail before removing anything if another record cannot be read safely.
+      for (const file of readdirSync(this.root)) {
+        if (!file.endsWith(".json") || file === cid + ".json") continue;
+        for (const id of ids(JSON.parse(readFileSync(join(this.root, file), "utf8")))) owned.delete(id);
+      }
+      const files = existsSync(uploadDir) ? readdirSync(uploadDir) : [];
+      for (const file of files) {
+        if (!owned.has(file.split(".")[0])) continue;
+        try { unlinkSync(join(uploadDir, file)); }
+        catch (error: any) { if (error.code !== "ENOENT") throw error; }
+      }
     }
+    // Keep the record on cleanup failure so deletion can be retried.
+    unlinkSync(path);
   }
 
   list(): any[] {
@@ -133,8 +153,14 @@ export class ChatStore {
       if (!f.endsWith(".json")) continue;
       try {
         const conv = JSON.parse(readFileSync(join(this.root, f), "utf8"));
+        const hasMessages = (conv.messages ?? []).some((m: any) => m.role === "user" && !m.command);
+        const draftText = String(conv.draftText ?? "").trim();
+        if (!hasMessages && draftText.split(/\s+/u).filter(Boolean).length < 3) continue;
         out.push({
-          id: conv.id, title: conv.title, model: conv.model,
+          id: conv.id,
+          title: hasMessages ? conv.title : `Draft: ${draftText.replace(/\s+/gu, " ").slice(0, 80)}`,
+          isDraft: !hasMessages,
+          model: conv.model,
           homeAssistant: Boolean(conv.homeAssistant),
           webSearch: conv.webSearch !== false,
           created: conv.created, updated: conv.updated,

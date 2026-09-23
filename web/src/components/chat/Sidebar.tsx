@@ -29,12 +29,6 @@ const Trash = () => (
     <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
   </svg>
 );
-const Check = () => (
-  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
-    <path d="M5 13l4 4L19 7" />
-  </svg>
-);
-
 const railBtn =
   "icon-button";
 
@@ -46,6 +40,15 @@ export default function Sidebar({ panelRef, mobile }) {
   const newConversation = useChatStore((s) => s.newConversation);
   const removeConversation = useChatStore((s) => s.removeConversation);
   const [confirmId, setConfirmId] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const confirmDelete = async (id) => {
+    setDeleting(true);
+    setDeleteError("");
+    try { await removeConversation(id); setConfirmId(null); }
+    catch (error) { setDeleteError(error instanceof Error ? error.message : "Could not delete conversation. Please try again."); }
+    finally { setDeleting(false); }
+  };
 
   const setOpen = (sidebarOpen) => useChatStore.setState({ sidebarOpen });
   const startNew = () => {
@@ -124,24 +127,25 @@ export default function Sidebar({ panelRef, mobile }) {
                 </span>
               </button>
               <button
-                onClick={() => {
-                  if (confirmId === c.id) {
-                    setConfirmId(null);
-                    removeConversation(c.id);
-                  } else {
-                    setConfirmId(c.id);
-                  }
-                }}
-                onBlur={() => setConfirmId((id) => (id === c.id ? null : id))}
-                aria-label={confirmId === c.id ? "Confirm delete" : `Delete ${c.title}`}
-                className={`absolute right-1.5 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-md transition-all duration-200 ${
-                  confirmId === c.id
-                    ? "bg-aurora-ember/15 text-aurora-ember opacity-100"
-                    : "text-zinc-600 opacity-0 hover:text-zinc-300 focus-visible:opacity-100 group-hover:opacity-100"
-                }`}
+                onClick={() => { setConfirmId(c.id); setDeleteError(""); }}
+                disabled={deleting}
+                aria-label={`Delete ${c.title}`}
+                className="absolute right-1.5 top-0 grid h-11 w-11 place-items-center rounded-md text-zinc-500 hover:text-zinc-200 focus-visible:text-zinc-200"
               >
-                {confirmId === c.id ? <Check /> : <Trash />}
+                <Trash />
               </button>
+              {confirmId === c.id && <div className="px-2.5 pb-3 text-sm text-zinc-400"
+                onKeyDown={event => { if (event.key === "Escape" && !deleting) { event.stopPropagation(); setConfirmId(null); } }}>
+                <p>Delete this conversation and its files? This cannot be undone.</p>
+                {deleteError && <p role="alert" className="mt-2 text-aurora-ember">{deleteError}</p>}
+                <div className="mt-2 flex gap-2">
+                  <button type="button" disabled={deleting} onClick={() => setConfirmId(null)} className="min-h-11 rounded-lg px-3 hover:bg-white/[0.06]">Cancel</button>
+                  <button type="button" disabled={deleting} onClick={() => void confirmDelete(c.id)} className="min-h-11 rounded-lg bg-aurora-ember/15 px-3 text-aurora-ember">
+                    {deleting ? "Deleting…" : "Delete conversation"}
+                  </button>
+                </div>
+              </div>}
+
             </li>
           ))}
         </ul>

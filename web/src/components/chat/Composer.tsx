@@ -1,10 +1,13 @@
-import { useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useChatStore } from "../../chatStore";
 import { uploadFile } from "../../lib/chatApi";
 import ModelPicker from "../ModelPicker";
 import AttachmentPicker from "./AttachmentPicker";
 import ToolsMenu from "./ToolsMenu";
+import DictationButton from "./DictationButton";
 import { useModels, useProviders } from "./useModels";
+import { commandSuggestions } from "../../lib/chatCommands";
+import CommandSuggestions from "./CommandSuggestions";
 
 const MAX_HEIGHT = 184; // ~8 lines of mono at 0.85rem
 const VISION_RE = /vl|vision/i;
@@ -38,10 +41,35 @@ export default function Composer() {
   const providers = useProviders();
   const renameModel = useChatStore((s) => s.renameModel);
 
-  const [text, setText] = useState("");
+  const text = active?.draftText ?? "";
+  const setText = useChatStore((s) => s.setDraftText);
+  const draftError = useChatStore((s) => s.draftError);
+  useEffect(() => {
+    const save = () => { void useChatStore.getState().flushDraft().catch(() => {}); };
+    const unload = () => { void useChatStore.getState().flushDraft(true).catch(() => {}); };
+    window.addEventListener("pagehide", unload);
+    return () => { window.removeEventListener("pagehide", unload); save(); };
+  }, []);
   const [uploading, setUploading] = useState(false);
+  const [dictating, setDictating] = useState(false);
   const textareaRef = useRef(null);
   const [uploadError, setUploadError] = useState("");
+  const [focused, setFocused] = useState(false);
+  const [dismissedCommand, setDismissedCommand] = useState<string | null>(null);
+  const [commandIndex, setCommandIndex] = useState(0);
+  const commandListId = useId();
+  const commands = commandSuggestions(text);
+  const commandKey = `${active?.id}:${text}`;
+  const showCommands = focused && !streaming && !uploading && !dictating
+    && commands.length > 0 && dismissedCommand !== commandKey;
+  const selectedCommand = Math.min(commandIndex, commands.length - 1);
+  useEffect(() => { setCommandIndex(0); }, [text, active?.id]);
+
+  const chooseCommand = (name: string) => {
+    setDismissedCommand(`${active?.id}:${name}`);
+    setText(name);
+    textareaRef.current?.focus();
+  };
 
   const autoGrow = () => {
     const el = textareaRef.current;
@@ -50,17 +78,36 @@ export default function Composer() {
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
   };
 
+  useEffect(() => { autoGrow(); }, [text, active?.id]);
+
   const canSend = text.trim().length > 0 || pendingAttachments.length > 0;
 
   const send = () => {
-    if (streaming || uploading || !canSend) return;
+    if (streaming || uploading || dictating || !canSend) return;
     startStream(text.trim());
-    setText("");
     const el = textareaRef.current;
     if (el) el.style.height = "auto";
   };
 
   const onKeyDown = (e) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    if (showCommands) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setCommandIndex((selectedCommand + (e.key === "ArrowDown" ? 1 : -1) + commands.length) % commands.length);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setDismissedCommand(commandKey);
+        return;
+      }
+      if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        e.preventDefault();
+        chooseCommand(commands[selectedCommand].name);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send();
@@ -76,7 +123,7 @@ export default function Composer() {
     try {
       for (const file of files) {
         try {
-          const attachment = await uploadFile(file);
+          const attachment = await uploadFile(file, conversationId);
           if (useChatStore.getState().activeId === conversationId) addAttachment(attachment);
         } catch (err) {
           failures.push(`${file.name}: ${err instanceof Error ? err.message : "Upload failed"}`);
@@ -95,6 +142,7 @@ export default function Composer() {
 
   return (
     <div className="composer shrink-0 px-4 pb-1 pt-2 sm:px-6">
+      {draftError && <p role="alert" className="attachment-feedback">{draftError}</p>}
       {uploading && <p role="status" className="attachment-feedback">Uploading attachments…</p>}
       {uploadError && <p role="alert" className="attachment-feedback">{uploadError}</p>}
       {showVisionWarning && (
@@ -111,6 +159,8 @@ export default function Composer() {
         </div>
       )}
       <div className="composer-field mx-auto max-w-3xl">
+        {showCommands && <CommandSuggestions id={commandListId} commands={commands}
+          selected={selectedCommand} onSelect={chooseCommand} />}
         {pendingAttachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 border-b border-white/5 px-3 pb-2 pt-2.5">
             {pendingAttachments.map((a) =>
@@ -155,19 +205,40 @@ export default function Composer() {
           rows={2}
           value={text}
           onChange={(e) => {
+            setDismissedCommand(null);
             setText(e.target.value);
             autoGrow();
           }}
+          onFocus={() => setFocused(true)}
+          onBlur={() => { setFocused(false); void useChatStore.getState().flushDraft().catch(() => {}); }}
           onKeyDown={onKeyDown}
           placeholder="Message the assistant…"
           aria-label="Message"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-haspopup="listbox"
+          aria-expanded={showCommands}
+          aria-controls={showCommands ? commandListId : undefined}
+          aria-activedescendant={showCommands ? `${commandListId}-${selectedCommand}` : undefined}
           className="block w-full max-h-[184px] min-h-[64px] resize-none self-center bg-transparent px-4 pt-3 pb-2 font-sans text-base leading-snug text-zinc-200 outline-none placeholder:text-zinc-500"
         />
         <div className="flex items-center gap-2 px-2.5 pb-2">
+          <div className="composer-controls" data-dictating={dictating}>
+          <div className="composer-settings" inert={dictating}>
           <AttachmentPicker key={active?.id} disabled={uploading} onFiles={onFiles} />
           <ToolsMenu key={`tools-${active?.id}`} />
           <div className="ml-auto min-w-0">
             <ModelPicker presentation="sheet" value={active?.model || ""} providers={providers} onChange={renameModel} />
+          </div>
+          </div>
+          <DictationButton key={active?.id} disabled={streaming || uploading}
+            onBusy={setDictating}
+            onText={(transcript) => {
+              const state = useChatStore.getState();
+              if (state.activeId !== active?.id) return;
+              const existing = state.active?.draftText ?? "";
+              state.setDraftText(existing + (existing && !/\s$/u.test(existing) ? " " : "") + transcript);
+            }} />
           </div>
           {streaming ? (
             <button
@@ -180,7 +251,7 @@ export default function Composer() {
           ) : (
             <button
               onClick={send}
-              disabled={!canSend || uploading}
+              disabled={!canSend || uploading || dictating}
               aria-label="Send message"
               className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-aurora-teal/50 bg-aurora-teal/15 text-aurora-teal transition-colors duration-300 hover:bg-aurora-teal/25 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
             >
@@ -190,7 +261,7 @@ export default function Composer() {
         </div>
       </div>
       <p className="composer-hint">
-        Enter to send · Shift + Enter for a new line
+        Enter to send · Shift + Enter for a new line · /help for commands
       </p>
     </div>
   );

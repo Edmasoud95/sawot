@@ -53,7 +53,7 @@ test("chat exports resolved model/provider without leaking client credentials", 
     const response = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "Hi" } });
     const events = response.body.split("\n").filter(l => l.startsWith("data: ")).map(l => JSON.parse(l.slice(6)));
     assert.equal(events[0].event, "context");
-    assert.deepEqual(events[0].data, { model: "actual", providerId: "local", providerName: "Local server" });
+    assert.deepEqual(events[0].data, { model: "actual", providerId: "local", providerName: "Local server", contextWindow: 128000 });
     assert.doesNotMatch(response.body, /private-test-key|apiKey/);
     assert.equal(events.at(-1).type, "done");
   } finally { await app.close(); rmSync(dir, { recursive: true, force: true }); }

@@ -15,18 +15,23 @@ export const createConversation = (model) =>
   }).then(json);
 export const getConversation = (id) =>
   fetch(`${API_BASE}/api/chat/conversations/${id}`).then(json);
-export const patchConversation = (id, patch) =>
-  fetch(`${API_BASE}/api/chat/conversations/${id}`, {
+export const patchConversation = (id, patch, keepalive = false) => {
+  const body = JSON.stringify(patch);
+  return fetch(`${API_BASE}/api/chat/conversations/${id}`, {
     method: "PATCH",
+    keepalive: keepalive && new TextEncoder().encode(body).length < 60_000,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
+    body,
   }).then(json);
+};
 export const deleteConversation = (id) =>
-  fetch(`${API_BASE}/api/chat/conversations/${id}`, { method: "DELETE" });
-export const uploadFile = (file) => {
+  fetch(`${API_BASE}/api/chat/conversations/${id}`, { method: "DELETE" }).then(async res => {
+    if (!res.ok) throw new Error("Could not delete the conversation and its files. Please try again.");
+  });
+export const uploadFile = (file, conversationId = null) => {
   const form = new FormData();
   form.append("file", file);
-  return fetch(`${API_BASE}/api/chat/upload`, { method: "POST", body: form }).then(json);
+  return fetch(`${API_BASE}/api/chat/upload${conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : ""}`, { method: "POST", body: form }).then(json);
 };
 
 /** POST a message; invoke onEvent for each SSE event. Returns an abort fn. */

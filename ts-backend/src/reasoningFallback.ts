@@ -1,5 +1,6 @@
 import type OpenAI from "openai";
 import { createViaResponses } from "./responsesTransport.js";
+import { isContextOverflow } from "./conversationError.js";
 
 // Which request shape a model accepts, learned from provider errors.
 //
@@ -81,6 +82,7 @@ export async function createChatCompletion<T = any>(client: OpenAI, params: Reco
       transports.set(k, "responses");
       return result;
     } catch (responsesErr) {
+      if (isContextOverflow(responsesErr)) throw responsesErr;
       throw new Error(
         `${params.model} cannot use tools on chat completions and the Responses API failed too: ${errorText(responsesErr).trim() || String(responsesErr)}`,
       );

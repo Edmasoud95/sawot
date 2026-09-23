@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { chunksFromEvents, createViaResponses, fromResponse, toResponsesInput, toResponsesTools } from "../src/responsesTransport.js";
+import { conversationErrorMessage } from "../src/conversationError.js";
+
+test("Responses stream context codes survive the chat adapter", async () => {
+  for (const event of [
+    { type: "response.failed", response: { error: { code: "context_length_exceeded", message: "Input rejected" } } },
+    { type: "error", code: "context_length_exceeded", message: "Input rejected" },
+  ]) {
+    await assert.rejects(async () => {
+      for await (const _ of chunksFromEvents(events([event]))) { /* drain */ }
+    }, error => /conversation.*too long/i.test(conversationErrorMessage(error)));
+  }
+});
 
 const CHAT_TOOLS = [{ type: "function", function: { name: "get_entities", description: "List devices", parameters: { type: "object", properties: {} } } }];
 

@@ -11,6 +11,24 @@ import {
   streamMessage,
 } from "./lib/chatApi";
 
+const pendingDrafts = new Map<string, { text: string; revision: number }>();
+const draftRevisions = new Map<string, number>();
+const deletedConversations = new Set<string>();
+let draftTimer: ReturnType<typeof setTimeout> | undefined;
+let draftWrites = Promise.resolve();
+let streamGeneration = 0;
+let commandGeneration = 0;
+
+function withHistory(conversations, active) {
+  const others = conversations.filter((c) => c.id !== active.id);
+  const hasMessages = active.messages.some((m) => m.role === "user");
+  const text = (active.draftText ?? "").trim();
+  if (!hasMessages && text.split(/\s+/u).filter(Boolean).length < 3) return others;
+  return [{ ...active, isDraft: !hasMessages,
+    title: hasMessages ? active.title : `Draft: ${text.replace(/\s+/gu, " ").slice(0, 80)}`,
+  }, ...others];
+}
+
 export const useChatStore = create<any>()((set, get) => ({
   conversations: [],
   activeId: null,
@@ -24,9 +42,49 @@ export const useChatStore = create<any>()((set, get) => ({
   pendingAttachments: [],
   sidebarOpen: window.matchMedia("(min-width: 640px)").matches,
   abortStream: null,
+  draftError: "",
+  commandResult: null,
+  abortCommand: null,
+
+  dismissCommand: () => {
+    commandGeneration++;
+    get().abortCommand?.();
+    set({ commandResult: null, abortCommand: null });
+  },
+
+  runCommand: async (command: string) => {
+    get().dismissCommand();
+    const generation = commandGeneration;
+    const { activeId, pendingAttachments } = get();
+    set({ commandResult: { command, loading: true, content: "", error: "" } });
+    get().setDraftText("");
+    const current = () => generation === commandGeneration && get().activeId === activeId;
+    try {
+      await get().flushDraft();
+    } catch {
+      if (current()) set({ commandResult: { command, loading: false, content: "", error: "Could not save draft. Please try again." } });
+      return;
+    }
+    if (!current()) return;
+    let settled = false;
+    const abort = streamMessage(activeId, { content: `/${command}`, attachments: pendingAttachments }, event => {
+      if (!current()) return;
+      if (event.type === "done") {
+        settled = true;
+        set({ commandResult: { ...event.message, command, loading: false, error: "" } });
+      } else if (event.type === "error") {
+        settled = true;
+        set({ commandResult: { command, loading: false, content: "", error: event.message } });
+      } else if (event.type === "stream_end") {
+        set({ abortCommand: null, ...(!settled ? { commandResult: { command, loading: false, content: "", error: "Connection ended before the command completed. Please try again." } } : {}) });
+      }
+    });
+    set({ abortCommand: abort });
+  },
 
   loadConversations: async () => {
     try {
+      await get().flushDraft();
       const conversations = await listConversations();
       set({ conversations });
     } catch (e) {
@@ -35,19 +93,23 @@ export const useChatStore = create<any>()((set, get) => ({
   },
 
   openConversation: async (id) => {
+    get().stopStream();
     try {
+      await get().flushDraft();
       const active = await getConversation(id);
-      set({ activeId: id, active });
+      set({ activeId: id, active, pendingAttachments: [] });
     } catch (e) {
       console.error("openConversation failed", e);
     }
   },
 
   newConversation: async (model) => {
+    get().stopStream();
     try {
+      await get().flushDraft();
       const conv = await createConversation(model);
       set((s) => ({
-        conversations: [conv, ...s.conversations],
+        pendingAttachments: [],
         activeId: conv.id,
         active: conv,
       }));
@@ -58,15 +120,20 @@ export const useChatStore = create<any>()((set, get) => ({
 
   removeConversation: async (id) => {
     try {
+      await get().flushDraft();
+      if (get().activeId === id) get().stopStream();
       await deleteConversation(id);
+      deletedConversations.add(id);
+      pendingDrafts.delete(id);
+      draftRevisions.delete(id);
       set((s) => {
         const conversations = s.conversations.filter((c) => c.id !== id);
         const activeId = s.activeId === id ? null : s.activeId;
         const active = s.activeId === id ? null : s.active;
-        return { conversations, activeId, active };
+        return { conversations, activeId, active, draftError: "", ...(s.activeId === id ? { pendingAttachments: [] } : {}) };
       });
     } catch (e) {
-      console.error("removeConversation failed", e);
+      throw e;
     }
   },
 
@@ -99,6 +166,44 @@ export const useChatStore = create<any>()((set, get) => ({
     }));
   },
 
+  setDraftText: (draftText: string) => {
+    const { active } = get();
+    if (!active) return;
+    const updated = { ...active, draftText, updated: Date.now() / 1000 };
+    const savedText = draftText.trim().split(/\s+/u).filter(Boolean).length >= 3 ? draftText : "";
+    const revision = (draftRevisions.get(active.id) ?? 0) + 1;
+    draftRevisions.set(active.id, revision);
+    pendingDrafts.set(active.id, { text: savedText, revision });
+    set((s) => ({ active: updated, conversations: withHistory(s.conversations, updated) }));
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => { void get().flushDraft().catch(() => {}); }, 350);
+  },
+
+  flushDraft: (keepalive = false) => {
+    clearTimeout(draftTimer);
+    const pending = [...pendingDrafts];
+    pendingDrafts.clear();
+    draftWrites = draftWrites.catch(() => {}).then(async () => {
+      let failure: unknown;
+      for (const [id, draft] of pending) {
+        if (deletedConversations.has(id)) continue;
+        try {
+          await patchConversation(id, { draftText: draft.text }, keepalive);
+        } catch (error) {
+          if (deletedConversations.has(id)) continue;
+          if (draftRevisions.get(id) === draft.revision) pendingDrafts.set(id, draft);
+          failure = error;
+        }
+      }
+      if (failure) {
+        set({ draftError: "Could not save draft. Please try again." });
+        throw failure;
+      }
+      if (pending.length) set({ draftError: "" });
+    });
+    return draftWrites;
+  },
+
   addAttachment: (attachment) =>
     set((s) => ({ pendingAttachments: [...s.pendingAttachments, attachment] })),
 
@@ -107,9 +212,21 @@ export const useChatStore = create<any>()((set, get) => ({
       pendingAttachments: s.pendingAttachments.filter((a) => a.id !== id),
     })),
 
-  startStream: (content) => {
+  startStream: async (content) => {
     const { activeId, active, pendingAttachments } = get();
     if (!activeId || !active || get().streaming) return;
+    const command = /^\/(status|help)$/i.exec(content.trim())?.[1].toLowerCase();
+    if (command) return get().runCommand(command);
+    get().dismissCommand();
+    const generation = ++streamGeneration;
+    set({ streaming: true });
+    try {
+      await get().flushDraft();
+    } catch {
+      if (generation === streamGeneration) set({ streaming: false });
+      return;
+    }
+    if (generation !== streamGeneration || get().activeId !== activeId) return;
 
     const userMessage = {
       role: "user",
@@ -120,11 +237,14 @@ export const useChatStore = create<any>()((set, get) => ({
     // Push optimistic user message
     const updatedActive = {
       ...active,
+      draftText: "",
+      updated: Date.now() / 1000,
       messages: [...active.messages, userMessage],
     };
 
     set({
       active: updatedActive,
+      conversations: withHistory(get().conversations, updatedActive),
       streaming: true,
       streamText: "",
       streamThinking: "",
@@ -216,6 +336,8 @@ export const useChatStore = create<any>()((set, get) => ({
   },
 
   stopStream: () => {
+    get().dismissCommand();
+    streamGeneration++;
     const { abortStream } = get();
     if (abortStream) abortStream();
     set({ streaming: false, abortStream: null });
