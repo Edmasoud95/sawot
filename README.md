@@ -1,419 +1,485 @@
 # SAWOT
 
-> **Work in progress.** SAWOT is under active development. Expect rough
-> edges, breaking changes between commits, and features that are documented
-> before they are finished. Feedback and issues are welcome.
+**A voice and chat assistant for Home Assistant, with an animated ink orb.**
 
-Fully local voice and chat assistant for Home Assistant: push-to-talk in the
-browser, CPU speech-to-text via
-[transcribe.cpp](https://github.com/handy-computer/transcribe.cpp), any
-OpenAI-compatible LLM with Home Assistant tool calling, and
-[Kokoro](https://github.com/hexgrad/kokoro) text-to-speech — no cloud required.
+Talk to your home, ask questions, discuss pictures, or open a general-purpose
+chat. SAWOT combines local speech recognition and speech synthesis with a model
+server of your choice. Use a local LLM for a local setup, or add hosted
+OpenAI-compatible providers from Settings.
 
-It is built and tested with local models: a tool-calling model on your own
-machine (Ollama, vLLM, llama.cpp or any other OpenAI-style server) is all it
-needs, and Gemma 4 works particularly well. Hosted providers such as
-OpenRouter or OpenAI can be added alongside from Settings.
+**Work in progress:** features and setup can change between commits. See
+[known limitations](#known-limitations) before installing.
 
-The assistant lives in a glass orb full of moving ink. The model chooses what
-the ink forms: a light bulb when it switches a lamp, a thermometer reading when
-you ask about the heating, a smile when it is pleased with itself.
+> **Trusted LAN only.** SAWOT has no login or user permissions. Anyone who can
+> reach the server can read conversations and issue Home Assistant commands.
+> HTTPS and the voice-origin allowlist do not add authentication. Do not expose
+> it to the internet. Read [SECURITY.md](SECURITY.md).
 
-> **Security note:** this server has **no authentication** and can control
-> your devices over the network. Authentication is planned but not yet
-> implemented. Until then, run it only on a trusted LAN, or bind
-> `server.host` to `127.0.0.1`. See [SECURITY.md](SECURITY.md).
+![SAWOT voice screen with the resting ink orb](screenshots/voice.png)
 
-![Voice mode — the resting ink orb](screenshots/voice.png)
+[Features](#features) · [Screenshots](#screenshots) ·
+[Docker setup](#docker-setup) · [Native setup](#native-setup) ·
+[Phone access](#phone-access-and-https) · [Limitations](#known-limitations)
 
 ## Features
 
-- **Voice assistant** — hold the button, speak, release. Local STT → LLM →
-  TTS pipeline with live per-turn latency traces.
-- **Expressive orb** — 6,144 persistent ink particles inside a lensed glass
-  sphere. The particles gather into a torus knot while the model thinks, ripple
-  with the reply as it is spoken, and form what the model chooses to show.
-  With every reply the model can either pick one of 28 predefined shapes
-  (faces, home symbols, statuses, weather), show a short text or number
-  readout, or free-hand sketch whatever it wants. Sketch quality scales with
-  the model: a large model draws a recognisable cat or house, a small one
-  should stick to the predefined shapes. Shapes are formed by moving the
-  existing ink, never by swapping in an icon.
-- **Home Assistant control** — the model uses tools (`get_entities`,
-  `call_service`) to list and control your devices, then shows touch-first
-  control cards for anything it touched. Verified temperature readings from
-  your sensors and thermostats can be drawn as numeric ink.
-- **Devices view** — toggle lights and switches, drag brightness and colour
-  temperature bars, pick colours, and step thermostat targets directly from
-  the cards.
-- **Chat** — a general-purpose AI chat with multiple server-stored
-  conversations, streaming replies, collapsible reasoning, image/text/PDF
-  uploads, web search with a Brave key, and a per-conversation switch that
-  brings in the Home Assistant tools and inline device cards.
-- **Attachments** — upload images (vision models), text files, and PDFs
-  (extracted text is sent inline to the model).
-- **Personality** — "Rita" ships with a sassy, teasing persona; switch to
-  plain and friendly, or write a custom personality in Settings. Type a few
-  words and let the selected model refine them into a full brief, or have it
-  invent one from scratch, then save.
-- **Any OpenAI-compatible model server** — one built-in local endpoint plus
-  any number of extra providers (OpenRouter, OpenAI, another local server, …)
-  added with their API keys from Settings. Every provider's models appear in
-  one searchable, fuzzy-filtered picker, each provider loading on its own so
-  a sleeping server never blocks the rest. Models
-  that only take tools through the Responses API (OpenAI's gpt-6 family) are
-  detected from the provider's first error and switched over automatically,
-  thinking included.
-- **Choice of speech engines** — Kokoro by default, or Resemble AI's
-  Chatterbox Turbo and Nano (expressive, `[laugh]`-style tags, voice cloning
-  from a short WAV). Download and switch from Settings.
-- **Live settings** — switch the model, voice, personality, and drawing detail
-  at runtime; choices apply instantly and persist to `settings.json`.
-- **Debug bar** — an optional diagnostics strip with a per-turn timeline
-  (STT, model, tools, TTS), every backend event, raw traffic in both
-  directions, and live state.
-- **OpenAI-compatible audio API** — `POST /v1/audio/speech` (TTS) and
-  `POST /v1/audio/transcriptions` (STT) let any OpenAI SDK client use the
-  local engines as a drop-in speech backend.
+### Voice and pictures
+
+- **Hands-free voice:** tap the microphone to start a session. A soft cue and
+  teal listening orb signal that capture is ready. Speak naturally; about 1.4
+  seconds of quiet sends the turn, or tap to send sooner. The microphone stays
+  ready across replies, with captions and spoken answers.
+- **Interrupt a reply:** tap the microphone to interrupt and listen again.
+  Choose **End** or press Escape to release the microphone. Switching to chat,
+  leaving the page, or losing the connection also ends the session. Pending
+  results are discarded; device actions already sent to Home Assistant cannot
+  be undone by interruption.
+- **Ask about pictures:** attach up to four images to a voice turn, then ask a
+  question aloud or use **Send pictures**. Requires an image-capable model.
+- **Camera, Photo library, and Files:** take a picture or select an existing
+  image. File selection remains available if live camera capture fails.
+- **Session history:** revisit voice turns in the history drawer.
+- **Keyboard and reduced-motion support:** the microphone works with Space or
+  Enter, and the orb respects the browser's reduced-motion preference.
+
+### An orb that responds
+
+- **Moving ink:** 6,144 persistent particles gather into shapes, form a knot
+  while thinking, and react to speech playback.
+- **28 catalogue expressions:** faces, home devices, weather, and status symbols.
+- **Readouts and sketches:** short text or numbers, simple drawings, and an
+  optional detailed-drawing mode. The model chooses what to show; drawing
+  quality depends on the model.
+- **Verified temperatures:** numeric temperature expressions use validated
+  readings returned by Home Assistant during the turn.
+- **Quiet captions:** expression markers stay out of speech and visible history.
+
+### Home Assistant
+
+- **Read and control entities** through model tool calls.
+- **Device cards** for entities used in a reply, available in the Devices view
+  and inline in chats with Home Assistant enabled.
+- **Touch controls** for lights and switches, brightness, colour temperature,
+  light colour, and thermostat targets where supported by the entity.
+- **Optional home tools in chat:** enable Home Assistant per conversation.
+  Voice mode is home-aware by default.
+
+### General-purpose chat
+
+- **Multiple saved conversations** with automatic titles, deletion,
+  and a model choice for each conversation.
+- **Streaming replies**, collapsible model reasoning when supplied, Markdown,
+  and highlighted code blocks.
+- **Chat commands:** `/status` shows the current model and estimated conversation
+  context used, capacity, and remaining space; `/help` lists commands. Estimates
+  include instructions, enabled tools, and readable attachments, with a rough
+  allowance for images. Capacity is labelled as LM Studio reported or assumed.
+  Results open in a dismissible drawer. Commands and results are not saved in
+  the conversation and do not call the model or enter its context.
+  Type `/` in the composer to browse command suggestions. Use arrow keys and
+  Enter or Tab, or tap a suggestion, to insert it; send when ready. Escape closes
+  the suggestions.
+- **Mobile conversation view** with history behind a menu and a compact model
+  picker beside the composer controls.
+- **Saved text drafts:** drafts of at least three words appear in history;
+  conversations with a sent message appear regardless of length.
+- **Click-to-toggle dictation:** click to start, click to stop, then edit the
+  transcript and press Send yourself. Dictation does not automatically send.
+- **Image and text attachments:** PNG, JPEG, WebP, GIF, and common text/code
+  formats, up to 10 MB per upload. Images require a vision-capable model.
+  PDFs can be uploaded, but their contents are **not yet extracted**.
+- **Separate chat instructions** editable in Settings, independent of the
+  voice assistant's personality.
+
+### Web search
+
+- **Brave-powered search** in voice and chat when a Brave Search API key is set.
+- **Page reading and phrase lookup** through `web_search`, `fetch_page`, and
+  `find_in_page`, with source links in chat and a compact source popover in voice.
+- **Per-conversation search toggle** in chat. Search and page retrieval require
+  internet access.
+
+### Models, speech, and personality
+
+- **A built-in local model endpoint plus custom providers** with their own base
+  URLs and API keys. Provider model lists load independently into a searchable
+  picker, so one unavailable server does not block the others.
+- **OpenAI-compatible transports**, including a Responses API fallback for
+  supported provider errors. Compatibility still depends on the provider and model.
+- **Local speech recognition** through transcribe.cpp. The catalogue includes
+  Parakeet Unified EN, Parakeet TDT v3, Cohere Transcribe, Whisper Large v3 Turbo,
+  and Canary; language coverage varies by model.
+- **Kokoro speech synthesis** by default. Optional Chatterbox Turbo and Nano
+  support expressive sound tags and cloned voices.
+- **Voice cloning:** record, name, and delete voice clips in Settings, then use
+  them with Chatterbox. A WAV in `models/tts/voices/` also becomes a named voice.
+- **Download and switch speech models** from Settings, with download progress.
+  Speech engines release weights after ten idle minutes and reload on use;
+  the first request after that pause may take longer.
+- **Custom personality:** use Rita's default sassy persona, choose plain, or
+  write a custom brief. The selected model can generate or refine the brief.
+- **Persistent settings:** model, voice, personality, drawing detail, providers,
+  and chat instructions can be changed without editing source code.
+
+### Diagnostics and integration
+
+- **Optional debug bar:** resolved model/provider, request outcomes, STT/model/
+  tool/TTS timing, events, raw messages, and state, with JSON copy for a turn.
+- **OpenAI-compatible audio endpoints:** `POST /v1/audio/speech`,
+  `POST /v1/audio/transcriptions`, and `GET /v1/models` through the backend.
+- **Phone home-screen installation:** standalone app presentation with an icon.
+  It still needs a connection to the SAWOT server.
 
 ## Screenshots
 
-**The orb answers with ink** — a bulb after switching a light, and a
-thermometer reading on a phone:
+These are existing UI captures. Some predate the current mobile composer,
+voice-picture controls, and dictation button; their placement may differ from
+this checkout. The redesign gallery includes simulated device and model
+responses, not proof of live device control. See the
+[visual notes](screenshots/redesign/README.md) for capture context.
 
-![Bulb expression while speaking](screenshots/expression.png)
+| Voice expression | Temperature readout on a phone |
+| --- | --- |
+| ![Ink forming a light bulb during a reply](screenshots/expression.png) | <img src="screenshots/readout-phone.png" alt="Numeric temperature drawn by the orb on a phone" width="280"> |
 
-<img src="screenshots/readout-phone.png" alt="Temperature readout on a phone" width="390">
+**Chat with reasoning and inline device controls**
 
-**Devices** — control cards for everything the assistant touched:
+![Chat conversation with expandable reasoning and light controls](screenshots/chat.png)
 
-![Device cards](screenshots/devices.png)
+<details>
+<summary>More screenshots: devices, speech settings, model picker, and diagnostics</summary>
 
-**Chat** — reasoning, streaming replies, and inline cards:
+**Devices** — cards for the entities involved in the conversation.
 
-![Chat mode](screenshots/chat.png)
+![Device cards with light and thermostat controls](screenshots/devices.png)
 
-**Settings** — three sections: General for providers and the debug bar,
-Assistant for the model, personality, and drawing detail, and Speech for the
-speech engines, voice, and voice cloning:
+**Speech settings** — engine selection, voices, and voice cloning.
 
-![Settings panel](screenshots/settings.png)
+![Speech settings and voice cloning](screenshots/settings.png)
 
-<img src="screenshots/model-picker-phone.png" alt="Fuzzy model picker with one provider still loading" width="390">
+**Model picker on a phone** — searchable models grouped by provider.
 
-**Debug bar** — the turn timeline with the reply and its orb expression:
+<img src="screenshots/model-picker-phone.png" alt="Phone model picker with independent provider loading" width="350">
 
-![Debug bar](screenshots/debug.png)
+**Diagnostics** — a turn timeline and orb-expression details.
 
-## Architecture
+![Expanded debug bar with turn timeline](screenshots/debug.png)
 
-- `ts-backend/` — TypeScript (Fastify) backend: WebSocket voice pipeline, chat
-  (SSE), settings, provider registry, Home Assistant client, the LLM agent +
-  tools, and the orb expression catalogue. Proxies STT/TTS to the Python
-  sidecar.
-- `sidecar/` + `server/` — Python (FastAPI) inference sidecar: transcribe.cpp
-  STT, Kokoro / Chatterbox TTS, and the model download manager.
-- `web/` — TypeScript (React + Vite + Three.js) frontend, built into
-  `web/dist/`. The ink simulation, shape fields, stroke font, and shader live
-  under `web/src/lib/` and `web/src/shaders/`.
-- `config.yaml` + `.env` — runtime configuration and the HA token.
-- `Dockerfile` + `docker-compose.yml` — one CPU image running both processes,
-  published to `ghcr.io/edmasoud95/sawot` on every push to main.
+</details>
 
-## Prerequisites
+## Before you install
 
-- Linux (native or WSL2). Speech-to-text runs on CPU (GGUF); text-to-speech
-  uses an NVIDIA GPU when present and falls back to CPU.
-- `sudo apt install espeak-ng ffmpeg`
-- Node.js 20+ and npm (TypeScript backend + frontend)
-- An OpenAI-compatible model server with a tool-calling model loaded.
-  Local servers such as Ollama, vLLM or llama.cpp work well; Gemma 4 is the
-  model it is tested with most. Hosted providers can be added from Settings.
-- A Home Assistant
-  [long-lived access token](https://www.home-assistant.io/docs/authentication/#your-account-profile)
-  (HA → Profile → Security → Long-lived access tokens)
+You need:
 
-## Quick start with Docker
+- **Home Assistant**, its URL, and a long-lived access token from your Home
+  Assistant profile's Security section. The current backend requires these
+  even if you only intend to use general chat.
+- **A language model endpoint.** SAWOT does not bundle or start an LLM server.
+  Use an OpenAI-compatible local server, or configure a hosted provider after
+  opening the UI. Home control and search require tool calling; pictures
+  require image input support.
+- **Internet access for initial installation and model downloads.** Some
+  models require accepting Hugging Face access terms and providing `HF_TOKEN`.
+  Local inference can run without cloud services after its dependencies and
+  model assets are cached; hosted models and web search remain online features.
+- **Storage for models and conversations.** The catalogue estimates about
+  731 MB for the default Parakeet STT and 327 MB for Kokoro, excluding Python,
+  PyTorch, other caches, and the LLM. Optional Chatterbox downloads are larger.
 
-The fastest way to run SAWOT is the prebuilt CPU image. You need Docker, a
-Home Assistant long-lived access token, and an OpenAI-compatible model
-server running on the same machine or LAN.
+Choose Docker for the packaged CPU deployment, or native Linux/WSL2 for direct
+control of Python dependencies and optional GPU speech synthesis.
+
+## Docker setup
+
+The published image targets **Linux x86_64 (`linux/amd64`) and CPU inference**.
+The included Compose file mounts `./data` at `/data` inside the container.
+
+### 1. Get the project and configure credentials
 
 ```bash
-git clone https://github.com/Edmasoud95/sawot.git && cd sawot
-cp .env.example .env      # set HA_URL and HA_TOKEN
+git clone https://github.com/Edmasoud95/sawot.git
+cd sawot
+cp .env.example .env
+```
+
+Edit `.env` and set `HA_URL` and `HA_TOKEN`. Set `LLM_URL` to your model server's
+OpenAI-compatible base URL, including `/v1`, and optionally set `LLM_MODEL` to
+its exact model ID. The Compose default is
+`http://host.docker.internal:1234/v1`; `host.docker.internal` addresses the
+Docker host, not the container. A server on another machine needs that
+machine's reachable LAN address.
+
+### 2. Enable your browser origin and prepare uploads
+
+Create `docker-compose.override.yml` beside `docker-compose.yml`:
+
+```yaml
+services:
+  sawot:
+    environment:
+      SAWOT_ALLOWED_ORIGINS: "http://localhost:8765"
+      BRAVE_API_KEY: "${BRAVE_API_KEY:-}"
+      HF_TOKEN: "${HF_TOKEN:-}"
+```
+
+The origin must exactly match the address you open in the browser. For phone
+access, replace or extend it with your trusted HTTPS origin; see
+[Phone access](#phone-access-and-https). Separate multiple origins with commas,
+without paths or trailing slashes.
+
+The base Compose file does not forward these three variables. Adding a key to
+`.env` alone does not pass it into the container; the override above does.
+
+```bash
+mkdir -p data/data/uploads
 docker compose up -d
 ```
 
-Open <http://localhost:8765>, then download the speech models from Settings
-(Parakeet Unified EN and Kokoro are the recommended defaults) and pick a model
-from your provider. Everything the container writes — downloaded models,
-settings, chat history — lands in `./data`, so `docker compose pull && docker
-compose up -d` upgrades without losing anything.
+Use `docker compose up -d --build` instead when you want to build the current
+checkout, including local changes, rather than run the published image.
 
-Inside the container, `host.docker.internal` is the machine running Docker,
-which is where the built-in model server URL points by default (port 1234).
-Set `LLM_URL` in `.env` if your server listens elsewhere, for example
-`http://host.docker.internal:11434/v1` for Ollama.
+### 3. Open the UI and select models
 
-`latest` follows the main branch. To stay on a fixed version, pin a release
-tag such as `ghcr.io/edmasoud95/sawot:0.1.0` in `docker-compose.yml`; every
-[release](https://github.com/Edmasoud95/sawot/releases) publishes a matching
-image tag.
-
-The image is CPU-only and **x86_64 only**: the transcribe.cpp native wheel
-has no ARM build yet, so Raspberry Pi and Apple Silicon Docker hosts are not
-supported for now. Speech runs well on a modern CPU; a GPU image is planned.
-A Home Assistant add-on built on this image is also planned, which would put
-the UI behind Home Assistant's own login through ingress.
-
-## Setup (native)
+Open **http://localhost:8765**, then follow [First run](#first-run).
+For startup logs:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-cp config.example.yaml config.yaml   # HA URL, model server URL, model name
-cp .env.example .env                 # paste your HA token
-(cd ts-backend && npm install && npm run build)   # TypeScript backend
-(cd web && npm install && npm run build)          # UI into web/dist
+docker compose logs -f sawot
 ```
 
-> **Tip — setup wizard:** `.venv/bin/python scripts/setup.py` walks through
-> configuration and downloads the STT + TTS models in one go.
-
-If your model server runs on the Windows host under WSL2, find its IP with
-`ip route show | grep default`.
-
-## Configuration
-
-Edit `config.yaml`:
-
-| Key | Description |
-| --- | --- |
-| `home_assistant.url` | Your Home Assistant URL |
-| `llm.url` | Built-in model server: any OpenAI-compatible `/v1` URL |
-| `llm.model` | The tool-calling model to use on it (or pick one from Settings) |
-| `stt.model` | STT model id (default `parakeet-unified-en`; see Settings for the list) |
-| `stt.language` | Transcription language (default `en`) |
-| `tts.voice` | Kokoro voice (see the Settings panel for the list) |
-| `tts.lang_code` | Kokoro language code (default `a` = American English) |
-| `assistant.name` | Assistant name in the system prompt (default `Rita`) |
-| `assistant.personality` | `sassy` (default), `plain`, or `custom` |
-| `assistant.personality_prompt` | The custom personality text (also editable and generated from Settings) |
-| `search.brave_api_key` | Brave Search API key; enables web tools in voice and Chat (optional) |
-| `server.host` / `server.port` | Bind address / port (default `0.0.0.0:8765`) |
-| `controls` | Optional per-domain service whitelist override |
-| `tls.certfile` / `tls.keyfile` | Optional — required for phone mic access over https |
-
-Put your Home Assistant token in `.env` as `HA_TOKEN=...`.
-
-Every key can also come from the environment, which wins over the file, so a
-container needs no `config.yaml` at all. Only `HA_URL` and `HA_TOKEN` are
-required; the rest default to the values above.
-
-| Environment variable | `config.yaml` key |
-| --- | --- |
-| `HA_URL` | `home_assistant.url` |
-| `LLM_URL` / `LLM_MODEL` | `llm.url` / `llm.model` |
-| `STT_MODEL` / `STT_LANGUAGE` | `stt.model` / `stt.language` |
-| `TTS_VOICE` / `TTS_LANG_CODE` | `tts.voice` / `tts.lang_code` |
-| `ASSISTANT_NAME` / `ASSISTANT_PERSONALITY` | `assistant.name` / `assistant.personality` |
-| `BRAVE_API_KEY` | `search.brave_api_key` |
-| `SERVER_HOST` / `SERVER_PORT` | `server.host` / `server.port` |
-| `TLS_CERTFILE` / `TLS_KEYFILE` | `tls.certfile` / `tls.keyfile` |
-| `SAWOT_DATA_DIR` | where `settings.json`, `data/` and `models/` live (default: beside `config.yaml`; `/data` in Docker) |
-
-Custom LLM providers and their API keys are added from Settings and stored in
-`settings.json` (gitignored). Keys are never returned by the API.
-The Brave key is treated the same way: it is read from `config.yaml` or the
-environment and never logged or returned.
-
-## Models
-
-Speech-to-text and text-to-speech models are downloaded on demand into a local
-`models/` directory (gitignored). Two ways to fetch them:
-
-- **Settings** → a download button next to each STT/TTS model, with a progress
-  bar. The recommended model for each kind is flagged. Downloaded TTS and STT
-  models can be switched with one click.
-- **Setup wizard** → `.venv/bin/python scripts/setup.py`.
-
-The STT catalog mirrors [Handy](https://github.com/cjpais/Handy)'s: quantized
-GGUF models (Cohere Transcribe, Parakeet, Whisper Large v3 Turbo, Canary) run
-on CPU by [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) —
-no CUDA or Hugging Face account needed. Recommended defaults: Parakeet
-Unified EN 0.6B (STT — very fast and accurate, English only, 0.7 GB; pick
-Cohere Transcribe for 14 languages) and Kokoro-82M (TTS). Once downloaded, the
-server runs fully offline.
-
-### Chatterbox Turbo and Nano (optional)
-
-Two extra TTS engines from Resemble AI. Turbo (350M) is expressive and low
-latency on a GPU; Nano (110M) also runs well on CPU. Both understand
-sound tags such as `[laugh]`, `[sigh]` or `[gasp]` in the text; while a
-Chatterbox model is the active voice, the assistant is told about the tags and
-may use them sparingly (they are stripped from captions and history). Mood
-tags like `[whispering]` exist in the vocabulary but change nothing audible,
-so they are not offered.
-Both can also clone a voice: while a Chatterbox model is
-active, Settings shows **Clone my voice** — read the short passage aloud,
-name the recording, and it appears in the voice picker under that name
-(`default` stays the built-in voice). A WAV dropped into `models/tts/voices/`
-works the same way. They need an optional package installed first, see
-`requirements-chatterbox.txt` for the exact commands, then download either
-model from Settings and click it to switch.
-
-## Run
+To update the published image while keeping the mounted data:
 
 ```bash
+docker compose pull
+docker compose up -d
+```
+
+`latest` follows main. Pin an available image tag or digest in Compose if you
+need a repeatable deployment. Back up `./data` before upgrades.
+
+## Native setup
+
+Use Linux or WSL2, **Python 3.12** and **Node.js 22** to match the container and
+CI. The project declares Python 3.10 or newer, but native speech dependencies
+also need compatible wheels. The packaged speech stack targets x86_64.
+
+### 1. Install dependencies
+
+With Python and Node already installed, on Debian/Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install -y git python3-venv espeak-ng ffmpeg libsndfile1
+git clone https://github.com/Edmasoud95/sawot.git
+cd sawot
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m spacy download en_core_web_sm
+cp config.example.yaml config.yaml
+cp .env.example .env
+mkdir -p data/uploads
+```
+
+### 2. Configure a localhost installation
+
+Edit `.env`: set `HA_URL`, `HA_TOKEN`, and your `LLM_URL`/`LLM_MODEL` if desired.
+Environment values override the corresponding YAML values, including `HA_URL`.
+
+In `config.yaml`:
+
+- Replace the example Home Assistant and model-server addresses.
+- Set `server.host` to `127.0.0.1` for access only from this machine.
+- Set `server.allowed_origins` to `["http://localhost:8765"]`.
+- **Remove or comment out the example `tls:` block** for this HTTP localhost
+  setup. It references certificate files that are not included.
+
+For LAN access, choose the appropriate bind address and configure trusted HTTPS
+before using a phone microphone or camera. Under WSL2, a model server on Windows
+must be reachable from WSL; do not assume WSL's `localhost` reaches it.
+
+### 3. Build and start
+
+```bash
+(cd ts-backend && npm ci && npm run build)
+(cd web && npm ci && npm run build)
 ./run.sh
 ```
 
-`run.sh` starts the Python inference sidecar (STT/TTS) and the TypeScript
-backend, building `ts-backend/dist` and `web/dist` first if they're missing.
+Open **http://localhost:8765**. The launcher runs the Python speech sidecar on
+loopback port 8766 and the TypeScript backend on port 8765. Initial speech
+loading or downloads can delay readiness. Stop the launcher with Ctrl+C.
 
-Open <http://localhost:8765>, or `http://<machine-ip>:8765` from another device
-on your LAN (use `https://` when TLS is configured).
+`run.sh` only builds missing `dist/` directories. After updating source code,
+repeat both build commands and restart it.
 
-## Usage
+## First run
 
-### Add to your phone's home screen
+1. Open **Settings → General** to add custom model providers if needed. Use the
+   provider's OpenAI-compatible base URL and API key.
+2. In **Settings → Assistant**, select a model with tool calling for voice/home
+   tasks. Choose the personality and optional drawing detail. Chat also has its
+   own model picker and instructions.
+3. In **Settings → Speech**, download and select an STT model and a TTS model.
+   The catalogue defaults are **Parakeet Unified EN** (English only) and
+   **Kokoro**. Choose a multilingual STT model when needed and a matching voice.
+   Kokoro may fetch assets during the first startup if they are not cached yet.
+4. Grant microphone permission and try a general question. For pictures, choose
+   a model that accepts images before attaching them.
+5. For search, set `BRAVE_API_KEY` and restart the backend (recreate the container
+   for changed Compose environment values). Enable search in the chat's tools
+   menu when wanted.
 
-Open SAWOT at its HTTPS address on your LAN, using a certificate your phone
-trusts. On iPhone, use Safari's **Share → Add to Home Screen** (keep **Open as
-Web App** enabled if shown). On Android, use Chrome's menu → **Add to Home
-screen** or **Install app**. Launching the SAWOT icon opens a standalone window
-without browser tabs or an address bar; the phone's status bar may remain visible.
+A responsive `/health` endpoint confirms the backend is running; it does not
+prove that speech models, your LLM, or Home Assistant are ready.
 
-The app still needs a connection to your SAWOT server. If you previously saved
-a plain bookmark, remove that shortcut and add it again to pick up the app icon
-and standalone launch settings.
+### Optional Chatterbox speech and voice cloning
 
-### Voice
+The standard dependency set and Docker image do not install Chatterbox.
+For a native installation, follow [requirements-chatterbox.txt](requirements-chatterbox.txt)
+for the optional package commands and compatible PyTorch/torchaudio builds.
+Then download and select **Chatterbox Turbo** or **Chatterbox Nano** in Speech
+settings. Using it in Docker requires a custom image with those dependencies.
 
-Hold the button, speak, release. Captions for what you said and what the
-assistant replied appear under the orb during a turn. Hold the microphone again
-while the assistant is thinking or speaking to interrupt and record your next
-question, or press Escape to stop without recording. Interruption cancels pending
-model and speech requests and discards late results; an already dispatched device
-action cannot be undone. Hands-free listening is not enabled. With TLS configured
-(self-signed cert in `certs/`), use `https://` — required for phone microphone
-access (accept the certificate warning once per device).
+Record a short sample under **Cloned voices**, name it, and select it as the
+voice. Cloned clips are used by Chatterbox, not Kokoro. Turbo and Nano can use
+sound tags such as `[laugh]`; those tags are removed from captions and history.
+Style tags such as `[whispering]` are not suggested because they had no audible
+effect in the project's Turbo checks.
 
-### How the orb draws
+## Phone access and HTTPS
 
-With every reply the model decides what the ink forms, either through a
-hidden marker at the start of the spoken text or by calling the
-`show_on_orb` tool. It has three options:
+Microphone and live camera capture need a secure browser context. HTTP on
+`localhost` works for local development; an ordinary HTTP LAN address does not
+provide that exception on a phone.
 
-- a **predefined shape** from the catalogue of 28, such as `bulb`,
-  `thermometer`, `lock`, `happy`, `rain` (the full list with meanings is in
-  `ts-backend/src/expressions.ts`). These always look right because the
-  outlines are built in;
-- a **readout** of up to twelve characters, on one or two lines;
-- a **free-hand sketch** of anything it wants, as polylines in a unit square.
-  The prompt tells the model never to refuse a drawing request: people become
-  stick figures, faces a circle with features, feelings and abstract ideas a
-  symbol. Turn on **Detailed drawings** in Settings to let it use filled
-  primitives (circles, ellipses, rectangles, polygons, arcs) and more strokes.
+1. Give the server an HTTPS address reachable on your trusted LAN and a
+   certificate the phone trusts. Configure `tls.certfile` and `tls.keyfile` for
+   direct backend TLS, or terminate HTTPS at a reverse proxy that supports
+   WebSocket upgrades and preserves the browser's `Origin` header.
+2. Add that exact HTTPS origin to `server.allowed_origins` or
+   `SAWOT_ALLOWED_ORIGINS`, and restart the backend. A missing or empty allowlist
+   rejects voice WebSockets.
+3. Open that address on the phone and grant microphone/camera permissions.
+   Dismissing a self-signed certificate warning alone is not a reliable setup;
+   the device must trust the certificate.
+4. Use the browser's **Add to Home Screen** or **Install app** action for a
+   standalone window. This is a server-connected app, not an offline assistant.
 
-How good the sketches are depends entirely on the model. Large models
-(Qwen3-32B, DeepSeek, GPT-class) produce recognisable drawings; small models
-(8B and under) tend to produce scribbles, so with those it is better to rely
-on the predefined shapes and readouts.
+In Docker, direct TLS also requires mounting the certificate/key and forwarding
+`TLS_CERTFILE` and `TLS_KEYFILE` in Compose. Keep certificates out of Git.
+HTTPS does not replace trusted-network restrictions or add a login.
 
-The backend validates and strips the markers, so nothing reaches speech,
-captions, or history. Device actions form their own symbols while a tool runs,
-and a verified temperature reading outranks everything else. Every final reply
-is appended to `data/orb-replies.log` with its parsed expression so a missing
-drawing can be diagnosed.
+## Configuration reference
 
-### Devices (grid icon)
+Start with [config.example.yaml](config.example.yaml) and [.env.example](.env.example).
+Startup configuration changes require a restart; choices exposed in Settings
+persist in `settings.json` and are applied at runtime.
 
-Control cards for the devices each answer touched — toggle lights and
-switches, drag brightness and warmth bars, pick colours, and step thermostat
-targets. Every target is at least 44 px for touch.
+| Purpose | YAML key | Environment variable |
+| --- | --- | --- |
+| Home Assistant | `home_assistant.url` | `HA_URL` |
+| Home Assistant token | Environment only | `HA_TOKEN` |
+| Built-in LLM server/model | `llm.url`, `llm.model` | `LLM_URL`, `LLM_MODEL` |
+| Speech recognition | `stt.model`, `stt.language` | `STT_MODEL`, `STT_LANGUAGE` |
+| Kokoro voice/language | `tts.voice`, `tts.lang_code` | `TTS_VOICE`, `TTS_LANG_CODE` |
+| Name/personality | `assistant.name`, `assistant.personality` | `ASSISTANT_NAME`, `ASSISTANT_PERSONALITY` |
+| Custom personality | `assistant.personality_prompt` | `ASSISTANT_PERSONALITY_PROMPT` |
+| Brave Search key | `search.brave_api_key` | `BRAVE_API_KEY` |
+| Bind address/port | `server.host`, `server.port` | `SERVER_HOST`, `SERVER_PORT` |
+| Voice browser origins | `server.allowed_origins` (list) | `SAWOT_ALLOWED_ORIGINS` (comma-separated) |
+| Direct HTTPS | `tls.certfile`, `tls.keyfile` | `TLS_CERTFILE`, `TLS_KEYFILE` |
+| Runtime storage root | — | `SAWOT_DATA_DIR` |
+| Backend → sidecar URL | — | `SAWOT_SIDECAR_URL` |
+| Sidecar listening port | — | `SAWOT_SIDECAR_PORT` |
 
-### Chat (speech-bubble icon)
+`controls` in YAML overrides the direct device-control service whitelist.
+Custom providers and their credentials are managed in Settings. Provider API
+keys are stored on disk and omitted from public provider responses.
+For Docker, explicitly forward additional environment variables in Compose;
+its `.env` file is an interpolation source, not an automatic container env file.
 
-A general-purpose assistant for everyday use, not a home controller. Multiple
-server-stored conversations (`data/conversations/`), streaming replies with
-collapsible thinking, a per-conversation model picker, image/text/PDF uploads,
-and markdown with highlighted code blocks. With a Brave Search key configured
-the model can call `web_search`, `fetch_page`, and `find_in_page` and cites its
-sources as links. These tools are also available in voice mode. `fetch_page`
-returns a 20,000-character preview; `find_in_page` searches the longer cached
-text for a literal phrase, ignoring case, and returns up to 10 passages with
-surrounding context (5 by default). Pages are cached in memory for 5 minutes,
-with at most 12 URL entries and a 2 MiB download limit per page. Results flag
-incomplete downloads; `fetch_page` can refresh a cached page.
+## Data storage and privacy
 
-The house button in the header turns Home Assistant on for that
-conversation: the device list, the HA tools, and inline device cards. Chat has
-its own instructions in Settings → Assistant, separate from the voice
-personality.
+For a standard native installation, these paths are under the repository root.
+With `SAWOT_DATA_DIR`, they are under that directory instead. Docker sets it to
+`/data`, mapped to the host's `./data`.
 
-### History (clock icon)
+| Contents | Native path | Host path with the supplied Compose mount |
+| --- | --- | --- |
+| Chat conversations and saved drafts | `data/conversations/` | `data/data/conversations/` |
+| Uploaded pictures and files | `data/uploads/` | `data/data/uploads/` |
+| Voice reply/expression diagnostic log | `data/orb-replies.log` | `data/data/orb-replies.log` |
+| Settings and provider credentials | `settings.json` | `data/settings.json` |
+| Downloaded speech models | `models/` | `data/models/` |
+| Cloned voice recordings | `models/tts/voices/` | `data/models/tts/voices/` |
 
-The voice conversation log for this session, with a per-turn pipeline trace
-when the debug bar is on.
+Uploads persist across restarts. **Deleting a chat also deletes its associated
+uploads**, including unsent files uploaded to that chat. Files referenced by another
+chat are kept until that chat is deleted. Removing an attachment from the composer
+keeps its file until the conversation is deleted. Older unattached uploads and
+voice uploads have no automatic cleanup. Voice session history is distinct from saved chat conversations;
+the diagnostic reply log can still contain voice response text.
 
-### Settings (gear icon)
+Runtime data, credentials, and models are gitignored, but are not encrypted by
+the app. Back them up and protect access to the host. Debug exports can contain
+conversation content and device information.
 
-Model (searchable across every provider), voice, personality (sassy, plain,
-or a custom brief you write or have the model write), chat instructions,
-detailed drawings, the
-debug bar, custom providers, and STT/TTS model downloads. Changes apply
-instantly and persist.
+When you select a hosted LLM, conversation content and attached images used in
+requests leave the local server. Web search sends queries to Brave and fetches
+external pages. Local speech processing does not make those features local.
 
-### Debug bar
+## Known limitations
 
-Switch it on from Settings. Collapsed, it shows live tiles: status, last turn
-total, STT, model, and TTS latencies, tool call count, and server health.
-Expanded, it has four tabs — Timeline, Events, Messages, and State — a turn
-picker for the last twenty turns, and a Copy button that puts a turn's JSON on
-the clipboard. Chat mode emits the same events over its stream.
+| Area | Current limitation |
+| --- | --- |
+| Access control | No authentication, separate users, or per-user conversation isolation. Trusted LAN only; a Home Assistant add-on with ingress is not included. |
+| Hands-free voice | Explicitly started sessions only; no wake word or voice interruption during replies. Local sound-level detection uses a 1.4-second quiet interval and a 45-second turn limit; background sound or long thinking pauses can split turns. Noisy-room and real-device microphone behavior still need validation. |
+| PDF support | Files are stored, but the TypeScript chat backend does not extract their text. Copy text into a supported text file instead. |
+| Upload lifecycle | Chat deletion removes associated files. Unassociated legacy uploads and voice uploads have no automatic cleanup. Fresh installs must create the uploads directory; both setup paths above include this step. |
+| Setup wizard | `scripts/setup.py` currently contains a Python syntax error. Use the manual setup steps above. |
+| Model compatibility | Tool calling, image input, reasoning, and provider transports vary. The image-support hint uses model-name heuristics and can be wrong. |
+| Memory/context | Chat sends the full saved message history; voice retains history for the current connection. Context metadata uses the local server's LM Studio native API when available (loaded context first, model maximum otherwise), with a 128,000-token fallback. The provider enforces its actual limit; context overflow displays an error. There is no automatic trimming or summarization. Text attachments are capped at 50,000 characters. |
+| Web retrieval | Page downloads and extracted text are bounded; login-only pages, JavaScript-heavy pages, and unavailable sites may not yield useful content. |
+| Speech performance | Speed, RAM/VRAM use, and language quality depend on the selected engines and hardware. Idle reloads add latency; optional Chatterbox requires extra dependencies. |
+| Platforms | The published Docker image is CPU-only and `linux/amd64`; there is no native ARM image for Raspberry Pi or Apple Silicon. |
+| Visual output | Freehand sketches depend on the model. An action shape indicates an attempted action, not confirmation that a device changed. |
+| Frontend development | The current Vite config proxies `/ws` only. Full chat/settings development also needs `/api` and relevant audio routes proxied to the backend. The built UI served on port 8765 avoids this issue. |
 
-## Tests
+## Development and verification
+
+| Directory | Responsibility |
+| --- | --- |
+| `web/` | React, TypeScript, Vite, Zustand, Three.js ink renderer |
+| `ts-backend/` | Fastify, voice WebSocket pipeline, streaming chat, providers, Home Assistant and search tools |
+| `sidecar/` | Python FastAPI speech service |
+| `server/` | Speech engines, model downloads, voice clips, configuration and audio API |
+| `tests/`, `ts-backend/tests/`, `web/tests/` | Python and TypeScript regression tests |
+
+From the repository root, after installing dependencies:
 
 ```bash
-.venv/bin/pytest                                     # Python sidecar (STT/TTS/models)
-(cd ts-backend && npm run typecheck && npx tsx --test tests/*.test.ts)
-(cd web && npm run typecheck && npx vitest run)
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/pytest -q
+(cd ts-backend && npm run typecheck && npm run build)
+(cd web && npm run typecheck && npm run build)
+(cd ts-backend && node --import tsx --test tests/*.test.ts ../web/tests/*.test.ts)
 ```
 
-The TypeScript suites cover the provider registry and per-provider loading,
-the Responses API transport and reasoning fallback, expression parsing and the
-orb tool, temperature readings, the ink simulation, readout font, expression
-priority, fuzzy matching, and the debug store.
+Use `npm run dev` in `web/` for frontend hot reload and in `ts-backend/` for
+backend watch mode. The backend still needs the Python sidecar; run
+`./run_sidecar.sh` separately. Add the actual Vite origin (normally
+`http://localhost:5173`) to the voice allowlist and account for the proxy
+limitation above. Avoid starting a second backend on an occupied port.
 
-## Development
+CI commands are in [.github/workflows/ci.yml](.github/workflows/ci.yml).
+Mocked tests and screenshot fixtures do not verify real microphones, speech
+quality, provider compatibility, or live Home Assistant actions.
 
-Frontend hot reload: `cd web && npm run dev` (proxies `/ws` to the backend).
-Backend dev: `cd ts-backend && npm run dev` (needs the sidecar running — see
-`./run_sidecar.sh`).
-
-## Extending
-
-- **Tools** — the LLM agent consumes a list of `Tool` objects
-  (`ts-backend/src/tools.ts`); Home Assistant tools are one provided set
-  (`buildHaTools`). Add a `Tool` and pass it to `Agent` to teach the assistant
-  new skills.
-- **Expressions** — add a name and meaning to the catalogue in
-  `ts-backend/src/expressions.ts` and a matching distance field in
-  `web/src/lib/inkShapes.ts`; the system prompt lists the catalogue
-  automatically.
-- **Providers** — `ts-backend/src/providers.ts` holds the registry; any
-  OpenAI-compatible endpoint works without code changes, and
-  `responsesTransport.ts` handles the Responses API for models that need it.
-- **Engines** — the Python sidecar exposes STT/TTS over HTTP
-  (`server/stt.py`, `server/tts.py`); swap them for any backend without touching
-  the TypeScript code.
-- **Voice pipeline** — `ts-backend/src/pipeline.ts` exposes the STT → agent →
-  TTS turn independent of the WebSocket transport.
-- **OpenAI API** — the sidecar registers `/v1/audio/speech`,
-  `/v1/audio/transcriptions`, and `/v1/models`; the TypeScript backend proxies
-  them at the same paths.
+For extensions, start with `ts-backend/src/tools.ts` (tools),
+`ts-backend/src/expressions.ts` and `web/src/lib/inkShapes.ts` (orb expressions),
+`ts-backend/src/providers.ts` (providers), or `server/stt.py` and `server/tts.py`
+(speech engines). Contribution and commit conventions are in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
