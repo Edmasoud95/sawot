@@ -129,3 +129,20 @@ test("createViaResponses sends a Responses request and drops the reasoning param
   assert.deepEqual(sent[1].input, [{ role: "user", content: "hi" }]);
   assert.equal("messages" in sent[1], false);
 });
+
+test("Responses preserves explicit none and never removes rejected explicit effort", async () => {
+  const requests: any[] = [];
+  const client: any = { responses: { create: async (body: any) => {
+    requests.push(body);
+    return { output: [] };
+  } } };
+  await createViaResponses(client, { model: "m", messages: [], reasoning_effort: "none" });
+  assert.equal(requests[0].reasoning.effort, "none");
+  requests.length = 0;
+  client.responses.create = async (body: any) => {
+    requests.push(body);
+    throw Object.assign(new Error("Unsupported reasoning effort"), { status: 400 });
+  };
+  await assert.rejects(createViaResponses(client, { model: "m", messages: [], reasoning_effort: "high" }), /Unsupported/);
+  assert.equal(requests.length, 1);
+});

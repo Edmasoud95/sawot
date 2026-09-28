@@ -31,6 +31,7 @@ const FileIcon = () => (
 
 export default function Composer() {
   const active = useChatStore((s) => s.active);
+  const settingsSaving = useChatStore((s) => s.settingsSaving || s.reconciling);
   const streaming = useChatStore((s) => s.streaming);
   const pendingAttachments = useChatStore((s) => s.pendingAttachments);
   const addAttachment = useChatStore((s) => s.addAttachment);
@@ -39,6 +40,7 @@ export default function Composer() {
   const stopStream = useChatStore((s) => s.stopStream);
   const models = useModels();
   const providers = useProviders();
+  const setEffort = useChatStore((s) => s.setEffort);
   const renameModel = useChatStore((s) => s.renameModel);
 
   const text = active?.draftText ?? "";
@@ -83,7 +85,7 @@ export default function Composer() {
   const canSend = text.trim().length > 0 || pendingAttachments.length > 0;
 
   const send = () => {
-    if (streaming || uploading || dictating || !canSend) return;
+    if (settingsSaving || streaming || uploading || dictating || !canSend) return;
     startStream(text.trim());
     const el = textareaRef.current;
     if (el) el.style.height = "auto";
@@ -220,7 +222,7 @@ export default function Composer() {
           aria-expanded={showCommands}
           aria-controls={showCommands ? commandListId : undefined}
           aria-activedescendant={showCommands ? `${commandListId}-${selectedCommand}` : undefined}
-          className="block w-full max-h-[184px] min-h-[64px] resize-none self-center bg-transparent px-4 pt-3 pb-2 font-sans text-base leading-snug text-zinc-200 outline-none placeholder:text-zinc-500"
+          className="block w-full max-h-[184px] min-h-[64px] resize-none self-center bg-transparent px-4 pt-3 pb-2 font-sans text-[1.0625rem] leading-snug text-zinc-200 outline-none placeholder:text-zinc-500"
         />
         <div className="flex items-center gap-2 px-2.5 pb-2">
           <div className="composer-controls" data-dictating={dictating}>
@@ -228,7 +230,8 @@ export default function Composer() {
           <AttachmentPicker key={active?.id} disabled={uploading} onFiles={onFiles} />
           <ToolsMenu key={`tools-${active?.id}`} />
           <div className="ml-auto min-w-0">
-            <ModelPicker presentation="sheet" value={active?.model || ""} providers={providers} onChange={renameModel} />
+            <ModelPicker key={active?.id} presentation="sheet" value={active?.model || ""} providers={providers}
+              onChange={renameModel} effort={active?.reasoningEffort ?? null} onEffortChange={setEffort} disabled={streaming || settingsSaving} />
           </div>
           </div>
           <DictationButton key={active?.id} disabled={streaming || uploading}
@@ -251,7 +254,7 @@ export default function Composer() {
           ) : (
             <button
               onClick={send}
-              disabled={!canSend || uploading || dictating}
+              disabled={!canSend || uploading || dictating || settingsSaving}
               aria-label="Send message"
               className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-aurora-teal/50 bg-aurora-teal/15 text-aurora-teal transition-colors duration-300 hover:bg-aurora-teal/25 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
             >

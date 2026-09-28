@@ -1,12 +1,17 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { rankModels, type ProviderLike } from "../lib/fuzzy";
+import { useModelFavorites } from "../lib/modelFavorites";
+import EffortSlider from "./EffortSlider";
 import ChevronDown from "./ChevronDown";
 
 interface Props {
   label?: string;
   value: string;
   providers: ProviderLike[];
-  onChange: (value: string) => void;
+  onChange: (value: string) => void | Promise<void>;
+  effort?: string | null;
+  onEffortChange?: (value: string | null) => void | Promise<void>;
+  disabled?: boolean;
   compact?: boolean;
   presentation?: "inline" | "sheet";
 }
@@ -19,9 +24,12 @@ function Highlight({ text, indices }: { text: string; indices: number[] }) {
 
 /** A searchable model picker: type to fuzzy-filter every provider's models,
  *  grouped by provider, with providers still loading shown as such. */
-export default function ModelPicker({ label = "Model", value, providers, onChange, compact = false, presentation = "inline" }: Props) {
+export default function ModelPicker({ label = "Model", value, providers, onChange, compact = false, presentation = "inline", effort = null, onEffortChange, disabled = false }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const choosing = useRef(false);
   const [cursor, setCursor] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -30,13 +38,17 @@ export default function ModelPicker({ label = "Model", value, providers, onChang
   const listId = useId();
   const sheet = presentation === "sheet";
 
-  const groups = useMemo(() => rankModels(query, providers), [query, providers]);
+  const { favorites, toggleFavorite } = useModelFavorites();
+  const groups = useMemo(() => rankModels(query, providers, favorites), [query, providers, favorites]);
   const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);
   const current = value.includes("::") ? value.split("::")[1] : value;
+  const providerId = value.includes("::") ? value.slice(0, value.indexOf("::")) : null;
+  const provider = providers.find(p => providerId ? p.id === providerId : p.builtin);
+  const levels = provider?.effortLevels?.[current] ?? [];
   const loading = providers.some((p) => (p.state ?? "ready") === "pending");
   const anyModels = providers.some((p) => p.models.length);
 
-  useEffect(() => { setCursor(0); }, [query, open]);
+  useEffect(() => { setCursor(0); }, [query, open, favorites]);
   useEffect(() => {
     if (!open || sheet) return;
     const onDown = (e: PointerEvent) => { if (!root.current?.contains(e.target as Node)) setOpen(false); };
@@ -55,7 +67,18 @@ export default function ModelPicker({ label = "Model", value, providers, onChang
     root.current?.querySelector(`[data-index="${cursor}"]`)?.scrollIntoView({ block: "nearest" });
   }, [cursor, open]);
 
-  const choose = (v: string) => { onChange(v); setOpen(false); setQuery(""); };
+  const choose = async (v: string) => {
+    if (disabled || choosing.current) return;
+    choosing.current = true;
+    setSaving(true);
+    setError("");
+    try {
+      await onChange(v);
+      if (!onEffortChange) setOpen(false);
+      setQuery("");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not change model. Try again."); }
+    finally { choosing.current = false; setSaving(false); }
+  };
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setCursor((c) => Math.max(0, Math.min(flat.length - 1, c + 1))); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setCursor((c) => Math.max(0, c - 1)); }
@@ -68,6 +91,7 @@ export default function ModelPicker({ label = "Model", value, providers, onChang
     <div className="mpick-field">
       <input
         ref={input}
+        disabled={disabled || saving}
         role="combobox"
         aria-label={label || "Model"}
         aria-expanded={open}
@@ -100,10 +124,11 @@ export default function ModelPicker({ label = "Model", value, providers, onChang
             index += 1;
             const i = index;
             return (
+              <div key={item.value} className="mpick-row" role="presentation">
               <div
-                key={item.value}
                 id={`${listId}-${i}`}
                 role="option"
+                aria-disabled={disabled || saving}
                 aria-selected={item.value === value}
                 data-index={i}
                 data-active={i === cursor}
@@ -111,7 +136,19 @@ export default function ModelPicker({ label = "Model", value, providers, onChang
                 onPointerEnter={() => setCursor(i)}
                 onClick={() => choose(item.value)}
               >
-                <Highlight text={item.model} indices={item.indices} />
+                <span className="mpick-model-name"><Highlight text={item.model} indices={item.indices} />
+                  {g.favorites && <small>{item.providerName}</small>}
+                </span>
+              </div>
+              <button type="button" className="mpick-favorite" disabled={disabled || saving}
+                aria-label={`${favorites.includes(item.value) ? "Unfavorite" : "Favorite"} ${item.model} (${item.providerName ?? g.name})`}
+                aria-pressed={favorites.includes(item.value)} title={favorites.includes(item.value) ? "Remove from favorites" : "Add to favorites"}
+                onClick={() => { toggleFavorite(item.value); input.current?.focus(); }}>
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"
+                  fill={favorites.includes(item.value) ? "currentColor" : "none"} aria-hidden="true">
+                  <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z" />
+                </svg>
+              </button>
               </div>
             );
                 })}
@@ -122,11 +159,26 @@ export default function ModelPicker({ label = "Model", value, providers, onChang
             {!groups.length && <li className="mpick-hint">{anyModels ? "No models match" : loading ? "Loading models…" : "No models available"}</li>}
           </ul>
   );
+  const resetEffort = async () => {
+    if (disabled || saving || !onEffortChange) return;
+    setSaving(true);
+    setError("");
+    try { await onEffortChange(null); }
+    catch (e) { setError(e instanceof Error ? e.message : "Could not reset effort."); }
+    finally { setSaving(false); }
+  };
+  const effortControl = onEffortChange && (levels.length > 0 && (effort === null || levels.includes(effort)) ? (
+    <EffortSlider key={value} model={current} levels={levels} value={effort} onChange={onEffortChange} disabled={disabled || saving} />
+  ) : effort !== null ? (
+    <div className="mpick-effort mpick-effort-heading"><span>Effort unavailable</span>
+      <button type="button" disabled={disabled || saving} onClick={() => void resetEffort()}>Reset to Default</button>
+    </div>
+  ) : null);
   return (
     <div ref={root} className="mpick" data-open={open} data-compact={compact}>
       {sheet ? (
         <>
-          <button ref={trigger} type="button" className="composer-model" aria-haspopup="dialog" aria-expanded={open}
+          <button ref={trigger} disabled={disabled} type="button" className="composer-model" aria-haspopup="dialog" aria-expanded={open}
             aria-label={`Choose model: ${current || "Select model"}`} title={current}
             onClick={() => { setQuery(""); setOpen(true); }}>
             <span>{current || "Select model"}</span><ChevronDown />
@@ -145,6 +197,8 @@ export default function ModelPicker({ label = "Model", value, providers, onChang
               </div>
               {field}
               {list}
+              {effortControl}
+              {error && <p role="alert" className="mpick-error">{error}</p>}
             </dialog>
           )}
         </>
@@ -152,7 +206,7 @@ export default function ModelPicker({ label = "Model", value, providers, onChang
         <>
           {label && !compact && <span className="mpick-label">{label}</span>}
           {field}
-          {open && <div className="mpick-pop">{list}</div>}
+          {open && <div className="mpick-pop">{list}{effortControl}{error && <p role="alert" className="mpick-error">{error}</p>}</div>}
         </>
       )}
     </div>

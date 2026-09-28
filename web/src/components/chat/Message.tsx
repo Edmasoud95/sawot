@@ -1,10 +1,12 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
+import { rehypeChatCodeLanguages } from "../../lib/chatCodeLanguages";
 import EntityCard from "../cards/EntityCard";
 import ThinkingBlock from "./ThinkingBlock";
 import ToolChip from "./ToolChip";
+import MessageActions from "./MessageActions";
 import ChatSources from "./ChatSources";
 
 const ImageIcon = () => (
@@ -32,40 +34,47 @@ const CheckIcon = () => (
   </svg>
 );
 
-// Fenced code block: ink-900 surface, language micro-label, copy-on-hover.
-function CodeBlock({ children, ...props }) {
-  const preRef = useRef(null);
+// Fenced code block with a persistent, touch-accessible copy control.
+function CodeBlock({ children, node: _node, ...props }) {
+  const preRef = useRef<HTMLPreElement>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [copyError, setCopyError] = useState(false);
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
   const [copied, setCopied] = useState(false);
   const lang =
-    /language-([\w-]+)/.exec(children?.props?.className || "")?.[1] || "";
+    /language-([^\s]+)/.exec(children?.props?.className || "")?.[1] || "";
 
-  const copy = () => {
-    const text = preRef.current?.innerText || "";
-    navigator.clipboard?.writeText(text).then(() => {
+  const copy = async () => {
+    setCopyError(false);
+    try {
+      await navigator.clipboard.writeText(preRef.current?.textContent || "");
       setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    });
+      clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopyError(true);
+    }
   };
 
   return (
     <div className="code-block group relative my-3 overflow-hidden rounded-xl border border-white/10 bg-ink-900">
       <div className="flex items-center justify-between border-b border-white/[0.06] px-3.5 py-1.5">
-        <span className="font-mono text-[0.58rem] uppercase tracking-[0.25em] text-zinc-600">
+        <span className="font-mono text-[0.65rem] uppercase tracking-[0.15em] text-zinc-400">
           {lang || "code"}
         </span>
         <button
-          onClick={copy}
-          aria-label="Copy code"
-          className={`flex items-center gap-1.5 rounded-md px-1.5 py-1 font-mono text-[0.58rem] uppercase tracking-[0.15em] transition-all duration-300 hover:bg-white/[0.06] ${
-            copied
-              ? "text-aurora-teal opacity-100"
-              : "text-zinc-500 opacity-0 hover:text-zinc-300 focus-visible:opacity-100 group-hover:opacity-100"
+          type="button"
+          onClick={() => void copy()}
+          aria-label={copied ? "Code copied" : "Copy code"}
+          className={`flex min-h-8 items-center gap-1.5 rounded-full px-2.5 font-mono text-[0.65rem] transition-colors duration-150 hover:bg-white/[0.06] active:bg-white/[0.06] ${
+            copied ? "text-aurora-teal" : "text-zinc-400 hover:text-zinc-200"
           }`}
         >
           {copied ? <CheckIcon /> : <CopyIcon />}
           {copied ? "copied" : "copy"}
         </button>
       </div>
+      {copyError && <p role="alert" className="px-3.5 py-2 text-xs text-red-300">Could not copy. Select the code to copy it.</p>}
       <pre
         ref={preRef}
         {...props}
@@ -89,10 +98,10 @@ const MD_COMPONENTS = { pre: CodeBlock, table: ScrollableTable };
 
 export function Markdown({ children }) {
   return (
-    <div className="chat-md text-[0.92rem] font-light leading-relaxed text-zinc-200">
+    <div className="chat-md text-[1rem] font-light leading-relaxed text-zinc-200">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
+        rehypePlugins={[rehypeChatCodeLanguages, rehypeHighlight]}
         components={MD_COMPONENTS}
       >
         {children}
@@ -159,10 +168,11 @@ function Attachment({ a }) {
   );
 }
 
-function UserMessage({ message }) {
+function UserMessage({ message, actions, textRef }) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[80%] rounded-2xl bg-white/5 px-4 py-2.5">
+      <div className="user-message-body max-w-[85%]">
+      <div className="rounded-2xl bg-white/5 px-4 py-2.5">
         {message.attachments?.length > 0 && (
           <div className="mb-1.5 flex flex-wrap items-start gap-1.5">
             {message.attachments.map((a) => (
@@ -170,9 +180,11 @@ function UserMessage({ message }) {
             ))}
           </div>
         )}
-        <p className="whitespace-pre-wrap text-[0.92rem] font-light leading-relaxed text-zinc-100">
+        <p ref={textRef} className="whitespace-pre-wrap text-[1rem] font-light leading-relaxed text-zinc-100">
           {message.content}
         </p>
+      </div>
+      <div className="message-footer message-footer-user">{actions}</div>
       </div>
     </div>
   );
@@ -180,14 +192,21 @@ function UserMessage({ message }) {
 
 // One persisted message. Live streaming messages are composed directly in
 // MessageList from the stream buffers using the exported pieces above.
-export default function Message({ message, sendControl }) {
-  if (message.role === "user") return <UserMessage message={message} />;
+export default function Message({ message, sendControl, reading, onRead, onRegenerate, disabled }) {
+  const textRef = useRef<HTMLDivElement>(null);
+  const actions = <MessageActions text={message.content ?? ""} getSpokenText={() => {
+    const node = textRef.current?.cloneNode(true) as HTMLElement | undefined;
+    node?.querySelectorAll("button, style, script").forEach(element => element.remove());
+    node?.querySelectorAll("p, li, pre, h1, h2, h3, h4, blockquote, tr, br").forEach(block => block.append(document.createTextNode("\n")));
+    return node?.textContent?.trim() || message.content || "";
+  }} reading={reading} onRead={onRead} onRegenerate={onRegenerate} disabled={disabled} />;
+  if (message.role === "user") return <UserMessage message={message} actions={actions} textRef={textRef} />;
   return (
     <div>
       <ThinkingBlock thinking={message.thinking} />
-      <Markdown>{message.content}</Markdown>
+      <div ref={textRef}><Markdown>{message.content}</Markdown></div>
       <CardGrid cards={message.cards} sendControl={sendControl} />
-      <ChatSources search={message.search} />
+      <div className="message-footer">{actions}<ChatSources search={message.search} /></div>
     </div>
   );
 }

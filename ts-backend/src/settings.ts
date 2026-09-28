@@ -123,7 +123,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
     const pid = req.params.pid;
     if (!ctx.registry.get(pid)) return reply.code(404).send({ detail: "unknown provider: " + pid });
     const listing = await ctx.registry.refresh(pid);
-    return { id: pid, models: listing.models, ...(listing.error ? { error: listing.error } : {}) };
+    return { id: pid, models: listing.models, effortLevels: listing.effortLevels ?? {}, ...(listing.error ? { error: listing.error } : {}) };
   });
 
   app.post("/api/settings", async (req: any, reply: any) => {

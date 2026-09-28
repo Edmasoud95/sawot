@@ -1,3 +1,4 @@
+import { isDeepSeekEndpoint } from "./effort.js";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -11,6 +12,7 @@ import { extname, join } from "node:path";
 
 import { executeTool, toOpenAiTools, touchedIdsFor, type Tool } from "./tools.js";
 import { createChatCompletion } from "./reasoningFallback.js";
+import type { EffortLevel } from "./effort.js";
 import { voiceSearchSources } from "./search.js";
 
 export const SAFE_ID = /^[0-9a-f]{12}$/;
@@ -39,12 +41,12 @@ function findFile(dir: string, prefix: string, excludeSuffix?: string): string |
   return null;
 }
 
-export function toOpenAiMessages(messages: any[], uploadDir: string): any[] {
+export function toOpenAiMessages(messages: any[], uploadDir: string, preserveThinking = false): any[] {
   const out: any[] = [];
   for (const m of messages) {
     if (m.command) continue;
     if (m.role === "assistant") {
-      out.push({ role: "assistant", content: m.content ?? "" });
+      out.push({ role: "assistant", content: m.content ?? "", ...(preserveThinking && m.thinking ? { reasoning_content: m.thinking } : {}) });
       continue;
     }
     let text = m.content ?? "";
@@ -91,7 +93,7 @@ export class ChatStore {
 
   create(model: string, homeAssistant = false, webSearch = true): any {
     const now = Date.now() / 1000;
-    const conv = { id: newId(), title: "New chat", model, homeAssistant, webSearch, created: now, updated: now, messages: [] };
+    const conv = { id: newId(), title: "New chat", reasoningEffort: null, model, homeAssistant, webSearch, created: now, updated: now, messages: [] };
     this.save(conv);
     return conv;
   }
@@ -104,6 +106,7 @@ export class ChatStore {
       conv.messages = (conv.messages ?? []).filter((m: any) => !m.command);
       conv.homeAssistant = Boolean(conv.homeAssistant);
       conv.webSearch = conv.webSearch !== false;
+      conv.reasoningEffort ??= null;
       return conv;
     } catch {
       return null;
@@ -161,6 +164,7 @@ export class ChatStore {
           title: hasMessages ? conv.title : `Draft: ${draftText.replace(/\s+/gu, " ").slice(0, 80)}`,
           isDraft: !hasMessages,
           model: conv.model,
+          reasoningEffort: conv.reasoningEffort ?? null,
           homeAssistant: Boolean(conv.homeAssistant),
           webSearch: conv.webSearch !== false,
           created: conv.created, updated: conv.updated,
@@ -225,6 +229,8 @@ export async function* runChat(
   systemPrompt: string,
   messages: any[],
   getCards?: (ids: string[]) => Promise<any[]>,
+  reasoningEffort?: EffortLevel | null,
+  signal?: AbortSignal,
 ): AsyncGenerator<[string, any]> {
   const convo: any[] = [{ role: "system", content: systemPrompt }, ...messages];
   const touched: string[] = [];
@@ -235,6 +241,7 @@ export async function* runChat(
 
   const turnStart = performance.now();
   for (let round = 0; round < MAX_ROUNDS; round++) {
+    signal?.throwIfAborted();
     const parser = new ThinkTagParser();
     const contentParts: string[] = [];
     const thinkingParts: string[] = [];
@@ -243,12 +250,14 @@ export async function* runChat(
     const roundStart = performance.now();
     const stream = await createChatCompletion<any>(client, {
       model,
+      ...(reasoningEffort != null ? { reasoning_effort: reasoningEffort } : {}),
       messages: convo,
       ...(tools.length ? { tools: toOpenAiTools(tools) } : {}),
       stream: true,
-    });
+    }, { preserveReasoning: true, signal });
 
     for await (const chunk of stream) {
+      signal?.throwIfAborted();
       if (!chunk.choices || !chunk.choices.length) continue;
       const delta = chunk.choices[0].delta;
       const reasoning = (delta as any).reasoning_content;
@@ -310,6 +319,7 @@ export async function* runChat(
     convo.push({
       role: "assistant",
       content: content || null,
+      ...(isDeepSeekEndpoint(client.baseURL) ? { reasoning_content: thinkingParts.join("") } : {}),
       tool_calls: calls.map((c) => ({
         id: c.id,
         type: "function",
@@ -318,6 +328,7 @@ export async function* runChat(
     });
 
     for (const c of calls) {
+      signal?.throwIfAborted();
       let args: any = {};
       let result: any = undefined;
       const toolStart = performance.now();

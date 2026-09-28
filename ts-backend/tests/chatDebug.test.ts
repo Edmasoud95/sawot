@@ -31,3 +31,38 @@ test("an empty tool list leaves the tools field out of the request", async () =>
   assert.equal("tools" in requests[0], false);
   assert.equal(requests[0].stream, true);
 });
+
+test("effort is carried through every tool round and Default omits it", async () => {
+  for (const effort of [null, "high", "none"] as const) {
+    const requests: any[] = [];
+    const client = { chat: { completions: { create: async (body: any) => {
+      requests.push(body);
+      return stream(requests.length === 1
+        ? [{ choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "lookup", arguments: "{}" } }] } }] }]
+        : [{ choices: [{ delta: { content: "Done" } }] }]);
+    } } } };
+    const tools = [{ name: "lookup", description: "Test lookup", parameters: {}, handler: async () => ({ found: true }) }];
+    for await (const _ of runChat(client, "m", tools, "sys", [], undefined, effort)) { /* drain */ }
+    assert.equal(requests.length, 2);
+    for (const request of requests) {
+      assert.equal(request.reasoning_effort, effort ?? undefined);
+      if (effort === null) assert.equal(Object.hasOwn(request, "reasoning_effort"), false);
+    }
+    assert.equal(requests[1].messages.at(-1).role, "tool");
+  }
+});
+
+test("DeepSeek retains reasoning content between tool rounds without sending it to other providers", async () => {
+  for (const baseURL of ["https://api.deepseek.com/v1", "https://api.openai.com/v1"]) {
+    const requests: any[] = [];
+    const client = { baseURL, chat: { completions: { create: async (body: any) => {
+      requests.push(structuredClone(body));
+      return stream(requests.length === 1
+        ? [{ choices: [{ delta: { reasoning_content: "Check the source.", tool_calls: [{ index: 0, id: "c1", function: { name: "lookup", arguments: "{}" } }] } }] }]
+        : [{ choices: [{ delta: { content: "Done" } }] }]);
+    } } } };
+    for await (const _ of runChat(client, "m", [{ name: "lookup", description: "", parameters: {}, handler: async () => ({ found: true }) }], "sys", [], undefined, "high")) {}
+    assert.equal(requests[1].messages[1].reasoning_content, baseURL.includes("deepseek") ? "Check the source." : undefined);
+    assert.equal(requests[1].reasoning_effort, "high");
+  }
+});

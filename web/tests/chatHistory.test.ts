@@ -161,3 +161,98 @@ test("deletion discards drafts typed while waiting and reports HTTP failures", a
   await assert.rejects(store.getState().removeConversation("delete-failure"), /Could not delete/);
   assert.equal(store.getState().activeId, "delete-failure");
 });
+
+test("model changes adopt the server's effort reset without modifying another conversation", async () => {
+  const active = { id: "a", model: "known", reasoningEffort: "high", messages: [] };
+  store.setState({ activeId: "a", active, conversations: [active] });
+  globalThis.fetch = async () => new Response(JSON.stringify({ model: "unknown", reasoningEffort: null }));
+  await store.getState().renameModel("unknown");
+  assert.equal(store.getState().active.reasoningEffort, null);
+  let release!: (response: Response) => void;
+  globalThis.fetch = async () => new Promise(resolve => { release = resolve; });
+  const pending = store.getState().setEffort("high");
+  store.setState({ activeId: "b", active: { id: "b", model: "other", reasoningEffort: null, messages: [] } });
+  release(new Response(JSON.stringify({ reasoningEffort: "high" })));
+  await pending;
+  assert.equal(store.getState().active.reasoningEffort, null);
+  assert.equal(store.getState().conversations[0].reasoningEffort, "high");
+});
+
+test("sending and model changes wait until the effort setting has saved", async () => {
+  store.setState({ activeId: "a", active: { id: "a", model: "known", reasoningEffort: null, messages: [] }, conversations: [], streaming: false });
+  let release!: (response: Response) => void;
+  let requests = 0;
+  globalThis.fetch = async () => { requests++; return new Promise(resolve => { release = resolve; }); };
+  const pending = store.getState().setEffort("high");
+  assert.equal(store.getState().settingsSaving, true);
+  await assert.rejects(store.getState().renameModel("unknown"), /saving/i);
+  await store.getState().startStream("Hello");
+  assert.equal(requests, 1, "send must not race a settings write");
+  release(new Response(JSON.stringify({ model: "known", reasoningEffort: "high" })));
+  await pending;
+  assert.equal(store.getState().settingsSaving, false);
+  assert.equal(store.getState().active.reasoningEffort, "high");
+});
+
+test("regeneration replaces the selected turn without consuming the current draft or attachments", async () => {
+  const messages = [{ role: "user", content: "First" }, { role: "assistant", content: "Old" }, { role: "user", content: "Later" }, { role: "assistant", content: "Later answer" }];
+  const attachment = { id: "abc123abcdef", name: "next.txt" };
+  store.setState({ activeId: "regen", active: { id: "regen", messages, draftText: "My unsent next prompt" }, conversations: [], pendingAttachments: [attachment], streaming: false });
+  let payload: any;
+  globalThis.fetch = async (_url, init: any) => {
+    payload = JSON.parse(init.body);
+    return new Response('data: {"type":"regenerating","from":0}\n\ndata: {"type":"done","message":{"role":"assistant","content":"New answer"}}\n\n');
+  };
+  await store.getState().regenerateMessage(1);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(payload, { regenerateFrom: 0, expectedMessageCount: 4 });
+  assert.deepEqual(store.getState().active.messages.map((m: any) => m.content), ["First", "New answer"]);
+  assert.equal(store.getState().active.draftText, "My unsent next prompt");
+  assert.deepEqual(store.getState().pendingAttachments, [attachment]);
+});
+
+test("failed regeneration restores the existing messages and reports the failure separately", async () => {
+  const messages = [{ role: "user", content: "First" }, { role: "assistant", content: "Keep answer" }];
+  store.setState({ activeId: "regen", active: { id: "regen", messages }, conversations: [], streaming: false });
+  globalThis.fetch = async (url) => String(url).endsWith("/messages") ? new Response('data: {"type":"regenerating","from":0}\n\ndata: {"type":"error","message":"Provider unavailable"}\n\n') : String(url).endsWith("/cancel") ? new Response(null, { status: 204 }) : new Response(JSON.stringify({ messages }));
+  assert.equal(typeof store.getState().regenerateMessage, "function");
+  await store.getState().regenerateMessage(0);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(store.getState().active.messages, messages);
+  assert.match(store.getState().messageError, /Provider unavailable/);
+});
+
+test("a lost regeneration acknowledgement reloads committed history before allowing another send", async () => {
+  const messages = [{ role: "user", content: "First" }, { role: "assistant", content: "Old" }, { role: "user", content: "Later" }];
+  const saved = [messages[0], { role: "assistant", content: "Saved replacement" }];
+  store.setState({ activeId: "lost", active: { id: "lost", messages }, conversations: [], streaming: false, reconciling: false });
+  let release!: (r: Response) => void;
+  globalThis.fetch = async (url) => String(url).endsWith("/messages")
+    ? new Response('data: {"type":"regenerating","from":0}\n\n')
+    : String(url).endsWith("/cancel") ? new Response(null, { status: 204 })
+    : new Promise(resolve => { release = resolve; });
+  await store.getState().regenerateMessage(1);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(store.getState().reconciling, true);
+  await store.getState().startStream("Must wait");
+  assert.equal(store.getState().streaming, false);
+  release(new Response(JSON.stringify({ messages: saved, title: "Saved" })));
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(store.getState().active.messages, saved);
+  assert.equal(store.getState().reconciling, false);
+});
+
+test("rejected sends restore their prompt and attachments without phantom history", async () => {
+  const messages = [{ role: "user", content: "First" }, { role: "assistant", content: "Old" }];
+  const attachment = { id: "pending" };
+  store.setState({ activeId: "busy", active: { id: "busy", messages, draftText: "Try this again" }, conversations: [], pendingAttachments: [attachment], streaming: false, reconciling: false });
+  globalThis.fetch = async (_url, init: any) => init.method === "POST"
+    ? new Response(JSON.stringify({ detail: "Conversation still responding" }), { status: 409 })
+    : new Response('{}');
+  await store.getState().startStream("Try this again");
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(store.getState().active.messages, messages);
+  assert.equal(store.getState().active.draftText, "Try this again");
+  assert.deepEqual(store.getState().pendingAttachments, [attachment]);
+  await store.getState().flushDraft();
+});

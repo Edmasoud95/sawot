@@ -56,21 +56,26 @@ export function resetReasoningFallback(): void {
 /** chat.completions.create through whichever transport the model accepts.
  *  Tries chat completions, then chat completions with reasoning off, then
  *  the Responses API, and remembers the first shape that works. */
-export async function createChatCompletion<T = any>(client: OpenAI, params: Record<string, any>, options?: { signal?: AbortSignal }): Promise<T> {
+export async function createChatCompletion<T = any>(client: OpenAI, params: Record<string, any>, options?: { signal?: AbortSignal; preserveReasoning?: boolean }): Promise<T> {
+  // Chat exposes Default as the provider default; voice keeps its legacy fallback.
+  const preserveEffort = params.reasoning_effort != null || options?.preserveReasoning === true;
+  const requestOptions = options?.signal ? { signal: options.signal } : undefined;
   const k = key(client, params.model);
-  const viaChat = (body: Record<string, any>) => client.chat.completions.create(body as any, options) as unknown as Promise<T>;
+  const viaChat = (body: Record<string, any>) => client.chat.completions.create(body as any, requestOptions) as unknown as Promise<T>;
   const withoutReasoning = { ...params, reasoning_effort: "none" };
 
   switch (transports.get(k)) {
-    case "chat-no-reasoning": return viaChat(withoutReasoning);
-    case "responses": return createViaResponses<T>(client, params, options);
+    case "chat-no-reasoning":
+      if (preserveEffort && params.reasoning_effort !== "none") return createViaResponses<T>(client, params, requestOptions);
+      return viaChat(preserveEffort ? params : withoutReasoning);
+    case "responses": return createViaResponses<T>(client, params, requestOptions);
   }
 
   try {
     return await viaChat(params);
   } catch (err) {
     if (!isReasoningToolConflict(err)) throw err;
-    try {
+    if (!preserveEffort) try {
       const result = await viaChat(withoutReasoning);
       transports.set(k, "chat-no-reasoning");
       return result;
@@ -78,7 +83,7 @@ export async function createChatCompletion<T = any>(client: OpenAI, params: Reco
       if (!isNoneUnsupported(retryErr)) throw retryErr;
     }
     try {
-      const result = await createViaResponses<T>(client, params, options);
+      const result = await createViaResponses<T>(client, params, requestOptions);
       transports.set(k, "responses");
       return result;
     } catch (responsesErr) {

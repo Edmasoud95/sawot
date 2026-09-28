@@ -181,7 +181,9 @@ async function main() {
   const chatCtx: ChatCtx = {
     store: new ChatStore(join(dataDir, "data", "conversations")),
     resolve: (model) => registry.resolve(model),
+    synthesize: (text, signal) => inference.synthesize(text, state.voice, signal),
     getContextWindow: (model) => registry.contextWindowFor(model),
+    getEffortLevels: (model) => registry.effortLevelsFor(model),
     getContextInfo: (model) => registry.contextInfoFor(model),
     haTools: tools,
     searchTools,

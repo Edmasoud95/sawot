@@ -45,7 +45,7 @@ function patchProvider(id, result) {
 export function loadProviderModels(id) {
   return fetch(`${API_BASE}/api/providers/${encodeURIComponent(id)}/models`)
     .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.statusText))))
-    .then((d) => ({ models: Array.isArray(d.models) ? d.models : [], state: d.error ? "error" : "ready", ...(d.error ? { error: d.error } : {}) }))
+    .then((d) => ({ models: Array.isArray(d.models) ? d.models : [], effortLevels: d.effortLevels ?? {}, state: d.error ? "error" : "ready", ...(d.error ? { error: d.error } : {}) }))
     .catch((e) => ({ models: [], state: "error", error: String(e?.message ?? e) }))
     .then((result) => { patchProvider(id, result); return result; });
 }

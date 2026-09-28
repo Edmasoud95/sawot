@@ -314,3 +314,186 @@ test('unconfigured Home Assistant cannot be enabled and stale chat flags offer n
     assert.equal(res.statusCode, 200);
   } finally { await app.close(); }
 });
+
+test("effort is validated, persisted, sent to the model, and reset on incompatible model changes", async () => {
+  const requests: any[] = [];
+  const { app } = harness({
+    getEffortLevels: (model: string) => model === "local::m" ? ["low", "high"] : [],
+    resolve: () => ({ model: "m", client: { chat: { completions: { create: async (params: any) => {
+      requests.push(params);
+      return params.stream ? once("Hello") : { choices: [{ message: { content: "Title" } }] };
+    } } } } }),
+  } as any);
+  try {
+    const conv = (await app.inject({ method: "POST", url: "/api/chat/conversations", payload: {} })).json();
+    const url = `/api/chat/conversations/${conv.id}`;
+    let res = await app.inject({ method: "PATCH", url, payload: { reasoningEffort: "high" } });
+    assert.equal(res.json().reasoningEffort, "high");
+    assert.equal((await app.inject({ method: "GET", url })).json().reasoningEffort, "high");
+    res = await app.inject({ method: "PATCH", url, payload: { reasoningEffort: "max" } });
+    assert.equal(res.statusCode, 400);
+    assert.equal((await app.inject({ method: "GET", url })).json().reasoningEffort, "high");
+    await app.inject({ method: "POST", url: url + "/messages", payload: { content: "Hello" } });
+    assert.equal(requests.find(p => p.stream)?.reasoning_effort, "high");
+    res = await app.inject({ method: "PATCH", url, payload: { model: "local::unknown" } });
+    assert.equal(res.json().reasoningEffort, null);
+    res = await app.inject({ method: "PATCH", url, payload: { reasoningEffort: null } });
+    assert.equal(res.statusCode, 200);
+  } finally { await app.close(); }
+});
+
+test("unselected effort defaults to medium only when supported and preserves explicit choices", async () => {
+  const requests: any[] = [];
+  const { app } = harness({
+    getEffortLevels: (model: string) => model === "local::m" ? ["low", "medium", "high"] : ["low", "high"],
+    resolve: () => ({ model: "m", client: { chat: { completions: { create: async (params: any) => {
+      requests.push(params);
+      return params.stream ? once("Hello") : { choices: [{ message: { content: "Title" } }] };
+    } } } } }),
+  } as any);
+  try {
+    const conv = (await app.inject({ method: "POST", url: "/api/chat/conversations", payload: {} })).json();
+    const url = `/api/chat/conversations/${conv.id}`;
+    await app.inject({ method: "POST", url: url + "/messages", payload: { content: "Hello" } });
+    assert.equal(requests.filter(p => p.stream).at(-1).reasoning_effort, "medium");
+    await app.inject({ method: "PATCH", url, payload: { reasoningEffort: "high" } });
+    await app.inject({ method: "POST", url: url + "/messages", payload: { content: "Hello" } });
+    assert.equal(requests.filter(p => p.stream).at(-1).reasoning_effort, "high");
+    await app.inject({ method: "PATCH", url, payload: { model: "local::other", reasoningEffort: null } });
+    await app.inject({ method: "POST", url: url + "/messages", payload: { content: "Hello" } });
+    assert.equal(Object.hasOwn(requests.filter(p => p.stream).at(-1), "reasoning_effort"), false);
+  } finally { await app.close(); }
+});
+
+test("regeneration replaces an answer and later turns using only the original prompt and attachments", async () => {
+  const requests: any[] = [];
+  const { app, ctx } = harness({ resolve: () => ({ client: recordingClient(requests), model: "m" }) });
+  try {
+    const conv = ctx.store.create("m");
+    conv.title = "Existing";
+    conv.draftText = "Keep my next draft";
+    conv.messages = [
+      { role: "user", content: "First" }, { role: "assistant", content: "Earlier" },
+      { role: "user", content: "Try this", attachments: [{ id: "123456abcdef", name: "notes.txt", kind: "text" }] },
+      { role: "assistant", content: "Old answer" }, { role: "user", content: "Later prompt" }, { role: "assistant", content: "Later answer" },
+    ];
+    ctx.store.save(conv);
+    const res = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { regenerateFrom: 2, expectedMessageCount: 6 } });
+    assert.ok(sseEvents(res.body).some(e => e.type === "done"));
+    assert.deepEqual(requests[0].messages.map((m: any) => m.role), ["system", "user", "assistant", "user"]);
+    assert.match(requests[0].messages.at(-1).content, /Try this.*notes.txt/s);
+    const saved = ctx.store.get(conv.id);
+    assert.deepEqual(saved.messages.map((m: any) => m.content), ["First", "Earlier", "Try this", "done"]);
+    assert.equal(saved.draftText, "Keep my next draft");
+    assert.equal(saved.messages[2].attachments[0].id, "123456abcdef");
+  } finally { await app.close(); }
+});
+
+test("invalid or stale regeneration cannot change a conversation", async () => {
+  const { app, ctx } = harness();
+  try {
+    const conv = ctx.store.create("m");
+    conv.messages = [{ role: "user", content: "Question" }, { role: "assistant", content: "Answer" }];
+    ctx.store.save(conv);
+    for (const payload of [
+      { regenerateFrom: -1, expectedMessageCount: 2 }, { regenerateFrom: 1, expectedMessageCount: 2 },
+      { regenerateFrom: 0.5, expectedMessageCount: 2 }, { regenerateFrom: 0, expectedMessageCount: 4 },
+    ]) {
+      const res = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload });
+      assert.ok([400, 409].includes(res.statusCode));
+      assert.deepEqual(ctx.store.get(conv.id).messages, conv.messages);
+    }
+  } finally { await app.close(); }
+});
+
+test("failed regeneration keeps the original answer and later history", async () => {
+  const { app, ctx } = harness({ resolve: () => { throw new Error("Provider unavailable"); } });
+  try {
+    const conv = ctx.store.create("m");
+    conv.messages = [{ role: "user", content: "Question" }, { role: "assistant", content: "Keep this" }, { role: "user", content: "Later" }];
+    ctx.store.save(conv);
+    const res = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { regenerateFrom: 0, expectedMessageCount: 3 } });
+    assert.match(sseEvents(res.body).find(e => e.type === "error").message, /Provider unavailable/);
+    assert.deepEqual(ctx.store.get(conv.id).messages, conv.messages);
+  } finally { await app.close(); }
+});
+
+test("message read-aloud strips hidden markers and speech tags and returns audio", async () => {
+  const spoken: string[] = [];
+  const { app } = harness({ synthesize: async (text: string) => { spoken.push(text); return Buffer.from("RIFF-test"); } } as any);
+  try {
+    const res = await app.inject({ method: "POST", url: "/api/chat/speech", payload: { text: "<expression:happy>Hello [laugh] there." } });
+    assert.equal(res.statusCode, 200);
+    assert.match(res.headers["content-type"] as string, /audio\/wav/);
+    assert.deepEqual(spoken, ["Hello there."]);
+    for (const text of ["", "<expression:happy>", "x".repeat(2001)]) {
+      assert.equal((await app.inject({ method: "POST", url: "/api/chat/speech", payload: { text } })).statusCode, 400);
+    }
+  } finally { await app.close(); }
+});
+
+test("cancelled regeneration preserves history and concurrent turns are rejected", async () => {
+  let started!: () => void;
+  const ready = new Promise<void>(resolve => { started = resolve; });
+  let wasAborted = false;
+  const client = { chat: { completions: { create: async (_body: any, opts: any) => {
+    started();
+    return (async function* () {
+      yield { choices: [{ delta: { content: "Partial replacement" } }] };
+      await new Promise<void>(resolve => {
+        if (opts.signal.aborted) { wasAborted = true; resolve(); }
+        else opts.signal.addEventListener("abort", () => { wasAborted = true; resolve(); }, { once: true });
+      });
+      opts.signal.throwIfAborted();
+    })();
+  } } } };
+  const { app, ctx } = harness({ resolve: () => ({ client, model: "m" }) });
+  const conv = ctx.store.create("m");
+  conv.title = "Existing chat";
+  conv.messages = [{ role: "user", content: "Original" }, { role: "assistant", content: "Keep this answer" }];
+  ctx.store.save(conv);
+  const controller = new AbortController();
+  try {
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const response = await fetch(`${address}/api/chat/conversations/${conv.id}/messages`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ regenerateFrom: 0, expectedMessageCount: 2 }), signal: controller.signal,
+    });
+    await ready;
+    const blocked = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "Overlap" } });
+    assert.equal(blocked.statusCode, 409);
+    const body = response.text().catch(() => "");
+    controller.abort();
+    await body;
+    for (let i = 0; i < 50 && !wasAborted; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(wasAborted, true, "client disconnect reaches model request");
+    assert.deepEqual(ctx.store.get(conv.id)?.messages, conv.messages);
+  } finally { controller.abort(); await app.close(); }
+});
+
+test("explicit cancellation aborts title generation and releases the turn lock", async () => {
+  let reachedTitle!: () => void;
+  const titleStarted = new Promise<void>(resolve => { reachedTitle = resolve; });
+  let titleAborted = false;
+  const client = { chat: { completions: { create: async (body: any, opts: any) => {
+    if (body.stream) return once("Replacement");
+    reachedTitle();
+    await new Promise<void>(resolve => opts.signal.addEventListener("abort", () => { titleAborted = true; resolve(); }, { once: true }));
+    opts.signal.throwIfAborted();
+  } } } };
+  const { app, ctx } = harness({ resolve: () => ({ client, model: "m" }) });
+  const conv = ctx.store.create("m");
+  conv.messages = [{ role: "user", content: "Hello" }, { role: "assistant", content: "Original" }];
+  ctx.store.save(conv);
+  try {
+    const pending = app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { regenerateFrom: 0, expectedMessageCount: 2 } }).then(r => r);
+    await titleStarted;
+    const cancelled = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/cancel` });
+    assert.equal(cancelled.statusCode, 204);
+    await pending;
+    assert.equal(titleAborted, true);
+    assert.deepEqual(ctx.store.get(conv.id)?.messages, conv.messages);
+    const next = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "/help" } });
+    assert.equal(next.statusCode, 200);
+  } finally { await app.close(); }
+});

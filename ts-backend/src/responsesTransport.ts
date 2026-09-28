@@ -139,7 +139,7 @@ export async function createViaResponses<T = any>(client: OpenAI, params: Record
   const body: Msg = {
     model,
     input: toResponsesInput(messages ?? []),
-    reasoning: { summary: "auto", ...(reasoning_effort && reasoning_effort !== "none" ? { effort: reasoning_effort } : {}) },
+    reasoning: { summary: "auto", ...(reasoning_effort != null ? { effort: reasoning_effort } : {}) },
   };
   const rtools = toResponsesTools(tools);
   if (rtools) body.tools = rtools;
@@ -154,7 +154,7 @@ export async function createViaResponses<T = any>(client: OpenAI, params: Record
   try {
     result = await send(body);
   } catch (err) {
-    if (!isReasoningParamRejected(err)) throw err;
+    if (reasoning_effort != null || !isReasoningParamRejected(err)) throw err;
     const { reasoning: _omit, ...plain } = body;
     result = await send(plain);
   }

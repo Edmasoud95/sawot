@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { effortLevels, lmStudioEffortLevels, type EffortCatalogue, type EffortLevel } from "./effort.js";
 import { chatModelIds } from "./chatModels.js";
 
 /** An OpenAI-compatible chat endpoint: the built-in local server from
@@ -28,6 +29,7 @@ export const MODEL_SEP = "::";
  *  it loads each provider on its own. */
 export interface ProviderListing extends ProviderInfo {
   models: string[];
+  effortLevels?: EffortCatalogue;
   error?: string;
   state: "pending" | "ready" | "error";
 }
@@ -49,7 +51,7 @@ export interface ContextInfo {
   source: "loaded" | "model" | "default";
 }
 
-async function fetchModelIds(baseUrl: string, apiKey?: string, timeoutMs = MODEL_LIST_TIMEOUT_MS): Promise<string[]> {
+async function fetchModelCatalogue(baseUrl: string, apiKey?: string, timeoutMs = MODEL_LIST_TIMEOUT_MS, discoverNative = false): Promise<{ models: string[]; effortLevels: EffortCatalogue; nativeEffortLevels: EffortCatalogue; nativeUnavailable: boolean }> {
   const headers: Record<string, string> = {};
   if (apiKey) headers.Authorization = "Bearer " + apiKey;
   let resp: Response;
@@ -62,13 +64,44 @@ async function fetchModelIds(baseUrl: string, apiKey?: string, timeoutMs = MODEL
   if (!resp.ok) throw new Error("endpoint returned " + resp.status);
   const data: any = await resp.json();
   if (!Array.isArray(data.data)) throw new Error("no model list in response");
-  return chatModelIds(data.data);
+  const models = chatModelIds(data.data);
+  const capabilities: EffortCatalogue = Object.create(null);
+  const nativeEffortLevels: EffortCatalogue = Object.create(null);
+  let nativeUnavailable = false;
+  for (const model of models) {
+    const levels = effortLevels(baseUrl, model, data.data.find((entry: any) => entry?.id === model));
+    const entry = data.data.find((entry: any) => entry?.id === model);
+    if (levels.length || Object.hasOwn(entry ?? {}, "supported_reasoning_efforts")) capabilities[model] = levels;
+  }
+  // Native LM Studio discovery is read-only and optional. Keep proxy path prefixes.
+  const url = new URL(baseUrl);
+  if (discoverNative && !["api.openai.com", "api.deepseek.com"].includes(url.hostname)) {
+    url.pathname = url.pathname.replace(/\/+$/, "").replace(/\/v1$/, "") + "/api/v1/models";
+    url.search = "";
+    try {
+      const native = await fetch(url, { headers, signal: AbortSignal.timeout(Math.min(timeoutMs, 1500)) });
+      nativeUnavailable = native.status >= 500 || native.status === 429;
+      if (native.ok) {
+        const info: any = await native.json();
+        if (!Array.isArray(info.models)) nativeUnavailable = true;
+        if (Array.isArray(info.models)) for (const model of models) {
+          if (Object.hasOwn(capabilities, model)) continue;
+          const matches = info.models.filter((entry: any) => entry?.type === "llm" &&
+            (entry.key === model || entry.loaded_instances?.some((instance: any) => instance?.id === model)));
+          if (matches.length !== 1) continue;
+          const levels = lmStudioEffortLevels(matches[0]);
+          if (levels.length) { capabilities[model] = levels; nativeEffortLevels[model] = levels; }
+        }
+      }
+    } catch { nativeUnavailable = true; }
+  }
+  return { models, effortLevels: capabilities, nativeEffortLevels, nativeUnavailable };
 }
 
 /** List models on an endpoint before it becomes a provider — used by the
  *  add-provider route to reject unreachable or non-OpenAI-compatible URLs. */
 export async function probeEndpoint(baseUrl: string, apiKey?: string, timeoutMs = MODEL_LIST_TIMEOUT_MS): Promise<string[]> {
-  return fetchModelIds(baseUrl.replace(/\/+$/, ""), apiKey, timeoutMs);
+  return (await fetchModelCatalogue(baseUrl.replace(/\/+$/, ""), apiKey, timeoutMs)).models;
 }
 
 export class ProviderRegistry {
@@ -79,7 +112,7 @@ export class ProviderRegistry {
   private readonly timeoutMs: number;
   // Last known model list per provider, so settings can answer at once and
   // a slow or sleeping provider never holds the others back.
-  private readonly cache = new Map<string, { models: string[]; error?: string }>();
+  private readonly cache = new Map<string, { models: string[]; effortLevels?: EffortCatalogue; nativeEffortLevels?: EffortCatalogue; error?: string }>();
 
   constructor(builtin: ProviderSpec, custom: ProviderSpec[] = [], options: { timeoutMs?: number } = {}) {
     this.timeoutMs = options.timeoutMs ?? MODEL_LIST_TIMEOUT_MS;
@@ -197,12 +230,21 @@ export class ProviderRegistry {
     const p = this.providers.get(id);
     if (!p) throw new Error("unknown provider: " + id);
     try {
-      const models = await fetchModelIds(p.baseUrl, p.apiKey, this.timeoutMs);
-      this.cache.set(id, { models });
-      return models;
+      const catalogue = await fetchModelCatalogue(p.baseUrl, p.apiKey, this.timeoutMs, true);
+      if (catalogue.nativeUnavailable) {
+        const previous = this.cache.get(id)?.nativeEffortLevels ?? {};
+        for (const model of catalogue.models) {
+          if (!Object.hasOwn(catalogue.effortLevels, model) && Object.hasOwn(previous, model)) {
+            catalogue.effortLevels[model] = previous[model];
+            catalogue.nativeEffortLevels[model] = previous[model];
+          }
+        }
+      }
+      this.cache.set(id, catalogue);
+      return catalogue.models;
     } catch (e: any) {
       const previous = this.cache.get(id);
-      this.cache.set(id, { models: previous?.models ?? [], error: String(e?.message ?? e) });
+      this.cache.set(id, { models: previous?.models ?? [], effortLevels: previous?.effortLevels, nativeEffortLevels: previous?.nativeEffortLevels, error: String(e?.message ?? e) });
       throw e;
     }
   }
@@ -212,12 +254,20 @@ export class ProviderRegistry {
     if (this.providers.has(id)) this.cache.set(id, { models: chatModelIds(models.map((id) => ({ id }))) });
   }
 
+  effortLevelsFor(model: string): EffortLevel[] {
+    const resolved = this.resolve(model);
+    const known = this.cache.get(resolved.providerId);
+    // A fetched catalogue is authoritative, including absent/unsupported entries.
+    if (known?.effortLevels) return known.effortLevels[resolved.model] ?? [];
+    return effortLevels(this.providers.get(resolved.providerId)!.baseUrl, resolved.model);
+  }
+
   /** Every provider with its last known models, without any network call. */
   listing(): ProviderListing[] {
     return this.list().map((info) => {
       const known = this.cache.get(info.id);
       if (!known) return { ...info, models: [], state: "pending" };
-      return { ...info, models: known.models, ...(known.error ? { error: known.error, state: "error" as const } : { state: "ready" as const }) };
+      return { ...info, models: known.models, effortLevels: known.effortLevels ?? Object.fromEntries(known.models.map(model => [model, effortLevels(info.baseUrl, model)]).filter(([, levels]) => levels.length)), ...(known.error ? { error: known.error, state: "error" as const } : { state: "ready" as const }) };
     });
   }
 

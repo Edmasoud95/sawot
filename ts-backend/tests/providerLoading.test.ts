@@ -7,7 +7,7 @@ import { registerSettingsRoutes } from "../src/settings.js";
 
 function servers() {
   const hanging = createServer(() => { /* never respond */ });
-  const healthy = createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "deepseek-v4" }, { id: "text-embedding-3-small" }, { id: "tts-1" }, { id: "custom-image", architecture: { output_modalities: ["image"] } }] })); });
+  const healthy = createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "deepseek-v4", supported_reasoning_efforts: ["low", "high"] }, { id: "text-embedding-3-small" }, { id: "tts-1" }, { id: "custom-image", architecture: { output_modalities: ["image"] } }] })); });
   return Promise.all([hanging, healthy].map((s) => new Promise<number>((resolve) => s.listen(0, () => resolve((s.address() as any).port))))).then(([h, k]) => ({
     hangingUrl: `http://127.0.0.1:${h}/v1`, healthyUrl: `http://127.0.0.1:${k}/v1`, close: () => { hanging.closeAllConnections?.(); hanging.close(); healthy.close(); },
   }));
@@ -50,7 +50,7 @@ test("each provider's models load through their own route, and settings then car
   try {
     const ok = await app.inject({ method: "GET", url: "/api/providers/deepseek/models" });
     assert.equal(ok.statusCode, 200);
-    assert.deepEqual(ok.json(), { id: "deepseek", models: ["deepseek-v4"] });
+    assert.deepEqual(ok.json(), { id: "deepseek", models: ["deepseek-v4"], effortLevels: { "deepseek-v4": ["low", "high"] } });
     const t = Date.now();
     const hung = await app.inject({ method: "GET", url: "/api/providers/local/models" });
     assert.equal(hung.statusCode, 200, "an unreachable provider is a result, not a failure");

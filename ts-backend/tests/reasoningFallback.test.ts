@@ -114,3 +114,22 @@ test("a pinned transport is used without probing", async () => {
   assert.equal(chat.length, 0);
   assert.equal(responses.length, 1);
 });
+
+test("explicit effort bypasses reasoning-off fallback even after that transport was learned", async () => {
+  for (const cached of [false, true]) {
+    resetReasoningFallback();
+    const { client, chat, responses } = astraClient();
+    if (cached) setTransport(client, "gpt-6-astra", "chat-no-reasoning");
+    await createChatCompletion(client, { model: "gpt-6-astra", messages: [], reasoning_effort: "high" });
+    assert.ok(chat.every(req => req.reasoning_effort === "high"));
+    assert.equal(responses.at(-1).reasoning.effort, "high");
+  }
+});
+
+test("chat Default can preserve the provider's effort instead of a learned reasoning-off fallback", async () => {
+  const { client, chat, responses } = astraClient();
+  setTransport(client, "gpt-6-astra", "chat-no-reasoning");
+  await createChatCompletion(client, { model: "gpt-6-astra", messages: [] }, { preserveReasoning: true } as any);
+  assert.equal(chat.length, 0);
+  assert.equal(responses[0].reasoning.effort, undefined);
+});

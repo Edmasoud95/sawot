@@ -33,14 +33,14 @@ export function fuzzyMatch(query: string, text: string): FuzzyHit | null {
   return { score, indices };
 }
 
-export interface ProviderLike { id: string; name: string; models: string[]; state?: string; error?: string }
-export interface RankedItem { value: string; model: string; indices: number[]; score: number }
-export interface RankedGroup { id: string; name: string; state: string; error?: string; items: RankedItem[] }
+export interface ProviderLike { id: string; name: string; models: string[]; builtin?: boolean; effortLevels?: Record<string, string[]>; state?: string; error?: string }
+export interface RankedItem { value: string; model: string; indices: number[]; score: number; providerName?: string }
+export interface RankedGroup { id: string; name: string; state: string; error?: string; favorites?: boolean; items: RankedItem[] }
 
 /** Provider groups with their matching models ordered by score. Groups with
  *  no hits drop out, except providers still loading, which stay so the user
  *  knows more may arrive. */
-export function rankModels(query: string, providers: ProviderLike[]): RankedGroup[] {
+export function rankModels(query: string, providers: ProviderLike[], favorites: readonly string[] = []): RankedGroup[] {
   const groups: RankedGroup[] = [];
   for (const p of providers) {
     const items: RankedItem[] = [];
@@ -54,5 +54,14 @@ export function rankModels(query: string, providers: ProviderLike[]): RankedGrou
       groups.push({ id: p.id, name: p.name, state, ...(p.error ? { error: p.error } : {}), items });
     }
   }
-  return groups;
+  const starred = new Set(favorites);
+  const favoriteItems = groups.flatMap(group => group.items.filter(item => starred.has(item.value))
+    .map(item => ({ ...item, providerName: group.name })));
+  if (!favoriteItems.length) return groups;
+  if (query.trim()) favoriteItems.sort((a, b) => b.score - a.score || a.model.localeCompare(b.model));
+  return [
+    { id: "\0favorites", name: "Favorites", state: "ready", favorites: true, items: favoriteItems },
+    ...groups.map(group => ({ ...group, items: group.items.filter(item => !starred.has(item.value)) }))
+      .filter(group => group.items.length || group.state !== "ready"),
+  ];
 }

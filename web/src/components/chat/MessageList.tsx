@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useMessageReader } from "../../hooks/useMessageReader";
 import { useChatStore } from "../../chatStore";
 import Message, { Markdown, ToolChips, CardGrid } from "./Message";
 import ThinkingBlock from "./ThinkingBlock";
@@ -10,6 +11,10 @@ const NEAR_BOTTOM_PX = 120;
 export default function MessageList({ sendControl }) {
   const active = useChatStore((s) => s.active);
   const streaming = useChatStore((s) => s.streaming);
+  const { reading, reader } = useMessageReader(active?.id, streaming);
+  const regenerate = useChatStore(s => s.regenerateMessage);
+  const settingsSaving = useChatStore(s => s.settingsSaving || s.reconciling);
+  const messageError = useChatStore(s => s.messageError);
   const streamText = useChatStore((s) => s.streamText);
   const streamThinking = useChatStore((s) => s.streamThinking);
   const streamTools = useChatStore((s) => s.streamTools);
@@ -72,8 +77,12 @@ export default function MessageList({ sendControl }) {
       {messages.length === 0 && !streaming && <Welcome />}
       <div className="mx-auto flex max-w-3xl flex-col gap-6 py-6">
         {messages.map((msg, i) => (
-          <Message key={i} message={msg} sendControl={sendControl} />
+          <Message key={`${active.id}:${i}`} message={msg} sendControl={sendControl}
+            reading={reading?.key === `${active.id}:${i}` ? reading : null}
+            onRead={text => void reader.toggle(`${active.id}:${i}`, text)}
+            onRegenerate={() => { reader.stop(); void regenerate(i); }} disabled={streaming || settingsSaving} />
         ))}
+        {messageError && <p role="alert" className="message-action-error">{messageError}</p>}
         {streaming && (
           <div>
             <ThinkingBlock

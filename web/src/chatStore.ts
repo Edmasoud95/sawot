@@ -4,6 +4,7 @@ import { useVoiceStore } from "./store";
 import { updateVoiceSearch } from "./lib/voiceSearch";
 import {
   listConversations,
+  cancelConversationTurn,
   createConversation,
   getConversation,
   patchConversation,
@@ -33,6 +34,8 @@ export const useChatStore = create<any>()((set, get) => ({
   conversations: [],
   activeId: null,
   active: null,
+  settingsSaving: false,
+  reconciling: false,
   streaming: false,
   streamText: "",
   streamThinking: "",
@@ -42,6 +45,7 @@ export const useChatStore = create<any>()((set, get) => ({
   pendingAttachments: [],
   sidebarOpen: window.matchMedia("(min-width: 640px)").matches,
   abortStream: null,
+  messageError: "",
   draftError: "",
   commandResult: null,
   abortCommand: null,
@@ -97,7 +101,7 @@ export const useChatStore = create<any>()((set, get) => ({
     try {
       await get().flushDraft();
       const active = await getConversation(id);
-      set({ activeId: id, active, pendingAttachments: [] });
+      set({ activeId: id, active, pendingAttachments: [], messageError: "", reconciling: false });
     } catch (e) {
       console.error("openConversation failed", e);
     }
@@ -112,6 +116,8 @@ export const useChatStore = create<any>()((set, get) => ({
         pendingAttachments: [],
         activeId: conv.id,
         active: conv,
+        messageError: "",
+        reconciling: false,
       }));
     } catch (e) {
       console.error("newConversation failed", e);
@@ -137,20 +143,22 @@ export const useChatStore = create<any>()((set, get) => ({
     }
   },
 
-  renameModel: async (model) => {
+  renameModel: (model: string) => get().saveModelSettings({ model }),
+  setEffort: (reasoningEffort: string | null) => get().saveModelSettings({ reasoningEffort }),
+
+  saveModelSettings: async (patch: { model?: string; reasoningEffort?: string | null }) => {
     const { activeId } = get();
     if (!activeId) return;
+    if (get().settingsSaving) throw new Error("Model settings are still saving. Please try again.");
+    set({ settingsSaving: true });
     try {
-      const updated = await patchConversation(activeId, { model });
+      const updated = await patchConversation(activeId, patch);
+      const fields = { ...(updated.model ? { model: updated.model } : {}), reasoningEffort: updated.reasoningEffort ?? null };
       set((s) => ({
-        active: s.active ? { ...s.active, model: updated.model } : s.active,
-        conversations: s.conversations.map((c) =>
-          c.id === activeId ? { ...c, model: updated.model } : c
-        ),
+        active: s.activeId === activeId && s.active ? { ...s.active, ...fields } : s.active,
+        conversations: s.conversations.map((c) => c.id === activeId ? { ...c, ...fields } : c),
       }));
-    } catch (e) {
-      console.error("renameModel failed", e);
-    }
+    } finally { set({ settingsSaving: false }); }
   },
 
   setTool: async (tool: "homeAssistant" | "webSearch", enabled: boolean) => {
@@ -212,14 +220,23 @@ export const useChatStore = create<any>()((set, get) => ({
       pendingAttachments: s.pendingAttachments.filter((a) => a.id !== id),
     })),
 
-  startStream: async (content) => {
+  regenerateMessage: (index: number) => {
+    const messages = get().active?.messages ?? [];
+    if (!Number.isInteger(index) || index < 0 || index >= messages.length) return;
+    let from = index;
+    while (from >= 0 && messages[from].role !== "user") from--;
+    if (from >= 0) return get().startStream("", from);
+  },
+
+  startStream: async (content, regenerateFrom?: number) => {
     const { activeId, active, pendingAttachments } = get();
-    if (!activeId || !active || get().streaming) return;
-    const command = /^\/(status|help)$/i.exec(content.trim())?.[1].toLowerCase();
+    if (!activeId || !active || get().streaming || get().settingsSaving || get().reconciling) return;
+    const regenerating = regenerateFrom !== undefined;
+    const command = !regenerating && /^\/(status|help)$/i.exec(content.trim())?.[1].toLowerCase();
     if (command) return get().runCommand(command);
     get().dismissCommand();
     const generation = ++streamGeneration;
-    set({ streaming: true });
+    set({ streaming: true, messageError: "" });
     try {
       await get().flushDraft();
     } catch {
@@ -235,8 +252,8 @@ export const useChatStore = create<any>()((set, get) => ({
     };
 
     // Push optimistic user message
-    const updatedActive = {
-      ...active,
+    const updatedActive = regenerating ? get().active : {
+      ...get().active,
       draftText: "",
       updated: Date.now() / 1000,
       messages: [...active.messages, userMessage],
@@ -251,9 +268,25 @@ export const useChatStore = create<any>()((set, get) => ({
       streamTools: [],
       streamSearch: null,
       streamCards: [],
-      pendingAttachments: [],
+      ...(!regenerating ? { pendingAttachments: [] } : {}),
     });
 
+    const restoreMessages = () => {
+      if (regenerating && get().activeId === activeId) set((s) => ({ active: { ...s.active, messages: active.messages }, streamText: "", streamThinking: "", streamTools: [], streamSearch: null, streamCards: [] }));
+    };
+    const reconcile = async () => {
+      const revision = streamGeneration;
+      set({ reconciling: true });
+      try {
+        await cancelConversationTurn(activeId);
+        const saved = await getConversation(activeId);
+        if (get().activeId === activeId && streamGeneration === revision) {
+          set((s) => ({ active: { ...s.active, messages: saved.messages, title: saved.title }, reconciling: false }));
+        }
+      } catch {
+        if (get().activeId === activeId && streamGeneration === revision) set({ messageError: "Could not reload the saved answer. Reopen this conversation before continuing." });
+      }
+    };
     let doneFired = false;
     let cancelled = false;
     const debug = () => (useVoiceStore.getState().debugEnabled ? useDebugStore.getState() : null);
@@ -264,11 +297,13 @@ export const useChatStore = create<any>()((set, get) => ({
 
     const abort = streamMessage(
       activeId,
-      { content, attachments: pendingAttachments },
+      regenerating ? { regenerateFrom, expectedMessageCount: active.messages.length } : { content, attachments: pendingAttachments },
       (event) => {
-        if (cancelled) return;
+        if (cancelled || generation !== streamGeneration || get().activeId !== activeId) return;
         if (event.type !== "content" && event.type !== "thinking") debug()?.logMessage("in", event);
-        if (event.type === "debug") {
+        if (event.type === "regenerating" && regenerating) {
+          set((s) => ({ active: { ...s.active, messages: active.messages.slice(0, regenerateFrom + 1) } }));
+        } else if (event.type === "debug") {
           if (debugTurn !== undefined) debug()?.addEvent(event, debugTurn);
         } else if (event.type === "thinking") {
           set((s) => ({ streamThinking: s.streamThinking + event.delta }));
@@ -306,6 +341,17 @@ export const useChatStore = create<any>()((set, get) => ({
           }));
         } else if (event.type === "error" && !doneFired) {
           finishDebug("failed", event.message);
+          if (event.rejected && !regenerating) {
+            set((s) => ({ active: { ...s.active, messages: active.messages, draftText: s.active.draftText || content },
+              pendingAttachments: [...pendingAttachments, ...s.pendingAttachments], messageError: event.message }));
+            get().setDraftText(get().active.draftText);
+            return;
+          }
+          if (regenerating) {
+            restoreMessages();
+            set({ messageError: event.message });
+            return;
+          }
           set((s) => ({
             active: s.active
               ? {
@@ -322,7 +368,14 @@ export const useChatStore = create<any>()((set, get) => ({
               : s.active,
           }));
         } else if (event.type === "stream_end") {
-          if (!doneFired) finishDebug("failed", "Connection ended before the response completed");
+          if (!doneFired) {
+            finishDebug("failed", "Connection ended before the response completed");
+            restoreMessages();
+            if (regenerating) {
+              if (!get().messageError) set({ messageError: "Connection interrupted. Reloading the saved answer." });
+              void reconcile();
+            }
+          }
           set({ streaming: false, abortStream: null });
         }
       }
@@ -330,8 +383,10 @@ export const useChatStore = create<any>()((set, get) => ({
 
     set({ abortStream: () => {
       cancelled = true;
+      if (!doneFired) restoreMessages();
       finishDebug("cancelled");
       abort();
+      if (regenerating && !doneFired) void reconcile();
     } });
   },
 

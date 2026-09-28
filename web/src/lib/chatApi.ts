@@ -13,6 +13,10 @@ export const createConversation = (model) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(model ? { model } : {}),
   }).then(json);
+export const cancelConversationTurn = (id) =>
+  fetch(`${API_BASE}/api/chat/conversations/${id}/cancel`, { method: "POST" }).then(res => {
+    if (!res.ok) throw new Error("Could not stop the response.");
+  });
 export const getConversation = (id) =>
   fetch(`${API_BASE}/api/chat/conversations/${id}`).then(json);
 export const patchConversation = (id, patch, keepalive = false) => {
@@ -48,7 +52,11 @@ export function streamMessage(conversationId, body, onEvent) {
           signal: controller.signal,
         }
       );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        onEvent({ type: "error", rejected: true, message: detail.detail || `HTTP ${res.status}` });
+        return;
+      }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
