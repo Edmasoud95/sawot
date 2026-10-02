@@ -21,3 +21,6 @@ models/
 .vscode/
 .idea/
 .DS_Store
+
+# Private Python analysis files (native default data root).
+/analysis/

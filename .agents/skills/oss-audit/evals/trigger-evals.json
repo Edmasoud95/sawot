@@ -1,0 +1,22 @@
+[
+  {"query": "i'm finally going to make my side project repo public on github this weekend, can you go through it and make sure i'm not about to leak anything embarrassing or dangerous?", "should_trigger": true},
+  {"query": "Our legal team wants a pre-release open source compliance pass on the payments-sdk repo before we announce it next Tuesday. Can you check it over?", "should_trigger": true},
+  {"query": "I think I committed my OpenAI key months ago and then deleted it in a later commit. Is it still in the history somewhere? The repo is ~/code/gpt-discord-bot", "should_trigger": true},
+  {"query": "is this repo ready to open source?", "should_trigger": true},
+  {"query": "we open-sourced our home automation config last night and someone on reddit said we leaked stuff. can you audit what's exposed in the repo and its commits?", "should_trigger": true},
+  {"query": "Before I push this to a public GitLab project, scan everything including old commits for passwords, tokens, private keys, internal IPs, that kind of thing", "should_trigger": true},
+  {"query": "do an OSS readiness review of this monorepo — licenses, community files, secrets, the works", "should_trigger": true},
+  {"query": "My manager approved releasing our internal CLI tool as open source. What do I need to check in the repo before flipping visibility? Can you just do the check for me?", "should_trigger": true},
+  {"query": "can u check if the screenshots and example configs in this repo have any of my personal info or home network stuff before i share it publicly", "should_trigger": true},
+  {"query": "run a publish-safety audit on ./ and tell me what blocks going public", "should_trigger": true},
+  {"query": "write a SECURITY.md for my project that tells people to email me at security@myproject.dev", "should_trigger": false},
+  {"query": "add an MIT license file to this repo with my name, Jordan Lee, and the year 2026", "should_trigger": false},
+  {"query": "my AWS access key was exposed, walk me through rotating it in the IAM console and updating the GitHub Actions secret", "should_trigger": false},
+  {"query": "review PR #214 for bugs, it changes the retry logic in src/http/client.ts", "should_trigger": false},
+  {"query": "set up gitleaks as a pre-commit hook and a GitHub Actions job so secrets can't get committed in future", "should_trigger": false},
+  {"query": "what's the practical difference between GPL-3.0 and AGPL-3.0 if I'm building a SaaS?", "should_trigger": false},
+  {"query": "use git filter-repo to remove config/prod.env from all history in this repo, I've already rotated the credentials", "should_trigger": false},
+  {"query": "run npm audit fix and bump anything with a high severity vulnerability in the web/ package", "should_trigger": false},
+  {"query": "do a security review of the auth changes on this branch — SQL injection, XSS, broken access control", "should_trigger": false},
+  {"query": "draft a CONTRIBUTING.md and issue templates for our open source project so new contributors know how to run the tests", "should_trigger": false}
+]

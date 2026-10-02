@@ -12,6 +12,7 @@ interface Props {
   effort?: string | null;
   onEffortChange?: (value: string | null) => void | Promise<void>;
   disabled?: boolean;
+  changeNotice?: (model: string) => string;
   compact?: boolean;
   presentation?: "inline" | "sheet";
 }
@@ -24,12 +25,18 @@ function Highlight({ text, indices }: { text: string; indices: number[] }) {
 
 /** A searchable model picker: type to fuzzy-filter every provider's models,
  *  grouped by provider, with providers still loading shown as such. */
-export default function ModelPicker({ label = "Model", value, providers, onChange, compact = false, presentation = "inline", effort = null, onEffortChange, disabled = false }: Props) {
+export default function ModelPicker({ label = "Model", value, providers, onChange, compact = false, presentation = "inline", effort = null, onEffortChange, disabled = false, changeNotice }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const choosing = useRef(false);
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(""), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
   const [cursor, setCursor] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -68,12 +75,15 @@ export default function ModelPicker({ label = "Model", value, providers, onChang
   }, [cursor, open]);
 
   const choose = async (v: string) => {
-    if (disabled || choosing.current) return;
+    if (disabled || choosing.current || v === value) return;
+    const message = changeNotice?.(v) ?? "";
+    setNotice("");
     choosing.current = true;
     setSaving(true);
     setError("");
     try {
       await onChange(v);
+      setNotice(message);
       if (!onEffortChange) setOpen(false);
       setQuery("");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not change model. Try again."); }
@@ -85,6 +95,13 @@ export default function ModelPicker({ label = "Model", value, providers, onChang
     else if (e.key === "Enter") { e.preventDefault(); if (open && flat[cursor]) choose(flat[cursor].value); else setOpen(true); }
     else if (e.key === "Escape") { e.preventDefault(); setOpen(false); setQuery(""); }
   };
+
+  const toast = notice ? (
+    <div className="settings-toast" role="status" aria-live="polite"
+      style={sheet && !open ? { position: "fixed", left: 0, right: 0, bottom: "max(100px, env(safe-area-inset-bottom))", zIndex: 100 } : undefined}>
+      <span className="settings-toast-inner border-aurora-teal/20 bg-ink-900 text-aurora-teal">{notice}</span>
+    </div>
+  ) : null;
 
   let index = -1;
   const field = (
@@ -198,6 +215,7 @@ export default function ModelPicker({ label = "Model", value, providers, onChang
               {field}
               {list}
               {effortControl}
+              {toast}
               {error && <p role="alert" className="mpick-error">{error}</p>}
             </dialog>
           )}
@@ -209,6 +227,7 @@ export default function ModelPicker({ label = "Model", value, providers, onChang
           {open && <div className="mpick-pop">{list}{effortControl}{error && <p role="alert" className="mpick-error">{error}</p>}</div>}
         </>
       )}
+      {!(sheet && open) && toast}
     </div>
   );
 }

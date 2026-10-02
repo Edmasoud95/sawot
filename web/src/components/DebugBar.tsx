@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useVoiceStore } from "../store";
 import { useChatStore } from "../chatStore";
 import { useDebugStore, type DebugTurn } from "../debugStore";
+import ResourcePanel from "./ResourcePanel";
+import { resourceBytes, resourcePercent, type ResourceSnapshot } from "../lib/resources";
 
-const TABS = ["timeline", "events", "messages", "state"] as const;
+const TABS = ["timeline", "events", "messages", "state", "resources"] as const;
 type Tab = (typeof TABS)[number];
 
 const ms = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(2)} s` : `${Math.round(n)} ms`);
@@ -16,11 +18,11 @@ function Json({ value }: { value: unknown }) {
   return <pre className="dbg-json">{text}</pre>;
 }
 
-function Tile({ label, value, tone }: { label: string; value: string; tone?: "ok" | "warn" | "bad" }) {
+function Tile({ label, value, tone, title }: { label: string; value: string; tone?: "ok" | "warn" | "bad"; title?: string }) {
   return (
-    <span className="dbg-tile" data-tone={tone}>
+    <span className="dbg-tile" data-tone={tone} title={title}>
       <span className="dbg-tile-label">{label}</span>
-      <span className="dbg-tile-value" title={value}>{value}</span>
+      <span className="dbg-tile-value" title={title ?? value}>{value}</span>
     </span>
   );
 }
@@ -167,6 +169,28 @@ export default function DebugBar() {
   const [tab, setTab] = useState<Tab>("timeline");
   const [selected, setSelected] = useState<number | null>(null);
   const [serverOk, setServerOk] = useState<boolean | null>(null);
+  const [resources, setResources] = useState<ResourceSnapshot | null>(null);
+  const [resourceError, setResourceError] = useState(false);
+
+  useEffect(() => {
+    if (!enabled) { setResources(null); return; }
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    const load = async () => {
+      try {
+        const response = await fetch("/api/resources", { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(6000)]) });
+        if (!response.ok) throw new Error("Resource counters unavailable");
+        const snapshot: ResourceSnapshot = await response.json();
+        if (!snapshot?.total || !Array.isArray(snapshot.components) || !Array.isArray(snapshot.gpus)) throw new Error("Invalid resource counters");
+        if (!controller.signal.aborted) { setResources(snapshot); setResourceError(false); }
+      } catch {
+        if (!controller.signal.aborted) { setResources(null); setResourceError(true); }
+      }
+      if (!controller.signal.aborted) timer = setTimeout(load, 5000);
+    };
+    void load();
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [enabled]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -189,6 +213,13 @@ export default function DebugBar() {
           <span className="dbg-chevron" aria-hidden="true">{open ? "▾" : "▴"}</span>
         </button>
         <div className="dbg-tiles">
+          <Tile label="SAWOT RAM" value={resources ? resourceBytes(resources.total.ramBytes) : "–"} />
+          <Tile label="SAWOT CPU" value={resources ? resourcePercent(resources.total.cpuPercent) : "–"} title="100% = one logical CPU core; see Resources for components" />
+          <Tile label="SAWOT VRAM" value={resources ? resourceBytes(resources.total.vramBytes) : "–"} />
+          <Tile label="device GPU" value={resources ? resources.gpus.map(g => resourcePercent(g.utilizationPercent)).join(" / ") || "N/A" : "–"}
+            title={resources?.gpus.map(g => `${g.name}: ${resourcePercent(g.utilizationPercent)} (device-wide)`).join("; ")} />
+          <Tile label="device VRAM" value={resources ? resources.gpus.map(g => resourceBytes(g.vramUsedBytes)).join(" / ") || "N/A" : "–"}
+            title={resources?.gpus.map(g => `${g.name}: ${resourceBytes(g.vramUsedBytes)} / ${resourceBytes(g.vramTotalBytes)} (device-wide)`).join("; ")} />
           <Tile label="model" value={turn?.model || "–"} />
           <Tile label="outcome" value={turn?.outcome || "–"} tone={turn?.outcome === "failed" ? "bad" : turn?.outcome === "completed" ? "ok" : undefined} />
           <Tile label="status" value={status} />
@@ -203,7 +234,7 @@ export default function DebugBar() {
       {open && (
         <div className="dbg-panel">
           <div className="dbg-panel-head">
-            <div className="dbg-tabs" role="tablist">
+            <div className="dbg-tabs" role="tablist" aria-label="Debug views">
               {TABS.map((t) => (
                 <button key={t} type="button" role="tab" aria-selected={tab === t} className="dbg-tab" onClick={() => setTab(t)}>{t}</button>
               ))}
@@ -219,11 +250,12 @@ export default function DebugBar() {
             </div>
           </div>
           <div className="dbg-body">
-            {!turn && tab !== "messages" && tab !== "state" && <p className="dbg-empty">No turns yet. Speak or send a chat message.</p>}
+            {!turn && (tab === "timeline" || tab === "events") && <p className="dbg-empty">No turns yet. Speak or send a chat message.</p>}
             {turn && tab === "timeline" && <Timeline turn={turn} />}
             {turn && tab === "events" && <Events turn={turn} />}
             {tab === "messages" && <Messages />}
             {tab === "state" && <State />}
+            {tab === "resources" && <ResourcePanel snapshot={resources} error={resourceError} />}
           </div>
         </div>
       )}

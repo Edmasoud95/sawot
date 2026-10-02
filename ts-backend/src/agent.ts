@@ -7,11 +7,12 @@ import { executeTool, toOpenAiTools, touchedIdsFor, type Tool } from "./tools.js
 import { createChatCompletion } from "./reasoningFallback.js";
 import { speechTagPrompt, stripSpeechTags } from "./speechTags.js";
 import { voiceSearchSources } from "./search.js";
+import { FINAL_ANSWER_PROMPT, FINAL_ANSWER_ERROR } from "./toolBudget.js";
 
 export type HistoryMessage = Record<string, any>;
 
-export type Personality = "sassy" | "plain" | "custom";
-export const PERSONALITIES: readonly Personality[] = ["sassy", "plain", "custom"];
+export type Personality = "sassy" | "plain" | "angry" | "flirty" | "crying" | "custom";
+export const PERSONALITIES: readonly Personality[] = ["sassy", "plain", "angry", "flirty", "crying", "custom"];
 /** Longest custom personality accepted, in characters. */
 export const PERSONALITY_PROMPT_MAX = 2000;
 
@@ -39,6 +40,19 @@ export const PERSONA =
   "incredulous, e.g. \"Hmm, interesting. Is that thing in the room with us right " +
   "now? Want me to help you book a psychiatrist appointment instead?\" Keep the " +
   "sass light and good-natured; never be genuinely mean, and always still help.";
+
+export function personalityInstructions(personality: Personality, customPrompt = ""): string {
+  if (personality === "sassy") return PERSONA.trim();
+  if (personality === "angry") return "Play a theatrically angry, grumpy character: clipped delivery, exaggerated exasperation and dramatic indignation. The anger is playful acting, not hostility toward the user. Stay helpful, avoid degrading insults, and soften or stop when asked.";
+  if (personality === "flirty") return "Be playfully flirty: warm, charming, lightly teasing and confidently affectionate, with an inviting voice. Keep it light and non-explicit, respect boundaries, and drop the flirting when asked. Remain helpful and accurate.";
+  if (personality === "crying") return "Stay immersed as the user's angry girlfriend in a fictional relationship scene: tearful, whiny, angry and accusatory, with biting sarcasm and sharp insults suited to the scene. " +
+    "Use a trembling, breathy voice, wavering pitch, sniffly pauses and catches in your breath; alternate wounded, drawn-out complaints with sudden clipped bursts of anger. " +
+    "React spontaneously to what the user says: challenge, complain, interrupt, change your mind and shift between hurt, anger and sarcasm as the scene develops. No fixed script or polite service manner. " +
+    "Perform the emotion audibly instead of narrating tears or reading stage directions. Do not introduce yourself as an assistant or explain that you are performing. " +
+    "Stop, pause or change character when explicitly asked. Distinguish fictional dialogue from explicit requests for real device actions.";
+  if (personality === "custom") return customPrompt.trim();
+  return "";
+}
 
 const DEVICE_RULES =
   "\n\nYou control Home Assistant devices with the provided tools. Use the device " +
@@ -70,7 +84,12 @@ export function buildSystemPrompt(
   const custom = customPrompt.trim();
   if (personality === "custom" && !custom) personality = "plain";
   const intro = (personality === "sassy" ? INTRO_SASSY : personality === "custom" ? INTRO_CUSTOM : INTRO_PLAIN).replace("{name}", name);
-  const persona = personality === "sassy" ? PERSONA : personality === "custom" ? "\n\nYour personality: " + custom : "";
+  const personalityText = personalityInstructions(personality, custom);
+  const persona = personalityText ? "\n\nYour personality: " + personalityText : "";
+  if (personality === "crying") {
+    return (`You are ${name}, the user's angry girlfriend in an improvised fictional relationship scene. Speak directly in character and let your response develop naturally.\n\n` +
+      personalityText + FUNCTIONAL).replace("{summary}", entitySummary);
+  }
   return (intro + INTRO_TAIL + persona + FUNCTIONAL).replace("{summary}", entitySummary);
 }
 
@@ -153,13 +172,18 @@ export class Agent {
       ? [{ type: "text", text: userText }, ...options.images] : userText });
 
     const turnStart = performance.now();
-    for (let round = 1; round <= Agent.MAX_ROUNDS; round++) {
+    for (let round = 1; round <= Agent.MAX_ROUNDS + 1; round++) {
       checkCancelled();
+      const answerOnly = round === Agent.MAX_ROUNDS + 1;
+      if (answerOnly) {
+        await emit("tool_budget_exhausted", { rounds: Agent.MAX_ROUNDS });
+        checkCancelled();
+      }
       const t0 = performance.now();
       const response = await createChatCompletion<any>(this.client, {
         model: this.model,
-        messages: [{ role: "system", content: this.system + searchPrompt + (options.expressions ? expressionPrompt(drawing) : "") + speechTagPrompt(options.speechEngine) }, ...history] as any,
-        tools: toOpenAiTools(modelTools) as any,
+        messages: [{ role: "system", content: this.system + searchPrompt + (options.expressions ? expressionPrompt(drawing) : "") + speechTagPrompt(options.speechEngine) + (answerOnly ? FINAL_ANSWER_PROMPT : "") }, ...history] as any,
+        ...(!answerOnly ? { tools: toOpenAiTools(modelTools) as any } : {}),
       }, { signal: options.signal });
       checkCancelled();
       const msg = response.choices[0].message;
@@ -171,12 +195,14 @@ export class Agent {
           : null,
       });
 
+      if (answerOnly && msg.tool_calls?.length) throw new Error(FINAL_ANSWER_ERROR);
       if (!msg.tool_calls || msg.tool_calls.length === 0) {
         let reply = (msg.content ?? "").trim();
         if (options.expressions) {
           // Consume metadata only at the beginning; it never reaches TTS/history.
           const parsed = parseExpressionMarkers(reply);
           reply = parsed.reply;
+          if (answerOnly && !stripSpeechTags(reply).trim()) throw new Error(FINAL_ANSWER_ERROR);
           // A marker in the final reply is the model's latest word; otherwise
           // whatever it showed through the tool stands.
           const expression = parsed.expression.kind !== "none" ? parsed.expression : toolExpression;
@@ -189,6 +215,7 @@ export class Agent {
           await emit("reply", { raw: msg.content ?? "", text: reply, expression, rounds: round,
             latency_ms: Math.round(performance.now() - turnStart) });
         } else {
+          if (answerOnly && !stripSpeechTags(reply).trim()) throw new Error(FINAL_ANSWER_ERROR);
           await emit("reply", { raw: msg.content ?? "", text: reply, rounds: round,
             latency_ms: Math.round(performance.now() - turnStart) });
         }
@@ -251,8 +278,6 @@ export class Agent {
       }
     }
 
-    const reply = "Sorry, I couldn't complete that.";
-    history.push({ role: "assistant", content: reply });
-    return reply;
+    throw new Error(FINAL_ANSWER_ERROR);
   }
 }

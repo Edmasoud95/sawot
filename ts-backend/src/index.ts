@@ -1,3 +1,9 @@
+import { buildLivePrompt } from "./livePrompts.js";
+import { liveBackendPrompt } from "./liveTools.js";
+import { PushNotifications } from "./pushNotifications.js";
+import { registerPushRoutes } from "./pushRoutes.js";
+import { RunnerClient } from "./analysis/runnerClient.js";
+import { AnalysisFileStore } from "./analysis/fileStore.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -15,7 +21,9 @@ import { registerChatRoutes, type ChatCtx } from "./chatRoutes.js";
 import { BraveSearchClient, buildSearchTools } from "./search.js";
 import { loadConfig } from "./config.js";
 import { HomeAssistant } from "./ha.js";
-import { InferenceClient } from "./inference.js";
+import { InferenceClient, InferenceError } from "./inference.js";
+import { isOpenAiSpeechProvider } from "./openaiSpeech.js";
+import { registerLiveVoiceRoutes } from "./liveVoice.js";
 import { VoiceSession } from "./voiceSession.js";
 import { isAllowedVoiceOrigin } from "./voiceOrigin.js";
 import { runVoiceTurn } from "./pipeline.js";
@@ -23,6 +31,7 @@ import { loadVoiceImages } from "./voiceImages.js";
 import { ProviderRegistry, qualifyModel } from "./providers.js";
 import { registerSettingsRoutes, SettingsStore, type SettingsState } from "./settings.js";
 import { buildHaTools } from "./tools.js";
+import { ResourceMonitor } from "./resources.js";
 
 const DEFAULT_ALLOWED_CONTROLS: Record<string, string[]> = {
   light: ["turn_on", "turn_off"],
@@ -94,7 +103,7 @@ async function main() {
   registerVoiceRoutes(app, config.sidecarUrl);
   registerDictationRoutes(app, config.sidecarUrl);
 
-  const inference = new InferenceClient(config.sidecarUrl);
+  const localInference = new InferenceClient(config.sidecarUrl);
   const ha = new HomeAssistant(config.haUrl, config.haToken);
   const tools = buildHaTools(ha);
   const searchTools = config.braveApiKey
@@ -113,6 +122,11 @@ async function main() {
   const fallbackModel = qualifyModel(registry.defaultId, config.llmModel);
   const initial = registry.resolve(overrides.model ?? fallbackModel);
   const state: SettingsState = {
+    liveVoiceEnabled: overrides.liveVoiceEnabled === true,
+    liveVoicePrompt: typeof overrides.liveVoicePrompt === "string" ? overrides.liveVoicePrompt : "",
+    liveBackendPrompt: typeof overrides.liveBackendPrompt === "string" ? overrides.liveBackendPrompt : "",
+    ttsProviderId: overrides.ttsProviderId ?? "local",
+    ttsModel: overrides.ttsModel ?? "gpt-4o-mini-tts",
     model: qualifyModel(initial.providerId, initial.model),
     voice: overrides.voice ?? config.ttsVoice,
     personality: overrides.personality !== undefined || overrides.sassy !== undefined
@@ -122,6 +136,14 @@ async function main() {
     detailedDrawings: Boolean(overrides.detailedDrawings ?? false),
     chatInstructions: String(overrides.chatInstructions ?? "").trim().slice(0, 2000),
   };
+  const inference = new InferenceClient(config.sidecarUrl, () => {
+    if (!state.ttsProviderId || state.ttsProviderId === "local") return undefined;
+    const provider = registry.get(state.ttsProviderId);
+    if (!provider || !isOpenAiSpeechProvider(provider)) {
+      throw new InferenceError(400, "Select an available speech provider in Settings → Speech.", "synthesize");
+    }
+    return { baseUrl: provider.baseUrl, apiKey: provider.apiKey ?? "", model: state.ttsModel ?? "gpt-4o-mini-tts" };
+  });
 
   let summary = "";
   let systemPrompt = buildSystemPrompt(summary, state.personality, config.assistantName, state.personalityPrompt);
@@ -142,6 +164,16 @@ async function main() {
   systemPrompt = buildSystemPrompt(summary, state.personality, config.assistantName, state.personalityPrompt);
   agent.setSystemPrompt(systemPrompt);
 
+  const liveVoice = registerLiveVoiceRoutes(app, {
+    registry, allowedOrigins: config.allowedOrigins, enabled: () => state.liveVoiceEnabled === true,
+    instructions: () => buildLivePrompt({ name: config.assistantName, personality: state.personality, personalityPrompt: state.personalityPrompt,
+      template: state.liveVoicePrompt, tools: true, search: searchTools.length > 0 }),
+    createAgent: () => {
+      const selected = registry.resolve(state.model);
+      return new Agent(selected.client, selected.model, [...tools, ...searchTools], liveBackendPrompt(
+        buildSystemPrompt(summary, "plain", config.assistantName), state.liveBackendPrompt));
+    },
+  });
   registerSettingsRoutes(app, {
     store,
     agent,
@@ -152,6 +184,8 @@ async function main() {
     name: config.assistantName,
     setSystemPrompt,
     inference,
+    localInference,
+    onLiveVoiceDisabled: () => liveVoice.sweep(),
     onCredentialsChanged(credentials) {
       if (config.braveApiKey !== credentials.braveApiKey) {
         config.braveApiKey = credentials.braveApiKey;
@@ -178,7 +212,15 @@ async function main() {
     },
   });
 
+  let notifications: PushNotifications | null = null;
+  try {
+    notifications = new PushNotifications(join(dataDir, "data", "push-notifications.json"), process.env.SAWOT_VAPID_SUBJECT,
+      { log: event => app.log.info(event, "response notification"),
+        isConversationAvailable: id => Boolean(chatCtx.store.get(id)) });
+  } catch { app.log.warn("Response notifications unavailable: check private storage and VAPID subject configuration"); }
+  registerPushRoutes(app, notifications, config.allowedOrigins);
   const chatCtx: ChatCtx = {
+    onResponseCompleted: notice => notifications?.enqueue(notice),
     store: new ChatStore(join(dataDir, "data", "conversations")),
     resolve: (model) => registry.resolve(model),
     synthesize: (text, signal) => inference.synthesize(text, state.voice, signal),
@@ -194,9 +236,20 @@ async function main() {
     getChatInstructions: () => state.chatInstructions,
     getDefaultModel: () => state.model,
   };
+  if (config.runnerSocket) {
+    const files = new AnalysisFileStore(join(dataDir, "analysis"), scope => Boolean(chatCtx.store.get(scope.conversationId)));
+    chatCtx.analysis = { files, runner: new RunnerClient(config.runnerSocket) };
+    app.addHook("onClose", async () => files.close());
+  }
   registerChatRoutes(app, chatCtx);
 
   app.get("/health", async () => ({ ok: true, backend: "typescript" }));
+  const resources = new ResourceMonitor({ sidecarUrl: config.sidecarUrl, sidecarPid: Number(process.env.SAWOT_SIDECAR_PID) || undefined });
+  app.get("/api/resources", async (_req: any, reply: any) => {
+    reply.header("Cache-Control", "no-store");
+    return resources.snapshot ?? await resources.sample();
+  });
+  app.addHook("onClose", async () => resources.stop());
   app.get("/api/status", async () => ({
     ok: true,
     model: state.model,
@@ -238,11 +291,12 @@ async function main() {
         turnAgent.setDetailedDrawings(state.detailedDrawings);
         const voice = state.voice;
         void session.start(turnId, async (history, send, signal) => {
+          const turnInference = inference.snapshot();
           const [images, contextWindow] = await Promise.all([
             loadVoiceImages(imageIds, chatCtx.uploadDir), registry.contextWindowFor(selectedModel),
           ]);
           if (signal.aborted) return;
-          await runVoiceTurn(inference, turnAgent, audio, history, send, voice, getCards, { ...llm, contextWindow }, signal, images);
+          await runVoiceTurn(turnInference, turnAgent, audio, history, send, voice, getCards, { ...llm, contextWindow }, signal, images);
         });
       };
 
@@ -280,6 +334,7 @@ async function main() {
 
   await app.listen({ port: config.port, host: config.host });
   console.log("SAWOT TS backend listening on http" + (https ? "s" : "") + "://" + config.host + ":" + config.port);
+  resources.start();
 }
 
 main().catch((e) => {

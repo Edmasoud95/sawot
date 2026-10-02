@@ -1,3 +1,4 @@
+import { pythonPreference } from "./pythonPreference";
 import { API_BASE } from "./config";
 
 async function json(res) {
@@ -11,14 +12,14 @@ export const createConversation = (model) =>
   fetch(`${API_BASE}/api/chat/conversations`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(model ? { model } : {}),
+    body: JSON.stringify({ ...(model ? { model } : {}), python: pythonPreference() }),
   }).then(json);
 export const cancelConversationTurn = (id) =>
   fetch(`${API_BASE}/api/chat/conversations/${id}/cancel`, { method: "POST" }).then(res => {
     if (!res.ok) throw new Error("Could not stop the response.");
   });
-export const getConversation = (id) =>
-  fetch(`${API_BASE}/api/chat/conversations/${id}`).then(json);
+export const getConversation = (id, signal?: AbortSignal) =>
+  fetch(`${API_BASE}/api/chat/conversations/${id}`, { signal, cache: "no-store" }).then(json);
 export const patchConversation = (id, patch, keepalive = false) => {
   const body = JSON.stringify(patch);
   return fetch(`${API_BASE}/api/chat/conversations/${id}`, {
@@ -71,7 +72,8 @@ export function streamMessage(conversationId, body, onEvent) {
         }
       }
     } catch (e) {
-      if (e.name !== "AbortError") onEvent({ type: "error", message: String(e) });
+      if (!controller.signal.aborted) onEvent({ type: "error", interrupted: true,
+        message: "Connection interrupted before the response finished. Please try again.", detail: String(e) });
     } finally {
       onEvent({ type: "stream_end" });
     }

@@ -10,12 +10,17 @@ import DebugBar from "./components/DebugBar";
 import ModeSwitch from "./components/ModeSwitch";
 import MobileHeader from "./components/MobileHeader";
 import ChatView from "./components/chat/ChatView";
+import { useLiveVoice } from "./hooks/useLiveVoice";
 import { useVoice } from "./hooks/useVoice";
 import { useModeSwipe } from "./hooks/useModeSwipe";
 import { useVoiceStore } from "./store";
 
 export default function App() {
-  const { tapMicrophone, endSession, sendControl, pictures, sendPictures } = useVoice();
+  const live = useVoiceStore(s => s.liveVoiceEnabled && s.liveMode);
+  const standard = useVoice(!live);
+  const liveSession = useLiveVoice(live);
+  const { sendControl, pictures, sendPictures } = standard;
+  const { tapMicrophone, endSession } = live ? liveSession : standard;
   const mode = useVoiceStore((s) => s.mode);
   const debugEnabled = useVoiceStore((s) => s.debugEnabled);
   const hasCaptions = useVoiceStore((s) => !!(s.userCaption || s.assistantCaption));
@@ -58,7 +63,7 @@ export default function App() {
               {hasCaptions && <Captions />}
             </div>
           </div>
-          <PushToTalk onTap={tapMicrophone} onEnd={endSession} pictures={pictures} onSendPictures={sendPictures} />
+          <PushToTalk live={live} onTap={tapMicrophone} onEnd={endSession} pictures={pictures} onSendPictures={sendPictures} />
         </div>
       )}
       <DebugBar />

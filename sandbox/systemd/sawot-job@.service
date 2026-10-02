@@ -1,0 +1,12 @@
+[Unit]
+Description=SAWOT disposable Python job %i
+After=docker.service
+[Service]
+Type=exec
+WorkingDirectory=/opt/sawot-sandbox
+ExecStart=/usr/bin/python3 -m sandbox.runner worker %i
+ExecStopPost=/usr/bin/python3 -m sandbox.runner cleanup %i
+RuntimeMaxSec=30
+TimeoutStopSec=10
+KillMode=control-group
+UMask=0077

@@ -1,3 +1,4 @@
+import AnalysisActivity, { AnalysisFiles } from "./AnalysisActivity";
 import { useEffect, useRef, useState } from "react";
 import { useMessageReader } from "../../hooks/useMessageReader";
 import { useChatStore } from "../../chatStore";
@@ -17,6 +18,7 @@ export default function MessageList({ sendControl }) {
   const messageError = useChatStore(s => s.messageError);
   const streamText = useChatStore((s) => s.streamText);
   const streamThinking = useChatStore((s) => s.streamThinking);
+  const streamAnalysis = useChatStore(s => s.streamAnalysis);
   const streamTools = useChatStore((s) => s.streamTools);
   const streamSearch = useChatStore((s) => s.streamSearch);
   const streamCards = useChatStore((s) => s.streamCards);
@@ -63,7 +65,7 @@ export default function MessageList({ sendControl }) {
   useEffect(() => {
     const el = scrollRef.current;
     if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [active?.messages, streamText, streamThinking, streamTools, streamCards, streamSearch]);
+  }, [active?.messages, streamText, streamThinking, streamTools, streamCards, streamSearch, streamAnalysis]);
 
   const messages = active?.messages || [];
   const liveThinking = streaming && !streamText;
@@ -77,7 +79,7 @@ export default function MessageList({ sendControl }) {
       {messages.length === 0 && !streaming && <Welcome />}
       <div className="mx-auto flex max-w-3xl flex-col gap-6 py-6">
         {messages.map((msg, i) => (
-          <Message key={`${active.id}:${i}`} message={msg} sendControl={sendControl}
+          <Message key={`${active.id}:${i}`} message={msg} conversationId={active.id} sendControl={sendControl}
             reading={reading?.key === `${active.id}:${i}` ? reading : null}
             onRead={text => void reader.toggle(`${active.id}:${i}`, text)}
             onRegenerate={() => { reader.stop(); void regenerate(i); }} disabled={streaming || settingsSaving} />
@@ -90,9 +92,11 @@ export default function MessageList({ sendControl }) {
               live={liveThinking}
               seconds={thinkSecs}
             />
-            <ToolChips tools={streamTools.filter(tool => !["web_search", "fetch_page", "find_in_page"].includes(tool.name))} />
-            {streamText && <Markdown>{streamText}</Markdown>}
-            {!streamThinking && !streamText && streamTools.length === 0 && (
+            <ToolChips tools={streamTools.filter(tool => !["web_search", "fetch_page", "find_in_page", "download_file", "run_python"].includes(tool.name))} />
+            <AnalysisActivity conversationId={active.id} events={streamAnalysis} />
+            {streamText && <Markdown streaming>{streamText}</Markdown>}
+            <AnalysisFiles conversationId={active.id} events={streamAnalysis} />
+            {!streamThinking && !streamText && streamTools.length === 0 && !streamAnalysis?.length && (
               <p className="thinking-shimmer font-mono text-[0.65rem] uppercase tracking-[0.25em]">
                 Thinking…
               </p>

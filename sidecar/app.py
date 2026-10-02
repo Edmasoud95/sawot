@@ -7,6 +7,7 @@ text-to-speech. It isolates the only Python-native dependencies
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Callable
 
@@ -90,7 +91,7 @@ def create_sidecar_app(
 
     @app.get("/health")
     async def health():
-        return {"ok": True, "service": "sawot-inference"}
+        return {"ok": True, "service": "sawot-inference", "pid": os.getpid()}
 
     # OpenAI-compatible audio endpoints: POST /v1/audio/speech + /v1/audio/transcriptions
     register_openai_api(app, state)

@@ -1,6 +1,6 @@
 import { migrateHaUrl } from "./connections.js";
 import { SettingsStore, migrateCredentials } from "./settingsStore.js";
-import { normalizePersonality } from "./agent.js";
+import { normalizePersonality, type Personality } from "./agent.js";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse } from "yaml";
@@ -17,7 +17,7 @@ export interface Config {
   ttsVoice: string;
   ttsLangCode: string;
   assistantName: string;
-  assistantPersonality: "sassy" | "plain" | "custom";
+  assistantPersonality: Personality;
   assistantPersonalityPrompt: string;
   /** Brave Search API key; empty disables the voice and chat web tools. */
   braveApiKey: string;
@@ -28,6 +28,7 @@ export interface Config {
   sslCertfile?: string;
   sslKeyfile?: string;
   sidecarUrl: string;
+  runnerSocket?: string;
   /** Where settings.json, data/ and models/ live (SAWOT_DATA_DIR, else
    *  beside config.yaml). */
   dataDir: string;
@@ -128,6 +129,7 @@ export function loadConfig(path = "config.yaml", env: NodeJS.ProcessEnv = proces
     sslCertfile: get("tls", "certfile") as string | undefined,
     sslKeyfile: get("tls", "keyfile") as string | undefined,
     sidecarUrl: env.SAWOT_SIDECAR_URL ?? "http://127.0.0.1:8766",
+    runnerSocket: env.SAWOT_RUNNER_SOCKET || undefined,
     dataDir,
   };
 }

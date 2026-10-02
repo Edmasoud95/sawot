@@ -1,0 +1,17 @@
+[Unit]
+Description=SAWOT sandbox broker (trusted host control plane)
+After=docker.service
+Requires=docker.service
+[Service]
+Type=simple
+User=root
+Group=sawot-runner
+WorkingDirectory=/opt/sawot-sandbox
+ExecStart=/usr/bin/python3 -m sandbox.runner
+RuntimeDirectory=sawot-runner
+RuntimeDirectoryMode=0750
+UMask=0007
+Restart=on-failure
+TimeoutStopSec=40
+[Install]
+WantedBy=multi-user.target

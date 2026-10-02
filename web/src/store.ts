@@ -10,6 +10,14 @@ export { levelBus } from "./lib/levelBus";
 
 export const useVoiceStore = create<any>()((set) => ({
   status: "connecting", // connecting | idle | starting | listening | recording | thinking | speaking
+  liveVoiceEnabled: false,
+  liveMode: localStorage.getItem("voice-live-mode") === "1",
+  liveProviderId: localStorage.getItem("voice-live-provider") || "",
+  liveVoice: localStorage.getItem("voice-live-voice") || "marin",
+  setLiveVoiceEnabled: (liveVoiceEnabled: boolean) => set({ liveVoiceEnabled }),
+  setLiveMode: (liveMode: boolean) => { localStorage.setItem("voice-live-mode", liveMode ? "1" : "0"); set({ liveMode }); },
+  setLiveProviderId: (liveProviderId: string) => { localStorage.setItem("voice-live-provider", liveProviderId); set({ liveProviderId }); },
+  setLiveVoice: (liveVoice: string) => { localStorage.setItem("voice-live-voice", liveVoice); set({ liveVoice }); },
   sessionActive: false,
   setSessionActive: (sessionActive: boolean) => set({ sessionActive }),
   userCaption: "",

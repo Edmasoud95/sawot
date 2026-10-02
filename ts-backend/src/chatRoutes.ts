@@ -1,6 +1,15 @@
+import { addFileInventory } from "./analysis/context.js";
+import { buildAnalysisTools } from "./analysis/tools.js";
+import { registerAnalysisRoutes, visibleTurns } from "./analysis/routes.js";
+import { importAnalysisAttachments } from "./analysis/attachments.js";
+import type { AnalysisFileStore } from "./analysis/fileStore.js";
+import type { Runner, AnalysisEvent } from "./analysis/types.js";
+import { randomUUID } from "node:crypto";
+import type { ChatCompletionNotice } from "./pushNotifications.js";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { createChatCompletion } from "./reasoningFallback.js";
 import { conversationErrorMessage } from "./conversationError.js";
+import { InferenceError } from "./inference.js";
 import { parseExpressionMarkers } from "./expressions.js";
 import { stripSpeechTags } from "./speechTags.js";
 import { isDeepSeekEndpoint, type EffortLevel } from "./effort.js";
@@ -28,6 +37,8 @@ const UPLOAD_MEDIA: Record<string, string> = {
 };
 
 export interface ChatCtx {
+  onResponseCompleted?: (notice: ChatCompletionNotice) => void | Promise<void>;
+  analysis?: { files: AnalysisFileStore; runner: Runner };
   store: ChatStore;
   /** Resolve a (possibly provider-qualified) model id to its client. */
   resolve: (model: string) => { client: any; model: string; providerId?: string; providerName?: string };
@@ -83,7 +94,25 @@ async function maybeTitle(ctx: ChatCtx, conv: any, signal: AbortSignal): Promise
 }
 
 export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
-  const activeTurns = new Map<string, { controller: AbortController; finished: Promise<void>; finish: () => void }>();
+  if (ctx.analysis) {
+    registerAnalysisRoutes(app, ctx.analysis.files, ctx.store);
+    // Recover partial tool outcomes after an interrupted backend process.
+    for (const entry of ctx.store.list()) {
+      const saved = ctx.store.get(entry.id);
+      if (saved?.pendingAnalysis) {
+        const pending = saved.pendingAnalysis;
+        if (!pending.regenerating) saved.messages.push({ id: pending.turnId, role: "assistant", content: "", analysis: pending.events });
+        delete saved.pendingAnalysis; ctx.store.save(saved);
+      }
+      if (saved) ctx.analysis.files.prune(saved.id, visibleTurns(saved));
+    }
+  }
+  const activeTurns = new Map<string, { controller: AbortController; finished: Promise<void>; analysisPending: Set<Promise<unknown>>; snapshot?: () => any }>();
+  app.addHook("preClose", async () => {
+    const turns = [...activeTurns.values()];
+    for (const turn of turns) turn.controller.abort();
+    await Promise.all(turns.map(turn => turn.finished));
+  });
   const homeConfigured = () => ctx.isHomeAssistantConfigured?.() ?? ctx.ha?.isConfigured() ?? false;
   const setupRequired = { detail: "Set up Home Assistant in Settings → Connections before enabling it." };
   app.post("/api/chat/speech", async (req: any, reply: any) => {
@@ -99,23 +128,25 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       const audio = await ctx.synthesize(spoken, controller.signal);
       return reply.type("audio/wav").header("Cache-Control", "no-store").send(audio);
     } catch (e) {
-      return reply.code(502).send({ detail: conversationErrorMessage(e) });
+      return reply.code(502).send({ detail: e instanceof InferenceError && e.detail ? e.detail : conversationErrorMessage(e) });
     } finally { reply.raw.off("close", close); }
   });
-  app.get("/api/chat/tools", async () => ({ homeAssistant: homeConfigured() }));
+  app.get("/api/chat/tools", async () => ({ homeAssistant: homeConfigured(), ...(ctx.analysis ? { python: (await ctx.analysis.runner.ready()).ready } : {}) }));
   app.get("/api/chat/conversations", async () => ctx.store.list());
 
   app.post("/api/chat/conversations", async (req: any, reply: any) => {
     const body = req.body ?? {};
     if (body.homeAssistant && !homeConfigured()) return reply.code(409).send(setupRequired);
     const model = body.model || ctx.getDefaultModel();
-    return ctx.store.create(model, Boolean(body.homeAssistant), body.webSearch !== false);
+    return ctx.store.create(model, Boolean(body.homeAssistant), body.webSearch !== false, body.python !== false);
   });
 
   app.get("/api/chat/conversations/:cid", async (req: any, reply: any) => {
     const conv = ctx.store.get(req.params.cid);
     if (!conv) return reply.code(404).send({ detail: "not found" });
-    return conv;
+    const snapshot = activeTurns.get(conv.id)?.snapshot;
+    reply.header("Cache-Control", "no-store");
+    return { ...conv, ...(snapshot?.() ?? {}), responding: Boolean(snapshot) };
   });
 
   app.patch("/api/chat/conversations/:cid", async (req: any, reply: any) => {
@@ -134,6 +165,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     if ("model" in body) conv.model = String(body.model);
     if ("homeAssistant" in body) conv.homeAssistant = Boolean(body.homeAssistant);
     if ("webSearch" in body) conv.webSearch = Boolean(body.webSearch);
+    if ("python" in body) conv.python = body.python !== false;
     if ("draftText" in body) {
       const text = String(body.draftText ?? "");
       conv.draftText = text.trim().split(/\s+/u).filter(Boolean).length >= 3 ? text : "";
@@ -145,8 +177,9 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
 
   app.delete("/api/chat/conversations/:cid", async (req: any, reply: any) => {
     if (!SAFE_ID.test(req.params.cid)) return reply.code(400).send({ detail: "Invalid conversation ID" });
-    activeTurns.get(req.params.cid)?.controller.abort();
-    try { ctx.store.delete(req.params.cid, ctx.uploadDir); }
+    const turn = activeTurns.get(req.params.cid);
+    if (turn) { turn.controller.abort(); await Promise.allSettled([...turn.analysisPending]); }
+    try { ctx.analysis?.files.deleteConversation(req.params.cid); ctx.store.delete(req.params.cid, ctx.uploadDir); }
     catch { return reply.code(500).send({ detail: "Could not delete the conversation and its files. Please try again." }); }
     return reply.code(204).send();
   });
@@ -165,7 +198,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     const ext = extname(part.filename ?? "").toLowerCase();
     const uid = newId();
     // Register ownership before writing, also covering unsent/removed attachments.
-    if (conversationId && (IMAGE_EXTS.has(ext) || TEXT_EXTS.has(ext) || ext === ".pdf")) {
+    if (conversationId && (IMAGE_EXTS.has(ext) || TEXT_EXTS.has(ext) || ext === ".pdf" || ext === ".xlsx")) {
       const conv = ctx.store.get(conversationId);
       conv.uploadIds = [...(conv.uploadIds ?? []), uid];
       ctx.store.save(conv);
@@ -178,6 +211,10 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       const text = data.toString("utf8").slice(0, TEXT_CAP);
       writeFileSync(join(ctx.uploadDir, uid + ext), data);
       return { id: uid, name: part.filename, kind: "text", text };
+    }
+    if (ext === ".xlsx") {
+      writeFileSync(join(ctx.uploadDir, uid + ext), data);
+      return { id: uid, name: part.filename, kind: "file" };
     }
     if (ext === ".pdf") {
       // NOTE: PDF text extraction (pypdf in the Python backend) is not yet
@@ -209,8 +246,14 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     const conv = ctx.store.get(req.params.cid);
     if (!conv) return reply.code(404).send({ detail: "not found" });
     const body = req.body ?? {};
+    const notificationDevice = typeof body.notificationDevice === "string" && /^[A-Za-z0-9_-]{43}$/.test(body.notificationDevice) ? body.notificationDevice : undefined;
+    const turnId = randomUUID();
     const regenerating = Object.hasOwn(body, "regenerateFrom");
     if (activeTurns.has(conv.id)) return reply.code(409).send({ detail: "This conversation is still responding. Try again when it finishes." });
+    if (ctx.analysis) {
+      for (const message of conv.messages) message.id ??= newId();
+      ctx.store.save(conv);
+    }
     if (regenerating) {
       const index = body.regenerateFrom;
       if (!Number.isInteger(index) || index < 0 || conv.messages[index]?.role !== "user") {
@@ -224,15 +267,20 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     const command = regenerating ? null : chatCommand(body.content);
     if (!command && !regenerating) {
       conv.draftText = "";
-      conv.messages.push({ role: "user", content: body.content ?? "", attachments: body.attachments ?? [] });
+      conv.messages.push({ ...(ctx.analysis ? { id: newId() } : {}), role: "user", content: body.content ?? "", attachments: body.attachments ?? [] });
       conv.updated = Date.now() / 1000;
       ctx.store.save(conv);
     }
 
     const controller = new AbortController();
+    const assistant: any = { ...(ctx.analysis ? { id: newId(), analysis: [] } : {}), role: "assistant", content: "", thinking: "", cards: [] };
+    if (command) assistant.command = command;
     let finish!: () => void;
     const finished = new Promise<void>(resolve => { finish = resolve; });
-    activeTurns.set(conv.id, { controller, finished, finish });
+    const analysisPending = new Set<Promise<unknown>>();
+    activeTurns.set(conv.id, { controller, finished, analysisPending,
+      ...(!command ? { snapshot: () => ({ messages: [...conv.messages, assistant], responseError: null }) } : {}),
+    });
     reply.hijack();
     const raw = reply.raw;
     raw.writeHead(200, {
@@ -240,14 +288,14 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
     });
-    const close = () => { if (!raw.writableEnded) controller.abort(); };
-    raw.on("close", close);
+    // The HTTP connection is only a viewer. Stop/delete/shutdown cancel the
+    // model; losing a browser connection must not interrupt its work.
     const sse = (obj: any) => { if (!raw.destroyed) raw.write("data: " + JSON.stringify(obj) + "\n\n"); };
     if (regenerating) sse({ type: "regenerating", from: body.regenerateFrom });
 
-    const assistant: any = { role: "assistant", content: "", thinking: "", cards: [] };
-    if (command) assistant.command = command;
     let persisted = false;
+    let savedResponse = false;
+    let failed = false;
     let completed = false;
     const persist = () => {
       if (command || persisted || (regenerating && (!completed || controller.signal.aborted))) return;
@@ -259,9 +307,12 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       conv.uploadIds = latest.uploadIds ?? [];
       conv.model = latest.model;
       conv.reasoningEffort = latest.reasoningEffort ?? null;
+      conv.responseError = null;
+      delete conv.pendingAnalysis;
       conv.messages.push(assistant);
       conv.updated = Date.now() / 1000;
       ctx.store.save(conv);
+      savedResponse = true;
     };
 
     try {
@@ -274,10 +325,30 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       const pending = command && body.attachments?.length
         ? [{ role: "user", content: "", attachments: body.attachments }] : [];
       const llm = ctx.resolve(conv.model);
-      const history = toOpenAiMessages([...conv.messages, ...pending], ctx.uploadDir, isDeepSeekEndpoint(llm.client.baseURL));
+      let analysisTools: Tool[] = [];
+      let historyMessages = [...conv.messages, ...pending];
+      let availableFiles: any[] = [];
+      if (!command && conv.python !== false && ctx.analysis && (await ctx.analysis.runner.ready()).ready) {
+        const { files, runner } = ctx.analysis;
+        const scope = { conversationId: conv.id, turnId: assistant.id, visibleTurnIds: visibleTurns(conv) };
+        const imported = await importAnalysisAttachments(conv, scope, files, ctx.uploadDir, controller.signal);
+        const importedIds = new Set(imported.map(f => f.uploadId).filter(Boolean));
+        historyMessages = historyMessages.map(message => ({ ...message, attachments: message.attachments?.filter((a: any) => a.kind === "image" || !importedIds.has(a.id)) }));
+        availableFiles = files.listVisible(scope).slice(0, 100).map(f => ({ id: f.id, name: f.name, size: f.size, source: f.source }));
+        const emit = (event: AnalysisEvent) => {
+          const index = assistant.analysis.findIndex((e: AnalysisEvent) => e.id === event.id);
+          if (index < 0) assistant.analysis.push(event); else assistant.analysis[index] = event;
+          const latest = ctx.store.get(conv.id);
+          if (latest) { latest.pendingAnalysis = { turnId: assistant.id, events: assistant.analysis, regenerating }; ctx.store.save(latest); }
+          sse({ type: "analysis", ...event });
+        };
+        analysisTools = buildAnalysisTools({ scope, files, runner, signal: controller.signal, emit, pending: analysisPending, webSearch: conv.webSearch !== false });
+      }
+      const history = toOpenAiMessages(historyMessages, ctx.uploadDir, isDeepSeekEndpoint(llm.client.baseURL));
+      addFileInventory(history, availableFiles);
       const homeAssistant = Boolean(conv.homeAssistant) && homeConfigured();
       const searchTools = conv.webSearch !== false ? ctx.searchTools : [];
-      const tools = [...searchTools, ...(homeAssistant ? ctx.haTools : [])];
+      const tools = [...searchTools, ...analysisTools, ...(homeAssistant ? ctx.haTools : [])];
       const system = buildChatSystemPrompt({
         name: ctx.name,
         instructions: ctx.getChatInstructions(),
@@ -285,6 +356,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
         homeAssistant,
         entitySummary: ctx.getEntitySummary(),
         search: searchTools.length > 0,
+        analysis: analysisTools.length > 0,
       });
       const getCards = homeAssistant && ctx.ha ? (ids: string[]) => ctx.ha!.getCards(ids) : undefined;
       if (command === "status") {
@@ -336,15 +408,43 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       persist();
       sse({ type: "done", message: assistant, title: conv.title });
     } catch (e: any) {
+      failed = true;
       if (assistant.search?.phase === "start") assistant.search.phase = "error";
       persist();
-      sse({ type: "error", message: conversationErrorMessage(e) });
+      const message = conversationErrorMessage(e);
+      // A disconnected viewer also needs to see provider failures on return.
+      const latest = !command && ctx.store.get(conv.id);
+      if (latest) {
+        latest.responseError = controller.signal.aborted ? null : message;
+        ctx.store.save(latest);
+      }
+      sse({ type: "error", message });
     } finally {
-      persist();
-      raw.off("close", close);
-      activeTurns.delete(conv.id);
-      finish();
-      raw.end();
+      try {
+        persist();
+        if (ctx.analysis) {
+          const saved = ctx.store.get(conv.id);
+          if (saved) {
+            delete saved.pendingAnalysis; ctx.store.save(saved);
+            ctx.analysis.files.prune(conv.id, visibleTurns(saved));
+          }
+        }
+      }
+      finally {
+        activeTurns.delete(conv.id);
+        finish();
+        if (!raw.destroyed) raw.end();
+        if (completed && savedResponse && !failed && !command && !controller.signal.aborted && notificationDevice && ctx.onResponseCompleted) {
+          // Release the response and turn lock before invoking independent delivery.
+          setImmediate(() => {
+            try {
+              const saved = ctx.store.get(conv.id);
+              if (!saved) return;
+              Promise.resolve(ctx.onResponseCompleted!({ conversationId: conv.id, turnId, notificationDevice, title: saved.title })).catch(() => {});
+            } catch { /* A notification failure cannot change a saved chat. */ }
+          });
+        }
+      }
     }
   });
 }

@@ -96,6 +96,10 @@ export default function SettingsPanel() {
   }, [open, refreshProviders]);
 
   useEffect(() => {
+    if (data) useVoiceStore.getState().setLiveVoiceEnabled(data.liveVoiceEnabled === true);
+  }, [data?.liveVoiceEnabled]);
+
+  useEffect(() => {
     const showConnections = (event: Event) => {
       setInitialConnection((event as CustomEvent).detail?.connection ?? null);
       setSection("connections");
@@ -195,7 +199,7 @@ export default function SettingsPanel() {
                     initialConnection={initialConnection} removeProvider={removeProvider}
                     onProvidersChanged={(body) => { mergeSettings(body); refreshProviders(body.providers ?? []); }} />
                 )}
-                {section === "advanced" && <AdvancedSection debugEnabled={debugEnabled} toggleDebug={toggleDebug} />}
+                {section === "advanced" && <AdvancedSection data={data} update={update} debugEnabled={debugEnabled} toggleDebug={toggleDebug} />}
                 {section === "assistant" && <AssistantSection data={data} update={update} />}
                 {section === "speech" && (
                   <SpeechSection

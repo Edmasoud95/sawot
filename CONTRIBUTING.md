@@ -29,6 +29,9 @@ cd web && npm run dev   # hot reload; proxies /ws to the server on 8765
 - Keep changes small and focused — one concern per pull request.
 - Add or update tests for behavior changes.
 - Run `pytest` and `cd web && npm run build` before submitting.
+- Never commit secrets. `pre-commit install` enables the gitleaks hook from
+  `.pre-commit-config.yaml`; CI scans the full history either way. Add a
+  false positive's fingerprint to `.gitleaksignore`.
 
 ## Commit messages
 

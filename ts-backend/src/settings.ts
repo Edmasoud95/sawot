@@ -1,3 +1,5 @@
+import { liveBackendPrompt } from "./liveTools.js";
+import { DEFAULT_LIVE_PROMPT, DEFAULT_LIVE_BACKEND_PROMPT, LIVE_PROMPT_MAX, buildLivePrompt } from "./livePrompts.js";
 import { normalizeHaUrl } from "./connections.js";
 import { SettingsStore, CREDENTIAL_KEYS, type Credentials } from "./settingsStore.js";
 export { SettingsStore } from "./settingsStore.js";
@@ -7,6 +9,7 @@ import { buildSystemPrompt, normalizePersonality, PERSONA, PERSONALITIES, PERSON
 import { createChatCompletion } from "./reasoningFallback.js";
 import type { InferenceClient } from "./inference.js";
 import { probeEndpoint, qualifyModel, type ProviderRegistry } from "./providers.js";
+import { isOpenAiSpeechProvider, OPENAI_SPEECH_MODELS, openAiVoices } from "./openaiSpeech.js";
 
 /** Longest chat instructions accepted, in characters. */
 export const CHAT_INSTRUCTIONS_MAX = 2000;
@@ -25,15 +28,21 @@ export function resolveVoice(voices: string[], current: string, fallback: string
 }
 
 /** Live voice list from the sidecar, or Kokoro's curated list when it is down. */
-async function activeVoices(ctx: SettingsCtx): Promise<{ engine: string | null; voices: string[]; default: string | null }> {
+async function activeVoices(ctx: SettingsCtx, providerId = ctx.state.ttsProviderId ?? "local", model = ctx.state.ttsModel ?? "gpt-4o-mini-tts"): Promise<{ engine: string | null; voices: string[]; default: string | null }> {
+  if (providerId !== "local") return openAiVoices(model);
   try {
-    const live = await ctx.inference.voices();
+    const live = await (ctx.localInference ?? ctx.inference).voices();
     if (live.voices.length) return { engine: live.engine, voices: live.voices, default: live.default };
   } catch { /* sidecar offline */ }
   return { engine: null, voices: KOKORO_VOICES, default: KOKORO_VOICES[0] };
 }
 
 export interface SettingsState {
+  liveVoiceEnabled?: boolean;
+  liveVoicePrompt?: string;
+  liveBackendPrompt?: string;
+  ttsProviderId?: string;
+  ttsModel?: string;
   model: string; // provider-qualified ("local::qwen3-8b")
   voice: string;
   personality: Personality;
@@ -55,6 +64,8 @@ export interface SettingsCtx {
   name: string;
   setSystemPrompt: (prompt: string) => void;
   inference: InferenceClient;
+  localInference?: InferenceClient;
+  onLiveVoiceDisabled?: () => Promise<void>;
   onCredentialsChanged?: (credentials: Credentials & { haUrl: string }) => void;
 }
 
@@ -69,8 +80,13 @@ function refinePrompt(name: string): string {
 
 function persist(ctx: SettingsCtx): void {
   ctx.store.save({
+    liveVoiceEnabled: ctx.state.liveVoiceEnabled === true,
+    liveVoicePrompt: ctx.state.liveVoicePrompt ?? "",
+    liveBackendPrompt: ctx.state.liveBackendPrompt ?? "",
     model: ctx.state.model,
     voice: ctx.state.voice,
+    ttsProviderId: ctx.state.ttsProviderId ?? "local",
+    ttsModel: ctx.state.ttsModel ?? "gpt-4o-mini-tts",
     personality: ctx.state.personality,
     personalityPrompt: ctx.state.personalityPrompt,
     chatInstructions: ctx.state.chatInstructions,
@@ -88,13 +104,28 @@ async function settingsPayload(ctx: SettingsCtx): Promise<Record<string, any>> {
   const models = providers.flatMap((p) => p.models.map((m) => qualifyModel(p.id, m)));
   // Switching the TTS engine in Settings can leave a voice the new engine
   // does not know; fall back to its default and remember that.
+  const selection = [ctx.state.ttsProviderId, ctx.state.ttsModel, ctx.state.voice];
   const active = await activeVoices(ctx);
+  if (selection[0] !== ctx.state.ttsProviderId || selection[1] !== ctx.state.ttsModel || selection[2] !== ctx.state.voice) {
+    return settingsPayload(ctx);
+  }
   const voice = resolveVoice(active.voices, ctx.state.voice, active.default);
   if (voice !== ctx.state.voice) { ctx.state.voice = voice; persist(ctx); }
   const saved = ctx.store.load();
   const data: Record<string, any> = {
+    liveVoiceEnabled: ctx.state.liveVoiceEnabled === true,
+    liveVoicePrompt: ctx.state.liveVoicePrompt ?? "",
+    liveBackendPrompt: ctx.state.liveBackendPrompt ?? "",
+    ttsProviderId: ctx.state.ttsProviderId ?? "local",
+    ttsModel: ctx.state.ttsModel ?? "gpt-4o-mini-tts",
+    ttsModels: [...OPENAI_SPEECH_MODELS],
+    ttsProviders: providers.filter(isOpenAiSpeechProvider),
     model: ctx.state.model,
     voice: ctx.state.voice,
+    liveEffectiveBackendPrompt: liveBackendPrompt(buildSystemPrompt(ctx.summary, "plain", ctx.name), ctx.state.liveBackendPrompt),
+    livePromptDefaults: { conversation: DEFAULT_LIVE_PROMPT, backend: DEFAULT_LIVE_BACKEND_PROMPT },
+    liveEffectivePrompt: buildLivePrompt({ name: ctx.name, personality: ctx.state.personality, personalityPrompt: ctx.state.personalityPrompt,
+      template: ctx.state.liveVoicePrompt, tools: true, search: Boolean(ctx.store.load().braveApiKey) }),
     personality: ctx.state.personality,
     personalityPrompt: ctx.state.personalityPrompt,
     chatInstructions: ctx.state.chatInstructions,
@@ -128,6 +159,14 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
 
   app.post("/api/settings", async (req: any, reply: any) => {
     const body = req.body ?? {};
+    for (const key of ["liveVoicePrompt", "liveBackendPrompt"] as const) {
+      if (body[key] !== undefined && (typeof body[key] !== "string" || body[key].length > LIVE_PROMPT_MAX)) {
+        return reply.code(400).send({ detail: `Live instructions must be text of at most ${LIVE_PROMPT_MAX} characters.` });
+      }
+    }
+    if (body.liveVoiceEnabled !== undefined && typeof body.liveVoiceEnabled !== "boolean") {
+      return reply.code(400).send({ detail: "Live voice must be enabled or disabled." });
+    }
     const credentials: Partial<Credentials> & { haUrl?: string } = {};
     if (Object.hasOwn(body, "haUrl")) {
       try { credentials.haUrl = normalizeHaUrl(body.haUrl); }
@@ -142,6 +181,20 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
     }
     const model = body.model;
     const voice = body.voice;
+    const speechRequested = body.ttsProviderId !== undefined || body.ttsModel !== undefined || voice !== undefined;
+    const originalSpeech = [ctx.state.ttsProviderId, ctx.state.ttsModel, ctx.state.voice];
+    const ttsProviderId = body.ttsProviderId === undefined ? ctx.state.ttsProviderId ?? "local" : body.ttsProviderId;
+    const ttsModel = body.ttsModel === undefined ? ctx.state.ttsModel ?? "gpt-4o-mini-tts" : body.ttsModel;
+    if (typeof ttsProviderId !== "string" || (ttsProviderId !== "local" &&
+      (!ctx.registry.get(ttsProviderId) || !isOpenAiSpeechProvider(ctx.registry.get(ttsProviderId)!)))) {
+      return reply.code(400).send({ detail: "Choose Local or a configured OpenAI provider for speech." });
+    }
+    if (!(OPENAI_SPEECH_MODELS as readonly unknown[]).includes(ttsModel)) {
+      return reply.code(400).send({ detail: "Choose a supported OpenAI speech model." });
+    }
+    if (ttsProviderId !== "local" && !ctx.registry.get(ttsProviderId)?.apiKey) {
+      return reply.code(400).send({ detail: "Add an API key to the OpenAI provider in Settings → Connections." });
+    }
     // `sassy` is the pre-custom boolean; older clients may still send it.
     const personality = body.personality !== undefined || body.sassy !== undefined
       ? body.personality ?? (body.sassy ? "sassy" : "plain") : undefined;
@@ -159,12 +212,14 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
       return reply.code(400).send({ detail: `chat instructions must be text of at most ${CHAT_INSTRUCTIONS_MAX} characters` });
     }
 
-    if (voice !== undefined && !(await activeVoices(ctx)).voices.includes(voice)) {
+    const speechChanged = ttsProviderId !== (ctx.state.ttsProviderId ?? "local") || ttsModel !== (ctx.state.ttsModel ?? "gpt-4o-mini-tts");
+    const voices = voice !== undefined || speechChanged ? await activeVoices(ctx, ttsProviderId, ttsModel) : null;
+    if (voice !== undefined && !voices!.voices.includes(voice)) {
       return reply.code(400).send({ detail: "unknown voice: " + voice });
     }
 
-    if (model !== undefined) {
-      const resolved = ctx.registry.resolve(String(model));
+    const resolved = model !== undefined ? ctx.registry.resolve(String(model)) : null;
+    if (resolved) {
       let models: string[];
       try {
         models = await ctx.registry.modelsFor(resolved.providerId);
@@ -174,11 +229,22 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
       if (!models.includes(resolved.model)) {
         return reply.code(400).send({ detail: "unknown model: " + model });
       }
+    }
+    // A slower save must not undo a newer speech selection or validate a voice
+    // against an engine that has since changed.
+    if (speechRequested && (originalSpeech[0] !== ctx.state.ttsProviderId ||
+      originalSpeech[1] !== ctx.state.ttsModel || originalSpeech[2] !== ctx.state.voice)) {
+      return reply.code(409).send({ detail: "Speech settings changed while saving. Please try again." });
+    }
+    if (resolved) {
       ctx.agent.setClient(resolved.client);
       ctx.agent.setModel(resolved.model);
       ctx.state.model = qualifyModel(resolved.providerId, resolved.model);
     }
     if (voice !== undefined) ctx.state.voice = voice;
+    else if (voices) ctx.state.voice = resolveVoice(voices.voices, ctx.state.voice, voices.default);
+    if (body.ttsProviderId !== undefined) ctx.state.ttsProviderId = ttsProviderId;
+    if (body.ttsModel !== undefined) ctx.state.ttsModel = ttsModel;
     if (personality !== undefined || personalityPrompt !== undefined) {
       if (personality !== undefined) ctx.state.personality = normalizePersonality(personality);
       if (personalityPrompt !== undefined) ctx.state.personalityPrompt = personalityPrompt.trim();
@@ -195,7 +261,11 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
       const saved = ctx.store.load();
       ctx.onCredentialsChanged?.({ haUrl: saved.haUrl ?? "", haToken: saved.haToken ?? "", braveApiKey: saved.braveApiKey ?? "", hfToken: saved.hfToken ?? "" });
     }
+    if (body.liveVoiceEnabled !== undefined) ctx.state.liveVoiceEnabled = body.liveVoiceEnabled;
+    if (body.liveVoicePrompt !== undefined) ctx.state.liveVoicePrompt = body.liveVoicePrompt.trim();
+    if (body.liveBackendPrompt !== undefined) ctx.state.liveBackendPrompt = body.liveBackendPrompt.trim();
     persist(ctx);
+    if (body.liveVoiceEnabled === false) await ctx.onLiveVoiceDisabled?.();
     return settingsPayload(ctx);
   });
 
@@ -260,6 +330,10 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
     if (!spec) return reply.code(404).send({ detail: "unknown provider: " + pid });
     if (spec.builtin) {
       return reply.code(400).send({ detail: "the built-in provider can't be removed" });
+    }
+
+    if (ctx.state.ttsProviderId === pid) {
+      return reply.code(409).send({ detail: "Switch speech to Local or another OpenAI provider in Settings → Speech before removing this provider." });
     }
 
     const wasActive = ctx.registry.resolve(ctx.state.model).providerId === pid;

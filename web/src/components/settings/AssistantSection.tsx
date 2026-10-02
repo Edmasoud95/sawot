@@ -1,3 +1,4 @@
+import NotificationSettings from "./NotificationSettings";
 import { useEffect, useState } from "react";
 import ModelPicker from "../ModelPicker";
 import { BUTTON_CLS, Disclosure, FIELD_CLS, Select, Skeleton, Toggle } from "./fields";
@@ -5,6 +6,9 @@ import { BUTTON_CLS, Disclosure, FIELD_CLS, Select, Skeleton, Toggle } from "./f
 const PERSONALITY_OPTIONS = [
   { value: "sassy", label: "Sassy", hint: "Rita gets witty and teases you." },
   { value: "plain", label: "Plain", hint: "Friendly and to the point." },
+  { value: "angry", label: "Angry", hint: "Theatrically grumpy, dramatic, and still helpful." },
+  { value: "flirty", label: "Flirty", hint: "Warm, charming and playfully teasing." },
+  { value: "crying", label: "Crying / whiny", hint: "A tearful, angry girlfriend character with shaky delivery and dramatic complaints." },
   { value: "custom", label: "Custom", hint: "Describe the character yourself, or let the model write it." },
 ];
 
@@ -152,6 +156,7 @@ export default function AssistantSection({ data, update }) {
           <ChatInstructions value={data.chatInstructions ?? ""} onChange={update} />
         </Disclosure>
       </div>
+      <NotificationSettings />
       <Toggle
         label="Detailed drawings"
         hint="Lets the model draw with filled shapes (circles, ellipses, rectangles, polygons, arcs) and more strokes. Off keeps simple outlines."

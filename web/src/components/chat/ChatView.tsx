@@ -1,3 +1,4 @@
+import { hasPendingNotificationTarget, notificationNavigationVersion, openPendingNotificationTarget } from "../../lib/notificationNavigation";
 import { useCallback, useEffect, useRef } from "react";
 import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { useChatStore } from "../../chatStore";
@@ -10,6 +11,7 @@ import CommandResultDrawer from "./CommandResultDrawer";
 
 export default function ChatView({ sendControl, mobile }) {
   const active = useChatStore((s) => s.active);
+  const messageError = useChatStore((s) => s.messageError);
   const loadConversations = useChatStore((s) => s.loadConversations);
   const newConversation = useChatStore((s) => s.newConversation);
   const sidebarOpen = useChatStore((s) => s.sidebarOpen);
@@ -23,12 +25,33 @@ export default function ChatView({ sendControl, mobile }) {
   }, [mobile, closeSidebar]);
 
   useEffect(() => {
+    const resume = () => {
+      if (document.visibilityState !== "visible") return;
+      if (hasPendingNotificationTarget()) { void openPendingNotificationTarget(); return; }
+      void useChatStore.getState().resumeConversation();
+    };
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("online", resume);
+    window.addEventListener("pageshow", resume);
+    window.addEventListener("focus", resume);
+    resume();
+    return () => {
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("online", resume);
+      window.removeEventListener("pageshow", resume);
+      window.removeEventListener("focus", resume);
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     const isMobile = window.matchMedia("(max-width: 639px)").matches;
     if (isMobile) closeSidebar();
     void loadConversations().then(() => {
-      if (!cancelled && isMobile) {
-        useChatStore.getState().stopStream();
+      if (cancelled) return;
+      if (hasPendingNotificationTarget()) { void openPendingNotificationTarget(); return; }
+      if (isMobile && notificationNavigationVersion() === 0) {
+        useChatStore.getState().detachStream();
         void newConversation();
       }
     });
@@ -46,7 +69,10 @@ export default function ChatView({ sendControl, mobile }) {
             <Composer />
           </>
         ) : (
-          <Welcome onStart={() => newConversation()} />
+          <>
+            {messageError && <p role="alert" className="px-4 pt-4 text-sm text-red-400">{messageError}</p>}
+            <Welcome onStart={() => newConversation()} />
+          </>
         )}
       </div>
       <CommandResultDrawer />

@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 
-const ACCEPT = "image/*,.pdf,.txt,.md,.csv,.json,.py,.js,.ts,.yaml,.yml,.html,.css";
+const ACCEPT = "image/*,.pdf,.txt,.md,.csv,.xlsx,.json,.py,.js,.ts,.yaml,.yml,.html,.css";
 
 function CameraPreview({ onPhoto, onFallback }: { onPhoto: (file: File) => void; onFallback: () => void }) {
   const video = useRef<HTMLVideoElement>(null);

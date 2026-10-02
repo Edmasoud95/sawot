@@ -112,6 +112,10 @@ in [CONTRIBUTING.md](CONTRIBUTING.md#commit-messages). Use the same format for
 pull request titles when they become squash commit messages. This applies
 going forward; do not rewrite published history just to rename old commits.
 
+Before a release or other public push, run the read-only `oss-audit` skill
+(`.agents/skills/oss-audit/`; for Claude Code, symlink it into the ignored
+`.claude/skills/`) for secrets, private data, licensing, and community-file checks.
+
 Never commit or print secrets from `.env`, `config.yaml`, `settings.json`, `certs/`,
 or provider credentials. Public provider responses must not expose API keys.
 Use example configuration files for documentation. Follow SECURITY.md: this service

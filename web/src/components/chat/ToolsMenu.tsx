@@ -5,6 +5,7 @@ import { useChatStore } from "../../chatStore";
 const TOOLS = [
   { key: "homeAssistant", label: "Home Assistant" },
   { key: "webSearch", label: "Web search" },
+  { key: "python", label: "Code execution" },
 ] as const;
 
 export default function ToolsMenu() {
@@ -14,6 +15,7 @@ export default function ToolsMenu() {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [haConfigured, setHaConfigured] = useState<boolean | null>(null);
+  const [pythonReady, setPythonReady] = useState<boolean | null>(null);
   const [availabilityError, setAvailabilityError] = useState(false);
   const [retry, setRetry] = useState(0);
   const [error, setError] = useState("");
@@ -32,19 +34,20 @@ export default function ToolsMenu() {
     if (!open) return;
     const controller = new AbortController();
     setHaConfigured(null);
+    setPythonReady(null);
     setAvailabilityError(false);
     fetch("/api/chat/tools", { signal: controller.signal })
       .then(async response => {
         if (!response.ok) throw new Error();
         const body = await response.json();
         if (typeof body.homeAssistant !== "boolean") throw new Error();
-        if (!controller.signal.aborted) setHaConfigured(body.homeAssistant);
+        if (!controller.signal.aborted) { setHaConfigured(body.homeAssistant); setPythonReady(body.python === true); }
       })
       .catch(() => { if (!controller.signal.aborted) setAvailabilityError(true); });
     return () => controller.abort();
   }, [open, retry]);
 
-  const toggle = async (key: "homeAssistant" | "webSearch", enabled: boolean) => {
+  const toggle = async (key: "homeAssistant" | "webSearch" | "python", enabled: boolean) => {
     if (key === "homeAssistant" && haConfigured !== true) return;
     setSaving(true);
     setError("");
@@ -74,7 +77,7 @@ export default function ToolsMenu() {
       </div>
       {TOOLS.map(({ key, label }) => {
         const unavailable = key === "homeAssistant" && haConfigured !== true;
-        const enabled = key === "webSearch" ? active?.webSearch !== false : !unavailable && Boolean(active?.homeAssistant);
+        const enabled = key === "python" ? active?.python !== false : key === "webSearch" ? active?.webSearch !== false : !unavailable && Boolean(active?.homeAssistant);
         return <div key={key}><button type="button" role="switch" aria-checked={enabled}
           disabled={!active || saving || streaming || unavailable} aria-describedby={unavailable ? "ha-setup-status" : undefined} className="attachment-action flex items-center justify-between gap-4"
           onClick={() => void toggle(key, !enabled)}>
@@ -83,6 +86,7 @@ export default function ToolsMenu() {
             <span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-transform ${enabled ? "translate-x-5" : "translate-x-1"}`} style={{ left: 0 }} />
           </span>
         </button>
+          {key === "python" && <p className="mb-3 px-3 text-sm leading-relaxed text-zinc-400">{pythonReady === false || availabilityError ? "Code execution is currently unavailable. Your preference is saved." : "Analyse files and run code in an isolated sandbox."}</p>}
           {unavailable && <div id="ha-setup-status" className="mb-3 px-3 text-sm leading-relaxed text-zinc-400">
             {haConfigured === false ? <>
               <p>Add a server URL and access token to use your home devices in chat.</p>

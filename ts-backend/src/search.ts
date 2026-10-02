@@ -1,5 +1,7 @@
+import { fetchPublic, publicAddress } from "./publicFetch.js";
+import { Readable } from "node:stream";
+import type { IncomingMessage } from "node:http";
 import { lookup as dnsLookup } from "node:dns/promises";
-import { isIP } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Tool } from "./tools.js";
 
@@ -57,7 +59,6 @@ const MAX_RESULTS = 8;
 const DEFAULT_RESULTS = 5;
 const PAGE_MAX_BYTES = 2 * 1024 * 1024;
 const PAGE_MAX_CHARS = 20_000;
-const MAX_REDIRECTS = 5;
 const PAGE_CACHE_ENTRIES = 12;
 const PAGE_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -114,52 +115,10 @@ function clampCount(value: unknown): number {
   return Math.min(MAX_RESULTS, Math.max(1, Math.round(n)));
 }
 
-function ipv4Parts(ip: string): number[] | null {
-  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
-  if (!m) return null;
-  const parts = m.slice(1).map(Number);
-  return parts.every((p) => p <= 255) ? parts : null;
-}
-
-/** Loopback, unspecified, link-local, and RFC 1918 / ULA ranges. */
-export function isPrivateAddress(ip: string): boolean {
-  let addr = ip.trim().toLowerCase();
-  if (addr.startsWith("[") && addr.endsWith("]")) addr = addr.slice(1, -1);
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(addr);
-  if (mapped) addr = mapped[1];
-  const v4 = ipv4Parts(addr);
-  if (v4) {
-    const [a, b] = v4;
-    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
-  }
-  if (isIP(addr) === 6) {
-    if (addr === "::1" || addr === "::") return true;
-    if (/^f[cd][0-9a-f]{2}:/.test(addr)) return true; // fc00::/7
-    if (/^fe[89ab][0-9a-f]:/.test(addr)) return true; // fe80::/10
-    return false;
-  }
-  return true; // not an IP literal at all: treat as unsafe
-}
-
+/** Kept for callers/tests; all special-use addresses are now refused. */
+export function isPrivateAddress(ip: string): boolean { return !publicAddress(ip); }
 async function defaultLookup(host: string): Promise<string[]> {
-  const records = await dnsLookup(host, { all: true });
-  return records.map((r) => r.address);
-}
-
-async function assertSafeUrl(raw: string, lookup: (host: string) => Promise<string[]>): Promise<URL> {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error("invalid URL");
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("only http and https URLs can be fetched");
-  const host = url.hostname.replace(/^\[|\]$/g, "");
-  const addresses = isIP(host) ? [host] : await lookup(host);
-  if (!addresses.length) throw new Error("host does not resolve");
-  if (addresses.some(isPrivateAddress)) throw new Error("refusing to fetch a private or local address");
-  return url;
+  return (await dnsLookup(host, { all: true })).map(record => record.address);
 }
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " };
@@ -212,32 +171,10 @@ export function buildSearchTools(client: SearchClient, deps: SearchToolDeps = {}
       return { results };
     },
   };
-  const fetchFn = deps.fetchFn ?? fetch;
   const lookup = deps.lookup ?? defaultLookup;
   const now = deps.now ?? Date.now;
   type Page = { url: string; title: string; text: string; truncated: boolean };
   const pages = new Map<string, { page: Page; expires: number }>();
-
-  async function readCapped(res: Response): Promise<{ body: string; truncated: boolean }> {
-    const reader = res.body?.getReader();
-    if (!reader) return { body: "", truncated: false };
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    let truncated = false;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done || !value) break;
-      total += value.byteLength;
-      if (total > PAGE_MAX_BYTES) {
-        truncated = true;
-        chunks.push(value.subarray(0, value.byteLength - (total - PAGE_MAX_BYTES)));
-        await reader.cancel();
-        break;
-      }
-      chunks.push(value);
-    }
-    return { body: new TextDecoder("utf-8", { fatal: false }).decode(Buffer.concat(chunks)), truncated };
-  }
 
   async function loadPage(raw: string, useCache: boolean): Promise<Page> {
     const requested = new URL(raw);
@@ -252,32 +189,26 @@ export function buildSearchTools(client: SearchClient, deps: SearchToolDeps = {}
       pages.set(key, cached);
       return cached.page;
     }
-    let url = await assertSafeUrl(key, lookup);
-    let res: Response | null = null;
-    const signal = AbortSignal.timeout(TIMEOUT_MS);
-    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      res = await fetchFn(url.toString(), {
-        redirect: "manual",
-        headers: { Accept: "text/html,text/plain;q=0.9", "User-Agent": "SAWOT/0.1 (+chat fetch_page)" },
-        signal,
-      });
-      const location = res.headers.get("location");
-      if (res.status >= 300 && res.status < 400 && location) {
-        await res.body?.cancel();
-        if (hop === MAX_REDIRECTS) throw new Error("too many redirects");
-        url = await assertSafeUrl(new URL(location, url).toString(), lookup);
-        url.hash = "";
-        continue;
-      }
-      break;
-    }
-    if (!res) throw new Error("no response");
-    if (!res.ok) throw new Error(`page returned HTTP ${res.status}`);
-    const type = (res.headers.get("content-type") ?? "").toLowerCase();
+    const downloaded = await fetchPublic(key, {
+      signal: AbortSignal.timeout(TIMEOUT_MS), deadlineMs: performance.now() + TIMEOUT_MS,
+      maxBytes: PAGE_MAX_BYTES, oversize: "truncate",
+    }, { resolve: lookup, ...(deps.fetchFn ? { connect: async (url: URL, _address: string, signal: AbortSignal) => {
+      // Test-only connector injection. Production always uses IP-pinned sockets.
+      const response = await deps.fetchFn!(url.toString(), { redirect: "manual", signal });
+      return Object.assign(response.body ? Readable.fromWeb(response.body as any) : Readable.from([]), {
+        statusCode: response.status, headers: Object.fromEntries(response.headers),
+      }) as IncomingMessage;
+    } } : {}) });
+    const type = downloaded.mediaType.toLowerCase();
     if (!type.startsWith("text/html") && !type.startsWith("text/plain")) {
+      downloaded.close();
       throw new Error("unsupported content type: " + (type || "unknown"));
     }
-    const { body, truncated } = await readCapped(res);
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of downloaded.body) chunks.push(chunk);
+    const body = Buffer.concat(chunks).toString("utf8");
+    const truncated = downloaded.truncated();
+    const url = new URL(downloaded.finalUrl);
     const { title, text } = type.startsWith("text/plain") ? { title: "", text: body.trim() } : htmlToText(body);
     // Keep the extracted text from the bounded download, not just the preview.
     const page = { url: url.href, title, text, truncated };

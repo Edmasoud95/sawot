@@ -256,3 +256,250 @@ test("rejected sends restore their prompt and attachments without phantom histor
   assert.deepEqual(store.getState().pendingAttachments, [attachment]);
   await store.getState().flushDraft();
 });
+
+function interruptedChat() {
+  store.setState({ activeId: "interrupted", active: { id: "interrupted", title: "Test", messages: [], draftText: "" },
+    conversations: [], streaming: false, backgroundResponding: false, reconciling: false, retryRecovery: null, pendingAttachments: [], messageError: "" });
+  let stream!: ReadableStreamDefaultController;
+  const response = new Response(new ReadableStream({ start(controller) {
+    stream = controller;
+    controller.enqueue(new TextEncoder().encode('data: {"type":"content","delta":"Partial answer"}\n\n'));
+  } }));
+  return { response, fail: () => stream.error(new TypeError("Type error")), close: () => stream.close() };
+}
+
+const settleStream = () => new Promise(resolve => setTimeout(resolve, 10));
+
+test("an interrupted chat preserves partial text and reloads saved history without resending", async () => {
+  const stream = interruptedChat();
+  const requests: string[] = [];
+  let release!: (response: Response) => void;
+  globalThis.fetch = async (url) => {
+    requests.push(String(url));
+    if (String(url).endsWith("/messages")) return stream.response;
+    if (String(url).endsWith("/cancel")) return new Response(null, { status: 204 });
+    return new Promise(resolve => { release = resolve; });
+  };
+  await store.getState().startStream("Question");
+  await settleStream();
+  stream.fail();
+  await settleStream();
+  assert.equal(store.getState().active.messages.at(-1).content, "Partial answer");
+  assert.doesNotMatch(store.getState().messageError, /TypeError|Type error/);
+  assert.equal(store.getState().reconciling, true);
+  await store.getState().startStream("Must wait");
+  const saved = [{ role: "user", content: "Question" }, { role: "assistant", content: "Saved answer" }];
+  store.setState(s => ({ active: { ...s.active, draftText: "Next question" }, pendingAttachments: [{ id: "next" }] }));
+  release(new Response(JSON.stringify({ title: "Saved", messages: saved })));
+  await settleStream();
+  assert.deepEqual(store.getState().active.messages, saved);
+  assert.equal(store.getState().active.draftText, "Next question");
+  assert.deepEqual(store.getState().pendingAttachments, [{ id: "next" }]);
+  assert.equal(store.getState().reconciling, false);
+  assert.equal(requests.filter(url => url.endsWith("/messages")).length, 1);
+  assert.equal(requests.some(url => url.endsWith("/cancel")), false, "recovery must never cancel generation");
+});
+
+test("offline recovery can retry once connectivity returns without duplicating requests", async () => {
+  const stream = interruptedChat();
+  let online = false;
+  let reloads = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith("/messages")) return stream.response;
+    if (!online) throw new TypeError("Failed to fetch");
+    if (String(url).endsWith("/cancel")) return new Response(null, { status: 204 });
+    reloads++;
+    return new Response(JSON.stringify({ messages: [{ role: "user", content: "Question" }], title: "Saved" }));
+  };
+  await store.getState().startStream("Question");
+  await settleStream();
+  stream.fail();
+  await settleStream();
+  assert.equal(store.getState().reconciling, true);
+  assert.equal(typeof store.getState().retryRecovery, "function");
+  online = true;
+  await Promise.all([store.getState().retryRecovery(), store.getState().retryRecovery()]);
+  assert.equal(reloads, 1);
+  assert.equal(store.getState().reconciling, false);
+  assert.equal(store.getState().retryRecovery, null);
+});
+
+test("a clean stream close without a done acknowledgement also recovers history", async () => {
+  const stream = interruptedChat();
+  let reloads = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith("/messages")) return stream.response;
+    if (String(url).endsWith("/cancel")) return new Response(null, { status: 204 });
+    reloads++;
+    return new Response(JSON.stringify({ messages: [{ role: "assistant", content: "Saved" }], title: "Saved" }));
+  };
+  await store.getState().startStream("Question");
+  await settleStream();
+  stream.close();
+  await settleStream();
+  assert.equal(reloads, 1);
+  assert.equal(store.getState().active.messages.at(-1).content, "Saved");
+});
+
+test("a late recovery cannot overwrite another conversation", async () => {
+  const stream = interruptedChat();
+  let release!: (response: Response) => void;
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith("/messages")) return stream.response;
+    if (String(url).endsWith("/cancel")) return new Response(null, { status: 204 });
+    if (String(url).endsWith("/other")) return new Response(JSON.stringify({ id: "other", messages: [], title: "Other" }));
+    return new Promise(resolve => { release = resolve; });
+  };
+  await store.getState().startStream("Question");
+  await settleStream();
+  stream.fail();
+  await settleStream();
+  assert.equal(typeof release, "function");
+  await store.getState().openConversation("other");
+  release(new Response(JSON.stringify({ messages: [{ role: "assistant", content: "Stale" }] })));
+  await settleStream();
+  assert.equal(store.getState().activeId, "other");
+  assert.deepEqual(store.getState().active.messages, []);
+  assert.equal(store.getState().retryRecovery, null);
+});
+
+test("a disconnected request that never reached the server restores its draft and attachments", async () => {
+  interruptedChat();
+  const attachment = { id: "unsent", kind: "image" };
+  store.setState({ pendingAttachments: [attachment] });
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith("/messages")) throw new TypeError("Type error");
+    if (String(url).endsWith("/cancel")) return new Response(null, { status: 204 });
+    return new Response(JSON.stringify({ title: "Test", messages: [] }));
+  };
+  await store.getState().startStream("Unsent question");
+  await settleStream();
+  assert.equal(store.getState().active.draftText, "Unsent question");
+  assert.deepEqual(store.getState().pendingAttachments, [attachment]);
+  assert.deepEqual(store.getState().active.messages, []);
+});
+
+test("reopening an active response polls progress until the full saved answer is ready", async () => {
+  interruptedChat();
+  let responding = true;
+  const requests: string[] = [];
+  globalThis.fetch = async (url) => {
+    requests.push(String(url));
+    return new Response(JSON.stringify({ id: "running", title: "Running", responding,
+      messages: [{ role: "user", content: "Question" }, { role: "assistant", content: responding ? "Partial" : "Complete" }] }));
+  };
+  await store.getState().openConversation("running");
+  await settleStream();
+  assert.equal(store.getState().backgroundResponding, true);
+  assert.equal(store.getState().reconciling, true);
+  assert.equal(store.getState().active.messages.at(-1).content, "Partial");
+  await store.getState().startStream("Must wait");
+  responding = false;
+  await store.getState().retryRecovery();
+  assert.equal(store.getState().backgroundResponding, false);
+  assert.equal(store.getState().reconciling, false);
+  assert.equal(store.getState().active.messages.at(-1).content, "Complete");
+  assert.equal(store.getState().messageError, "");
+  assert.equal(requests.every(url => url.endsWith("/running")), true);
+});
+
+test("Stop explicitly cancels a response even after the browser stream disconnected", async () => {
+  interruptedChat();
+  store.setState({ activeId: "running", active: { id: "running", messages: [] }, backgroundResponding: true, reconciling: true });
+  const requests: string[] = [];
+  globalThis.fetch = async (url) => {
+    requests.push(String(url));
+    return String(url).endsWith("/cancel") ? new Response(null, { status: 204 })
+      : new Response(JSON.stringify({ id: "running", responding: false, messages: [{ role: "assistant", content: "Stopped" }] }));
+  };
+  await store.getState().stopStream();
+  await settleStream();
+  assert.equal(requests.filter(url => url.endsWith("/cancel")).length, 1);
+  assert.equal(store.getState().active.messages.at(-1).content, "Stopped");
+  assert.equal(store.getState().backgroundResponding, false);
+});
+
+test("switching conversations detaches the browser without cancelling the model", async () => {
+  const stream = interruptedChat();
+  const requests: string[] = [];
+  globalThis.fetch = async (url) => {
+    requests.push(String(url));
+    return String(url).endsWith("/messages") ? stream.response
+      : new Response(JSON.stringify({ id: "other", title: "Other", messages: [], responding: false }));
+  };
+  await store.getState().startStream("Question");
+  await settleStream();
+  await store.getState().openConversation("other");
+  stream.close();
+  await settleStream();
+  assert.equal(requests.some(url => url.endsWith("/cancel")), false);
+  assert.equal(store.getState().activeId, "other");
+  assert.deepEqual(store.getState().active.messages, []);
+});
+
+test("detaching a live stream keeps its visible text while the next snapshot loads", async () => {
+  const stream = interruptedChat();
+  globalThis.fetch = async () => stream.response;
+  await store.getState().startStream("Question");
+  await settleStream();
+  store.getState().detachStream();
+  stream.close();
+  await settleStream();
+  assert.equal(store.getState().active.messages.at(-1).content, "Partial answer");
+  assert.equal(store.getState().streaming, false);
+});
+
+test("recovery retries a transient network failure without another focus event", async (t) => {
+  interruptedChat();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let reads = 0;
+  globalThis.fetch = async () => {
+    if (++reads === 1) throw new TypeError("network");
+    return new Response(JSON.stringify({ title: "Saved", messages: [{ role: "assistant", content: "Complete answer" }], responding: false }));
+  };
+  await store.getState().recoverConversation("interrupted");
+  assert.equal(reads, 1);
+  t.mock.timers.tick(1000);
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  assert.equal(reads, 2);
+  assert.equal(store.getState().active.messages.at(-1).content, "Complete answer");
+  assert.equal(store.getState().messageError, "");
+  store.getState().detachStream();
+});
+
+test("a stalled recovery request times out and retries instead of blocking all focus events", async (t) => {
+  interruptedChat();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let signal: AbortSignal | undefined;
+  let reads = 0;
+  globalThis.fetch = async (_url, init) => {
+    if (++reads > 1) return new Response(JSON.stringify({ title: "Saved", messages: [], responding: false }));
+    signal = init?.signal as AbortSignal;
+    return new Promise<Response>((_resolve, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
+  };
+  const recovery = store.getState().recoverConversation("interrupted");
+  assert.ok(signal, "recovery GET must have a cancellation signal");
+  t.mock.timers.tick(10000);
+  await recovery;
+  assert.equal(signal.aborted, true);
+  t.mock.timers.tick(1000);
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  assert.equal(reads, 2);
+  assert.equal(store.getState().reconciling, false);
+  store.getState().detachStream();
+});
+
+test("resuming an idle chat refreshes a stale network error without reopening or resending", async () => {
+  interruptedChat();
+  store.setState({ active: { id: "interrupted", draftText: "Keep my draft", messages: [{ role: "assistant", content: "⚠ TypeError: network" }] } });
+  const requests: string[] = [];
+  globalThis.fetch = async (url) => {
+    requests.push(String(url));
+    return new Response(JSON.stringify({ title: "Saved", messages: [{ role: "assistant", content: "Saved answer" }], responding: false }));
+  };
+  assert.equal(typeof store.getState().resumeConversation, "function");
+  await store.getState().resumeConversation();
+  assert.equal(store.getState().active.messages.at(-1).content, "Saved answer");
+  assert.equal(store.getState().active.draftText, "Keep my draft");
+  assert.deepEqual(requests, ["/api/chat/conversations/interrupted"]);
+});

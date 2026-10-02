@@ -17,4 +17,4 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Run the TypeScript backend in the foreground.
-node ts-backend/dist/index.js
+SAWOT_SIDECAR_PID="$SIDECAR_PID" node ts-backend/dist/index.js

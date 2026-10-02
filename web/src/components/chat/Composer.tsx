@@ -32,7 +32,7 @@ const FileIcon = () => (
 export default function Composer() {
   const active = useChatStore((s) => s.active);
   const settingsSaving = useChatStore((s) => s.settingsSaving || s.reconciling);
-  const streaming = useChatStore((s) => s.streaming);
+  const streaming = useChatStore((s) => s.streaming || s.backgroundResponding);
   const pendingAttachments = useChatStore((s) => s.pendingAttachments);
   const addAttachment = useChatStore((s) => s.addAttachment);
   const removeAttachment = useChatStore((s) => s.removeAttachment);
@@ -231,7 +231,8 @@ export default function Composer() {
           <ToolsMenu key={`tools-${active?.id}`} />
           <div className="ml-auto min-w-0">
             <ModelPicker key={active?.id} presentation="sheet" value={active?.model || ""} providers={providers}
-              onChange={renameModel} effort={active?.reasoningEffort ?? null} onEffortChange={setEffort} disabled={streaming || settingsSaving} />
+              onChange={renameModel} effort={active?.reasoningEffort ?? null} onEffortChange={setEffort} disabled={settingsSaving}
+              changeNotice={(model) => `Switched to ${model.includes("::") ? model.split("::")[1] : model}.${streaming ? " Applies to the next response." : ""}`} />
           </div>
           </div>
           <DictationButton key={active?.id} disabled={streaming || uploading}

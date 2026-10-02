@@ -1,3 +1,6 @@
+import { savePythonPreference } from "./lib/pythonPreference";
+import { getNotificationDevice } from "./lib/pushNotifications";
+import { normalizeAnalysisEvent, mergeAnalysisEvents } from "./lib/chatAnalysis";
 import { create } from "zustand";
 import { useDebugStore } from "./debugStore";
 import { useVoiceStore } from "./store";
@@ -12,13 +15,17 @@ import {
   streamMessage,
 } from "./lib/chatApi";
 
+const attachmentDrafts = new Map<string, any[]>();
 const pendingDrafts = new Map<string, { text: string; revision: number }>();
 const draftRevisions = new Map<string, number>();
 const deletedConversations = new Set<string>();
 let draftTimer: ReturnType<typeof setTimeout> | undefined;
 let draftWrites = Promise.resolve();
 let streamGeneration = 0;
+let navigationGeneration = 0;
 let commandGeneration = 0;
+let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+let recoveryRequest: AbortController | undefined;
 
 function withHistory(conversations, active) {
   const others = conversations.filter((c) => c.id !== active.id);
@@ -30,16 +37,29 @@ function withHistory(conversations, active) {
   }, ...others];
 }
 
+function retainStream(s) {
+  const hasReply = s.streamText || s.streamThinking || s.streamSearch || s.streamCards.length || s.streamAnalysis?.length;
+  return {
+    ...(s.active && hasReply ? { active: { ...s.active, messages: [...s.active.messages, {
+      role: "assistant", content: s.streamText, thinking: s.streamThinking, cards: s.streamCards, analysis: s.streamAnalysis,
+      ...(s.streamSearch ? { search: s.streamSearch } : {}),
+    }] } } : {}),
+    streamText: "", streamThinking: "", streamTools: [], streamAnalysis: [], streamSearch: null, streamCards: [],
+  };
+}
+
 export const useChatStore = create<any>()((set, get) => ({
   conversations: [],
   activeId: null,
   active: null,
   settingsSaving: false,
   reconciling: false,
+  retryRecovery: null,
+  backgroundResponding: false,
   streaming: false,
   streamText: "",
   streamThinking: "",
-  streamTools: [],
+  streamTools: [], streamAnalysis: [],
   streamSearch: null,
   streamCards: [],
   pendingAttachments: [],
@@ -97,27 +117,44 @@ export const useChatStore = create<any>()((set, get) => ({
   },
 
   openConversation: async (id) => {
-    get().stopStream();
+    const navigation = ++navigationGeneration;
+    if (get().activeId) attachmentDrafts.set(get().activeId, get().pendingAttachments);
+    get().detachStream();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
       await get().flushDraft();
-      const active = await getConversation(id);
-      set({ activeId: id, active, pendingAttachments: [], messageError: "", reconciling: false });
-    } catch (e) {
-      console.error("openConversation failed", e);
-    }
+      if (navigation !== navigationGeneration) return false;
+      const active = await getConversation(id, controller.signal);
+      if (navigation !== navigationGeneration) return false;
+      set({ activeId: id, active, pendingAttachments: attachmentDrafts.get(id) ?? [], messageError: active.responseError || "", reconciling: false, retryRecovery: null,
+        backgroundResponding: Boolean(active.responding) });
+      if (active.responding) void get().recoverConversation(id);
+      return true;
+    } catch {
+      if (navigation !== navigationGeneration) return false;
+      set({ messageError: "Could not open this conversation. Check your connection and try again." });
+      return false;
+    } finally { clearTimeout(timeout); }
   },
 
   newConversation: async (model) => {
-    get().stopStream();
+    const navigation = ++navigationGeneration;
+    if (get().activeId) attachmentDrafts.set(get().activeId, get().pendingAttachments);
+    get().detachStream();
     try {
       await get().flushDraft();
+      if (navigation !== navigationGeneration) return;
       const conv = await createConversation(model);
+      if (navigation !== navigationGeneration) return;
       set((s) => ({
         pendingAttachments: [],
         activeId: conv.id,
         active: conv,
         messageError: "",
         reconciling: false,
+        retryRecovery: null,
+        backgroundResponding: false,
       }));
     } catch (e) {
       console.error("newConversation failed", e);
@@ -127,9 +164,10 @@ export const useChatStore = create<any>()((set, get) => ({
   removeConversation: async (id) => {
     try {
       await get().flushDraft();
-      if (get().activeId === id) get().stopStream();
+      if (get().activeId === id) get().detachStream();
       await deleteConversation(id);
       deletedConversations.add(id);
+      attachmentDrafts.delete(id);
       pendingDrafts.delete(id);
       draftRevisions.delete(id);
       set((s) => {
@@ -141,6 +179,58 @@ export const useChatStore = create<any>()((set, get) => ({
     } catch (e) {
       throw e;
     }
+  },
+
+  // Read-only recovery also works after reopening the page: the backend owns
+  // the turn and exposes its current snapshot until the full answer is saved.
+  recoverConversation: (id, options: { revision?: number; onSaved?: (saved: any) => void; error?: string } = {}) => {
+    const revision = options.revision ?? streamGeneration;
+    const current = () => get().activeId === id && streamGeneration === revision;
+    let reading = false;
+    let failures = 0;
+    const refresh = async () => {
+      if (reading || !current()) return;
+      reading = true;
+      clearTimeout(recoveryTimer);
+      set({ reconciling: true, retryRecovery: refresh });
+      const controller = new AbortController();
+      recoveryRequest = controller;
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      try {
+        const saved = await getConversation(id, controller.signal);
+        if (!current()) return;
+        failures = 0;
+        const responding = Boolean(saved.responding);
+        set(s => ({ active: { ...s.active, messages: saved.messages, title: saved.title },
+          backgroundResponding: responding, reconciling: responding,
+          retryRecovery: responding ? refresh : null,
+          messageError: saved.responseError || (responding ? "Response is still being generated." : options.error || ""),
+          conversations: s.conversations.map(c => c.id === id ? { ...c, title: saved.title } : c),
+        }));
+        if (responding) recoveryTimer = setTimeout(() => { void refresh(); }, 1000);
+        else options.onSaved?.(saved);
+      } catch {
+        if (current()) {
+          set({ messageError: "Reconnecting to your conversation… Your response continues on the server." });
+          recoveryTimer = setTimeout(() => { void refresh(); }, Math.min(1000 * 2 ** failures++, 15000));
+        }
+      } finally {
+        clearTimeout(timeout);
+        if (recoveryRequest === controller) recoveryRequest = undefined;
+        reading = false;
+      }
+    };
+    return refresh();
+  },
+
+  resumeConversation: () => {
+    const state = get();
+    if (state.retryRecovery) return state.retryRecovery();
+    // Refresh even when a stale stream error has already marked the UI idle.
+    // A send still preparing its draft must be allowed to finish preparation.
+    if (!state.activeId || (state.streaming && !state.abortStream)) return;
+    state.detachStream();
+    return get().recoverConversation(state.activeId);
   },
 
   renameModel: (model: string) => get().saveModelSettings({ model }),
@@ -161,10 +251,11 @@ export const useChatStore = create<any>()((set, get) => ({
     } finally { set({ settingsSaving: false }); }
   },
 
-  setTool: async (tool: "homeAssistant" | "webSearch", enabled: boolean) => {
+  setTool: async (tool: "homeAssistant" | "webSearch" | "python", enabled: boolean) => {
     const { activeId } = get();
     if (!activeId) return;
     const updated = await patchConversation(activeId, { [tool]: enabled });
+    if (tool === "python") savePythonPreference(updated.python !== false);
     set((s) => ({
       active: s.activeId === activeId && s.active
         ? { ...s.active, [tool]: updated[tool] } : s.active,
@@ -263,31 +354,29 @@ export const useChatStore = create<any>()((set, get) => ({
       active: updatedActive,
       conversations: withHistory(get().conversations, updatedActive),
       streaming: true,
+      backgroundResponding: true,
       streamText: "",
       streamThinking: "",
-      streamTools: [],
+      streamTools: [], streamAnalysis: [],
       streamSearch: null,
       streamCards: [],
       ...(!regenerating ? { pendingAttachments: [] } : {}),
     });
 
     const restoreMessages = () => {
-      if (regenerating && get().activeId === activeId) set((s) => ({ active: { ...s.active, messages: active.messages }, streamText: "", streamThinking: "", streamTools: [], streamSearch: null, streamCards: [] }));
+      if (regenerating && get().activeId === activeId) set((s) => ({ active: { ...s.active, messages: active.messages }, streamText: "", streamThinking: "", streamTools: [], streamAnalysis: [], streamSearch: null, streamCards: [] }));
     };
-    const reconcile = async () => {
-      const revision = streamGeneration;
-      set({ reconciling: true });
-      try {
-        await cancelConversationTurn(activeId);
-        const saved = await getConversation(activeId);
-        if (get().activeId === activeId && streamGeneration === revision) {
-          set((s) => ({ active: { ...s.active, messages: saved.messages, title: saved.title }, reconciling: false }));
-        }
-      } catch {
-        if (get().activeId === activeId && streamGeneration === revision) set({ messageError: "Could not reload the saved answer. Reopen this conversation before continuing." });
-      }
-    };
+    const reconcile = () => get().recoverConversation(activeId, {
+      revision: generation,
+      error: responseError ? get().messageError : "",
+      onSaved: (saved) => {
+        const unsent = !regenerating && saved.messages.length === active.messages.length;
+        if (unsent) set(s => ({ active: { ...s.active, draftText: s.active.draftText || content },
+          pendingAttachments: [...pendingAttachments, ...s.pendingAttachments] }));
+      },
+    });
     let doneFired = false;
+    let responseError = false;
     let cancelled = false;
     const debug = () => (useVoiceStore.getState().debugEnabled ? useDebugStore.getState() : null);
     const debugTurn = debug()?.beginTurn("chat", { event: "user", data: { text: content, attachments: pendingAttachments.length } });
@@ -297,7 +386,8 @@ export const useChatStore = create<any>()((set, get) => ({
 
     const abort = streamMessage(
       activeId,
-      regenerating ? { regenerateFrom, expectedMessageCount: active.messages.length } : { content, attachments: pendingAttachments },
+      { ...(regenerating ? { regenerateFrom, expectedMessageCount: active.messages.length } : { content, attachments: pendingAttachments }),
+        notificationDevice: getNotificationDevice() },
       (event) => {
         if (cancelled || generation !== streamGeneration || get().activeId !== activeId) return;
         if (event.type !== "content" && event.type !== "thinking") debug()?.logMessage("in", event);
@@ -311,12 +401,16 @@ export const useChatStore = create<any>()((set, get) => ({
           set((s) => ({ streamText: s.streamText + event.delta }));
         } else if (event.type === "tool") {
           set((s) => ({ streamTools: [...s.streamTools, event] }));
+        } else if (event.type === "analysis") {
+          const analysis = normalizeAnalysisEvent(event);
+          if (analysis) set(s => ({ streamAnalysis: mergeAnalysisEvents(s.streamAnalysis, analysis) }));
         } else if (event.type === "search") {
           set((s) => ({ streamSearch: updateVoiceSearch(s.streamSearch, event) }));
         } else if (event.type === "entities") {
           set({ streamCards: event.entities });
         } else if (event.type === "done") {
           doneFired = true;
+          set({ backgroundResponding: false });
           finishDebug("completed");
           const msg = event.message;
           if (event.title) {
@@ -335,12 +429,18 @@ export const useChatStore = create<any>()((set, get) => ({
               : s.active,
             streamText: "",
             streamThinking: "",
-            streamTools: [],
+            streamTools: [], streamAnalysis: [],
             streamSearch: null,
             streamCards: [],
           }));
         } else if (event.type === "error" && !doneFired) {
           finishDebug("failed", event.message);
+          responseError = !event.interrupted;
+          if (event.interrupted) {
+            set({ messageError: "Connection interrupted. Reloading the saved answer." });
+            return;
+          }
+          set({ backgroundResponding: false });
           if (event.rejected && !regenerating) {
             set((s) => ({ active: { ...s.active, messages: active.messages, draftText: s.active.draftText || content },
               pendingAttachments: [...pendingAttachments, ...s.pendingAttachments], messageError: event.message }));
@@ -371,7 +471,8 @@ export const useChatStore = create<any>()((set, get) => ({
           if (!doneFired) {
             finishDebug("failed", "Connection ended before the response completed");
             restoreMessages();
-            if (regenerating) {
+            if (regenerating || !responseError) {
+              if (!regenerating) set(retainStream);
               if (!get().messageError) set({ messageError: "Connection interrupted. Reloading the saved answer." });
               void reconcile();
             }
@@ -386,16 +487,38 @@ export const useChatStore = create<any>()((set, get) => ({
       if (!doneFired) restoreMessages();
       finishDebug("cancelled");
       abort();
-      if (regenerating && !doneFired) void reconcile();
     } });
   },
 
-  stopStream: () => {
+  detachStream: () => {
     get().dismissCommand();
     streamGeneration++;
+    clearTimeout(recoveryTimer);
+    recoveryRequest?.abort();
+    recoveryRequest = undefined;
     const { abortStream } = get();
     if (abortStream) abortStream();
-    set({ streaming: false, abortStream: null });
+    if (get().streaming) set(retainStream);
+    set({ streaming: false, abortStream: null, backgroundResponding: false, reconciling: false, retryRecovery: null });
+  },
+
+  stopStream: async () => {
+    const { activeId, abortStream, backgroundResponding, reconciling } = get();
+    get().detachStream();
+    if (!activeId || (!abortStream && !backgroundResponding && !reconciling)) return;
+    const revision = streamGeneration;
+    const current = () => get().activeId === activeId && streamGeneration === revision;
+    const cancel = async () => {
+      if (!current()) return;
+      set({ reconciling: true });
+      try {
+        await cancelConversationTurn(activeId);
+        if (current()) await get().recoverConversation(activeId, { revision });
+      } catch {
+        if (current()) set({ retryRecovery: cancel, messageError: "Could not stop the response. Reconnect to retry Stop." });
+      }
+    };
+    await cancel();
   },
 
   patchCards: (entities) => {

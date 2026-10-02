@@ -52,7 +52,7 @@ export default function Sidebar({ panelRef, mobile }) {
 
   const setOpen = (sidebarOpen) => useChatStore.setState({ sidebarOpen });
   const startNew = () => {
-    useChatStore.getState().stopStream();
+    useChatStore.getState().detachStream();
     void newConversation();
     if (mobile) setOpen(false);
   };

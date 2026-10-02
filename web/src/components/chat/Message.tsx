@@ -1,8 +1,13 @@
+import AnalysisActivity, { AnalysisFiles } from "./AnalysisActivity";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { rehypeChatCodeLanguages } from "../../lib/chatCodeLanguages";
+import { remarkChatMermaid } from "../../lib/chatMermaid";
+import MermaidBlock from "./MermaidBlock";
+import ChartWidget from "./ChartWidget";
+import { parseChartWidget } from "../../lib/chartWidget";
 import EntityCard from "../cards/EntityCard";
 import ThinkingBlock from "./ThinkingBlock";
 import ToolChip from "./ToolChip";
@@ -94,14 +99,33 @@ function ScrollableTable({ children, node: _node, ...props }) {
   );
 }
 
-const MD_COMPONENTS = { pre: CodeBlock, table: ScrollableTable };
+function MarkdownCodeBlock(props) {
+  const code = props.node?.children?.[0];
+  const fallback = <CodeBlock {...props} />;
+  const source = code.children?.map(child => child.value ?? "").join("") ?? "";
+  if (code?.properties?.className?.includes("language-charts_widget_v2")) {
+    if (code.properties.dataMermaidPending) return fallback;
+    const chart = parseChartWidget(source);
+    return chart ? <ChartWidget key={source} chart={chart} /> : <>
+      <p className="text-sm text-zinc-400">Could not render chart. Source shown below.</p>{fallback}
+    </>;
+  }
+  if (!code?.properties?.className?.includes("language-mermaid")) return fallback;
+  return <MermaidBlock source={source} pending={Boolean(code.properties.dataMermaidPending)}>
+    {fallback}
+  </MermaidBlock>;
+}
 
-export function Markdown({ children }) {
+const MD_COMPONENTS = { pre: MarkdownCodeBlock, table: ScrollableTable };
+
+export function Markdown({ children, streaming = false }) {
+  const chart = !streaming && typeof children === "string" ? parseChartWidget(children) : null;
+  if (chart) return <div className="chat-md"><ChartWidget key={children} chart={chart} /></div>;
   return (
     <div className="chat-md text-[1rem] font-light leading-relaxed text-zinc-200">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeChatCodeLanguages, rehypeHighlight]}
+        remarkPlugins={[remarkGfm, [remarkChatMermaid, { streaming }]]}
+        rehypePlugins={[rehypeChatCodeLanguages, [rehypeHighlight, { plainText: ["mermaid", "charts_widget_v2"] }]]}
         components={MD_COMPONENTS}
       >
         {children}
@@ -192,7 +216,7 @@ function UserMessage({ message, actions, textRef }) {
 
 // One persisted message. Live streaming messages are composed directly in
 // MessageList from the stream buffers using the exported pieces above.
-export default function Message({ message, sendControl, reading, onRead, onRegenerate, disabled }) {
+export default function Message({ conversationId, message, sendControl, reading, onRead, onRegenerate, disabled }) {
   const textRef = useRef<HTMLDivElement>(null);
   const actions = <MessageActions text={message.content ?? ""} getSpokenText={() => {
     const node = textRef.current?.cloneNode(true) as HTMLElement | undefined;
@@ -204,7 +228,9 @@ export default function Message({ message, sendControl, reading, onRead, onRegen
   return (
     <div>
       <ThinkingBlock thinking={message.thinking} />
+      <AnalysisActivity conversationId={conversationId} events={message.analysis ?? []} />
       <div ref={textRef}><Markdown>{message.content}</Markdown></div>
+      <AnalysisFiles conversationId={conversationId} events={message.analysis ?? []} />
       <CardGrid cards={message.cards} sendControl={sendControl} />
       <div className="message-footer">{actions}<ChatSources search={message.search} /></div>
     </div>

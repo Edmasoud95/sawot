@@ -1,7 +1,9 @@
+import LiveVoiceSettings from "./LiveVoiceSettings";
 import { useEffect, useState } from "react";
 import { ModelList, useSpeechModels } from "../ModelsSection";
 import { useRecorder } from "../../hooks/useRecorder";
 import { BUTTON_CLS, Disclosure, FIELD_CLS, Select, Skeleton } from "./fields";
+import { OPEN_CONNECTIONS_EVENT } from "../../lib/settingsNavigation";
 
 // Read aloud in ten to fifteen seconds; varied sounds, natural rhythm.
 const CLONE_PASSAGE =
@@ -157,23 +159,45 @@ export default function SpeechSection({ data, update, active, onSwitched }) {
   const tts = speech.models.filter((m) => m.kind === "tts");
   const [info, setInfo] = useState(null); // { engine, voices, default, clones }
   const [voicesError, setVoicesError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const remote = Boolean(data?.ttsProviderId && data.ttsProviderId !== "local");
+  async function updateSpeech(patch) {
+    setSaving(true);
+    try { await update(patch); } finally { setSaving(false); }
+  }
   // A new speech engine brings its own voice list, so refetch on a switch.
   const activeTts = tts.find((m) => m.active)?.id;
   useEffect(() => {
-    if (!active) return;
+    if (!active || remote) return;
     setVoicesError("");
     fetch("/api/voices").then((r) => r.json()).then(setInfo).catch(() => setVoicesError("Couldn't reach the speech engine."));
-  }, [active, activeTts]);
+  }, [active, activeTts, remote]);
   const clones = info?.clones ?? [];
 
   if (!data) return <Skeleton />;
   return (
     <div className="flex flex-col">
+      {data.liveVoiceEnabled === true && <LiveVoiceSettings />}
       <Disclosure id="stt" title="Speech-to-text" summary={activeLabel(stt)} open={openRow === "stt"} onToggle={() => toggle("stt")}>
         <ModelList {...speech} models={stt} />
       </Disclosure>
-      <Disclosure id="tts" title="Text-to-speech" summary={activeLabel(tts)} open={openRow === "tts"} onToggle={() => toggle("tts")}>
-        <ModelList {...speech} models={tts} />
+      <Disclosure id="tts" title="Text-to-speech" summary={remote ? "OpenAI" : activeLabel(tts)} open={openRow === "tts"} onToggle={() => toggle("tts")}>
+        <div className="flex flex-col gap-4">
+          <Select label="Speech provider" value={data.ttsProviderId ?? "local"} disabled={saving}
+            options={["local", ...(data.ttsProviders ?? []).map(p => p.id)]}
+            labels={{ local: "Local", ...Object.fromEntries((data.ttsProviders ?? []).map(p => [p.id, p.name])) }}
+            onChange={(ttsProviderId) => updateSpeech({ ttsProviderId })} />
+          {remote ? <>
+            <Select label="Speech model" value={data.ttsModel} options={data.ttsModels ?? []} disabled={saving}
+              onChange={(ttsModel) => updateSpeech({ ttsModel })} />
+            <p className="text-sm leading-snug text-zinc-500">Text read aloud is sent to OpenAI to generate an AI voice. Internet access and paid API usage are required.</p>
+          </> : <ModelList {...speech} models={tts} />}
+          <button type="button" className={`${BUTTON_CLS} self-start`}
+            onClick={() => window.dispatchEvent(new CustomEvent(OPEN_CONNECTIONS_EVENT, { detail: { connection: "providers" } }))}>
+            Manage AI providers
+          </button>
+          {!(data.ttsProviders ?? []).length && <p className="text-sm leading-snug text-zinc-500">To use OpenAI speech, add an AI provider in Connections with the base URL https://api.openai.com/v1 and your API key.</p>}
+        </div>
       </Disclosure>
       <Disclosure id="voice" title="Voice" summary={data.voice} open={openRow === "voice"} onToggle={() => toggle("voice")}>
         <Select
@@ -181,10 +205,11 @@ export default function SpeechSection({ data, update, active, onSwitched }) {
           ariaLabel="Voice"
           value={data.voice}
           options={data.voices}
-          onChange={(voice) => update({ voice })}
+          disabled={saving}
+          onChange={(voice) => updateSpeech({ voice })}
         />
       </Disclosure>
-      <Disclosure
+      {!remote && <Disclosure
         id="clones"
         title="Cloned voices"
         summary={info ? (clones.length === 1 ? "1 voice" : `${clones.length} voices`) : "…"}
@@ -198,7 +223,7 @@ export default function SpeechSection({ data, update, active, onSwitched }) {
           selectedVoice={data.voice}
           onUse={(voice) => update({ voice })}
         />
-      </Disclosure>
+      </Disclosure>}
     </div>
   );
 }

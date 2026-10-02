@@ -463,12 +463,71 @@ test("cancelled regeneration preserves history and concurrent turns are rejected
     const blocked = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "Overlap" } });
     assert.equal(blocked.statusCode, 409);
     const body = response.text().catch(() => "");
+    await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/cancel` });
     controller.abort();
     await body;
     for (let i = 0; i < 50 && !wasAborted; i++) await new Promise(resolve => setTimeout(resolve, 10));
-    assert.equal(wasAborted, true, "client disconnect reaches model request");
+    assert.equal(wasAborted, true, "explicit Stop reaches model request");
     assert.deepEqual(ctx.store.get(conv.id)?.messages, conv.messages);
   } finally { controller.abort(); await app.close(); }
+});
+
+for (const regenerate of [false, true]) test(`browser disconnect keeps ${regenerate ? "regeneration" : "chat"} running and saves the full answer`, async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let signal!: AbortSignal;
+  let requests = 0;
+  const client = { chat: { completions: { create: async (_body: any, opts: any) => {
+    requests++;
+    signal = opts.signal;
+    return (async function* () {
+      yield { choices: [{ delta: { content: "First half. " } }] };
+      await gate;
+      signal.throwIfAborted();
+      yield { choices: [{ delta: { content: "Second half." } }] };
+    })();
+  } } } };
+  const notices: any[] = [];
+  const { app, ctx } = harness({ resolve: () => ({ client, model: "m" }), onResponseCompleted: n => { notices.push(n); } });
+  const conv = ctx.store.create("m");
+  conv.title = "Existing chat";
+  if (regenerate) conv.messages = [{ role: "user", content: "Question" }, { role: "assistant", content: "Old answer" }];
+  ctx.store.save(conv);
+  const browser = new AbortController();
+  try {
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const response = await fetch(`${address}/api/chat/conversations/${conv.id}/messages`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, signal: browser.signal,
+      body: JSON.stringify({ ...(regenerate ? { regenerateFrom: 0, expectedMessageCount: 2 } : { content: "Question" }), notificationDevice: "a".repeat(43) }),
+    });
+    const reader = response.body!.getReader();
+    let received = "";
+    while (!received.includes("First half.")) received += new TextDecoder().decode((await reader.read()).value);
+    browser.abort();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(signal.aborted, false, "disconnect must not cancel generation");
+    const running = (await app.inject({ url: `/api/chat/conversations/${conv.id}` })).json();
+    assert.equal(running.responding, true);
+    assert.equal(running.messages.at(-1).content, "First half. ");
+    assert.equal((await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "Duplicate" } })).statusCode, 409);
+    release();
+    let saved: any;
+    for (let i = 0; i < 100; i++) {
+      saved = (await app.inject({ url: `/api/chat/conversations/${conv.id}` })).json();
+      if (!saved.responding) break;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert.equal(saved.responding, false);
+    assert.deepEqual(saved.messages.map((m: any) => m.content), ["Question", "First half. Second half."]);
+    assert.equal(ctx.store.get(conv.id).messages.at(-1).content, "First half. Second half.");
+    assert.equal(requests, 1);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(notices.length, 1);
+  } finally {
+    release(); browser.abort();
+    await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/cancel` });
+    await app.close();
+  }
 });
 
 test("explicit cancellation aborts title generation and releases the turn lock", async () => {
@@ -481,19 +540,87 @@ test("explicit cancellation aborts title generation and releases the turn lock",
     await new Promise<void>(resolve => opts.signal.addEventListener("abort", () => { titleAborted = true; resolve(); }, { once: true }));
     opts.signal.throwIfAborted();
   } } } };
-  const { app, ctx } = harness({ resolve: () => ({ client, model: "m" }) });
+  const notices: any[] = [];
+  const { app, ctx } = harness({ resolve: () => ({ client, model: "m" }), onResponseCompleted: n => { notices.push(n); } });
   const conv = ctx.store.create("m");
   conv.messages = [{ role: "user", content: "Hello" }, { role: "assistant", content: "Original" }];
   ctx.store.save(conv);
   try {
-    const pending = app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { regenerateFrom: 0, expectedMessageCount: 2 } }).then(r => r);
+    const pending = app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { regenerateFrom: 0, expectedMessageCount: 2, notificationDevice: "a".repeat(43) } }).then(r => r);
     await titleStarted;
     const cancelled = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/cancel` });
     assert.equal(cancelled.statusCode, 204);
     await pending;
     assert.equal(titleAborted, true);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(notices.length, 0);
     assert.deepEqual(ctx.store.get(conv.id)?.messages, conv.messages);
     const next = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "/help" } });
     assert.equal(next.statusCode, 200);
   } finally { await app.close(); }
+});
+
+test('saved completion notifies originating device once and regeneration gets a new turn', async t => {
+  const notices: any[] = [];
+  const {app,ctx}=harness({resolve:()=>({client:recordingClient([]),model:'m'}),onResponseCompleted: notice => {
+    assert.equal(ctx.store.get(notice.conversationId).messages.at(-1).role,'assistant'); notices.push(notice);
+  }});
+  t.after(()=>app.close()); const conv=ctx.store.create('m');conv.title='Existing';ctx.store.save(conv);
+  const url=`/api/chat/conversations/${conv.id}/messages`;
+  await app.inject({method:'POST',url,payload:{content:'Hello',notificationDevice:'a'.repeat(43)}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(notices.length,1);assert.equal(notices[0].notificationDevice,'a'.repeat(43));assert.equal(notices[0].title,'Existing');
+  await app.inject({method:'POST',url,payload:{regenerateFrom:0,expectedMessageCount:2,notificationDevice:'b'.repeat(43)}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(notices.length,2);assert.equal(notices[1].notificationDevice,'b'.repeat(43));assert.notEqual(notices[0].turnId,notices[1].turnId);
+});
+test('completion callback rejection cannot fail saved chat or hold turn lock',async t=>{
+ const {app,ctx}=harness({resolve:()=>({client:recordingClient([]),model:'m'}),onResponseCompleted:()=>{throw Error('push failed');}});t.after(()=>app.close());
+ const conv=ctx.store.create('m');conv.title='Existing';ctx.store.save(conv);
+ for(let i=0;i<2;i++){
+ const response=await app.inject({method:'POST',url:`/api/chat/conversations/${conv.id}/messages`,payload:{content:'Hello',notificationDevice:'a'.repeat(43)}});
+ assert.ok(sseEvents(response.body).some(e=>e.type==='done'));assert.ok(!sseEvents(response.body).some(e=>e.type==='error'));
+ }
+ await new Promise(resolve=>setImmediate(resolve));
+});
+test('failed turns and commands never notify',async t=>{
+ const notices:any[]=[];const {app,ctx}=harness({onResponseCompleted:n=>{notices.push(n);}});t.after(()=>app.close());
+ const conv=ctx.store.create('m');
+ for(const content of ['/help','/status','Hello']) await app.inject({method:'POST',url:`/api/chat/conversations/${conv.id}/messages`,payload:{content,notificationDevice:'a'.repeat(43)}});
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(notices.length,0);
+});
+
+test('failed assistant persistence never queues a notification',async t=>{
+ const notices:any[]=[];const {app,ctx}=harness({resolve:()=>({client:recordingClient([]),model:'m'}),onResponseCompleted:n=>{notices.push(n);}});t.after(()=>app.close());
+ const conv=ctx.store.create('m');conv.title='Existing';ctx.store.save(conv);
+ const save=ctx.store.save.bind(ctx.store);let failed=false;
+ ctx.store.save=(value:any)=>{if(!failed && value.messages.at(-1)?.role==='assistant'){failed=true;throw Error('disk unavailable');}save(value);};
+ const response=await app.inject({method:'POST',url:`/api/chat/conversations/${conv.id}/messages`,payload:{content:'Hello',notificationDevice:'a'.repeat(43)}});
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(failed,true);assert.equal(notices.length,0);assert.ok(!sseEvents(response.body).some(e=>e.type==='done'));
+});
+
+test('Python defaults on for legacy chats and saved false survives reload', async () => {
+  const {app,ctx}=harness();
+  try {
+    const conv=(await app.inject({method:'POST',url:'/api/chat/conversations',payload:{}})).json();
+    assert.equal(conv.python,true);
+    delete conv.python;ctx.store.save(conv);
+    assert.equal(ctx.store.get(conv.id).python,true);
+    await app.inject({method:'PATCH',url:`/api/chat/conversations/${conv.id}`,payload:{python:false,draftText:'Saved Python preference'}});
+    assert.equal(ctx.store.get(conv.id).python,false);
+    assert.equal(ctx.store.list().find(c=>c.id===conv.id).python,false);
+    const off=(await app.inject({method:'POST',url:'/api/chat/conversations',payload:{python:false}})).json();
+    assert.equal(off.python,false);
+  } finally {await app.close();}
+});
+
+test('Python disabled omits both analysis tools without touching runner', async () => {
+  const requests:any[]=[];let probes=0;
+  const {app,ctx}=harness({resolve:()=>({client:recordingClient(requests),model:'m'}),analysis:{files:{prune(){}} as any,runner:{ready:async()=>{probes++;throw Error('must not probe');}} as any}});
+  try {
+    const conv=ctx.store.create('m');conv.python=false;ctx.store.save(conv);
+    await app.inject({method:'POST',url:`/api/chat/conversations/${conv.id}/messages`,payload:{content:'hello'}});
+    assert.equal(probes,0);assert.ok(requests.length>=1);
+    for (const request of requests) assert.equal(request.tools,undefined);
+  } finally {await app.close();}
 });

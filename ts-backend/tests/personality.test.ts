@@ -136,3 +136,28 @@ test("chat instructions are validated, trimmed, saved, and returned", async () =
     assert.equal(res.statusCode, 400);
   } finally { await app.close(); llm.close(); }
 });
+
+test('Live prompt edits and new personalities persist, validate, and reset to visible defaults', async () => {
+  const { app, saved } = await harness('http://unused/v1');
+  const save = (payload: any) => app.inject({ method: 'POST', url: '/api/settings', payload });
+  try {
+    const initial = (await app.inject('/api/settings')).json();
+    assert.match(initial.livePromptDefaults.conversation, /theatre rehearsal/);
+    assert.match(initial.livePromptDefaults.backend, /device_context/);
+    for (const personality of ['angry', 'flirty', 'crying']) {
+      const response = await save({ personality });
+      assert.equal(response.statusCode, 200);
+      assert.equal(response.json().personality, personality);
+    }
+    const result = await save({ liveVoicePrompt: '{name} performs {personality}', liveBackendPrompt: '{device_context}\nReturn facts.' });
+    assert.equal(result.statusCode, 200);
+    assert.match(result.json().liveEffectivePrompt, /Rita performs/);
+    assert.equal(saved.at(-1).liveVoicePrompt, '{name} performs {personality}');
+    assert.match(result.json().liveEffectiveBackendPrompt, /Devices:\n\(devices\)/);
+    for (const patch of [{ liveVoicePrompt: 3 }, { liveBackendPrompt: null }, { liveVoicePrompt: 'x'.repeat(8001) }]) assert.equal((await save(patch)).statusCode, 400);
+    const reset = (await save({ liveVoicePrompt: '', liveBackendPrompt: '' })).json();
+    assert.equal(reset.liveVoicePrompt, '');
+    assert.match(reset.liveEffectivePrompt, /theatre rehearsal/);
+    assert.match(reset.liveEffectiveBackendPrompt, /Do not replay earlier requests/);
+  } finally { await app.close(); }
+});

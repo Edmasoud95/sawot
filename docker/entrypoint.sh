@@ -7,7 +7,7 @@ mkdir -p "${SAWOT_DATA_DIR:-/data}/data" "${SAWOT_DATA_DIR:-/data}/models"
 
 python -m sidecar.main &
 SIDECAR=$!
-node ts-backend/dist/index.js &
+SAWOT_SIDECAR_PID="$SIDECAR" node ts-backend/dist/index.js &
 BACKEND=$!
 
 trap 'kill $SIDECAR $BACKEND 2>/dev/null; wait; exit 0' INT TERM

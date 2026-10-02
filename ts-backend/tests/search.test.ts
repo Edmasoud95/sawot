@@ -110,7 +110,7 @@ test("fetch_page rejects non-text content and follows only safe redirects", asyn
   const pdf = await executeTool(tools, "fetch_page", { url: "https://example.com/pdf" });
   assert.match(pdf.error, /content type/i);
   const hop = await executeTool(tools, "fetch_page", { url: "https://example.com/hop" });
-  assert.match(hop.error, /private|local/i);
+  assert.match(hop.error, /private|local|downgrade/i);
   assert.ok(!seen.includes("http://192.168.1.10/"), "the private redirect target was never fetched");
 });
 

@@ -1,0 +1,8 @@
+# Optional overlay; install and verify the host broker first. This only mounts
+# its restricted socket directory, never the Docker socket or runner job data.
+services:
+  sawot:
+    environment:
+      SAWOT_RUNNER_SOCKET: /run/sawot-runner/runner.sock
+    volumes:
+      - /run/sawot-runner:/run/sawot-runner:ro

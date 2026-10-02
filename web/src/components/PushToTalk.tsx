@@ -23,8 +23,8 @@ const ACTIONS = {
   speaking: "Interrupt and listen",
 };
 
-export default function PushToTalk({ onTap, onEnd, pictures, onSendPictures }: {
-  onTap: () => void; onEnd: () => void; pictures: ReturnType<typeof useVoicePictures>; onSendPictures: () => void;
+export default function PushToTalk({ onTap, onEnd, pictures, onSendPictures, live = false }: {
+  live?: boolean; onTap: () => void; onEnd: () => void; pictures: ReturnType<typeof useVoicePictures>; onSendPictures: () => void;
 }) {
   const status = useVoiceStore((s) => s.status);
   const sessionActive = useVoiceStore((s) => s.sessionActive);
@@ -33,18 +33,18 @@ export default function PushToTalk({ onTap, onEnd, pictures, onSendPictures }: {
   const locked = sessionActive || status !== "idle";
   return (
     <div className="talk-dock" data-status={status}>
-      <VoicePictures items={pictures.items} disabled={locked} onRemove={pictures.remove} />
+      {!live && <VoicePictures items={pictures.items} disabled={locked} onRemove={pictures.remove} />}
       <p id="voice-session-status" role="status" aria-live="polite" aria-atomic="true" className="talk-status">
-        {pictures.error || (pictures.uploading ? "Adding pictures…" : LABELS[status])}
+        {live ? (status === "idle" ? "Tap to start Live voice" : `Live · ${LABELS[status]}`) : pictures.error || (pictures.uploading ? "Adding pictures…" : LABELS[status])}
       </p>
       <div className="talk-controls">
-        <AttachmentPicker imagesOnly disabled={locked || pictures.items.length >= 4} onFiles={pictures.add} />
+        {!live && <AttachmentPicker imagesOnly disabled={locked || pictures.items.length >= 4} onFiles={pictures.add} />}
         <button
           type="button"
-          aria-label={ACTIONS[status]}
-          title={ACTIONS[status]}
+          aria-label={live ? (sessionActive ? "End Live voice session" : "Start Live voice session") : ACTIONS[status]}
+          title={live ? (sessionActive ? "End Live voice session" : "Start Live voice session") : ACTIONS[status]}
           aria-describedby="voice-session-status"
-          disabled={status === "connecting" || pictures.uploading}
+          disabled={status === "connecting" || (!live && pictures.uploading)}
           onClick={onTap}
           className={`talk-button ${recording ? "is-recording" : ""}`}
         >
@@ -60,7 +60,7 @@ export default function PushToTalk({ onTap, onEnd, pictures, onSendPictures }: {
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
             <span>End</span>
           </button>
-        ) : (
+        ) : live ? null : (
           <button className="voice-picture-send" type="button" aria-label="Send pictures" title="Send pictures"
             data-visible={pictures.items.length > 0} tabIndex={pictures.items.length ? 0 : -1}
             aria-hidden={!pictures.items.length} disabled={locked || pictures.uploading || !pictures.items.length} onClick={onSendPictures}>

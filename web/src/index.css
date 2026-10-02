@@ -101,6 +101,73 @@ body {
 }
 
 /* Markdown body — scoped so chat styles never leak into the rest of the UI. */
+.chat-chart {
+  margin: 0.75rem 0;
+  padding: 1rem;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 1rem;
+  background: var(--color-ink-900);
+  color: var(--color-zinc-200);
+  min-width: 0;
+  font-size: 0.85rem;
+}
+.chat-chart-title { font-weight: 500; font-size: 0.95rem; }
+.chat-md .chat-chart-description { margin: 0.25rem 0 0; color: var(--color-zinc-400); font-size: 0.75rem; }
+.chat-chart-pie-layout { display: flex; align-items: center; gap: 1rem; margin-top: 0.75rem; }
+.chat-chart-pie { width: 140px; flex: 0 0 140px; }
+.chat-chart-pie-legend { min-width: 0; flex: 1; }
+.chat-chart-pie-legend button { display: flex; align-items: center; gap: 0.5rem; width: 100%; min-height: 32px; text-align: left; font-size: 0.75rem; border-radius: 4px; cursor: pointer; }
+.chat-chart-name { flex: 1; overflow-wrap: anywhere; }
+.chat-chart-value { font-variant-numeric: tabular-nums; color: var(--color-zinc-300); }
+.chat-chart-swatch { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.chat-chart-plot { display: block; width: 100%; max-height: 230px; margin-top: 0.75rem; overflow: visible; }
+.chat-chart-axis line { stroke: #2d3442; stroke-width: 0.7; }
+.chat-chart-axis text, .chat-chart-label { fill: #a3aec3; font-size: 10px; font-family: var(--font-sans); }
+.chat-chart-series { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; color: var(--color-zinc-400); font-size: 0.7rem; }
+.chat-chart-series > span { display: inline-flex; align-items: center; gap: 0.35rem; }
+.chat-chart-detail { margin-top: 0.65rem; min-height: 2.5em; font-size: 0.7rem; color: var(--color-zinc-300); overflow-wrap: anywhere; }
+.chat-chart-data { border-top: 1px solid rgba(255,255,255,0.06); padding-top: 0.4rem; font-size: 0.7rem; color: var(--color-zinc-400); }
+.chat-chart-data summary { cursor: pointer; width: fit-content; padding: 0.25rem 0; }
+.chat-chart [role="button"] { cursor: pointer; }
+.chat-chart [role="button"]:focus-visible { outline: none; stroke: #edf0f6; stroke-width: 2px; }
+/* The visible point carries selection; keep its larger tap target invisible. */
+.chat-chart .chat-chart-hit:focus { outline: none; stroke: none; }
+.chat-chart .chat-chart-pie [role="button"]:focus { outline: none; }
+.chat-chart .chat-chart-pie [role="button"]:is([aria-pressed="true"], :focus-visible) {
+  stroke: var(--color-zinc-100);
+  stroke-width: 1.5px;
+  stroke-linejoin: round;
+}
+.chat-chart button:focus-visible, .chat-chart summary:focus-visible { outline: 1px solid var(--color-aurora-teal); outline-offset: 2px; }
+@media (max-width: 480px) {
+  .chat-chart { padding: 0.75rem; }
+  .chat-chart-pie-layout { gap: 0.75rem; }
+  .chat-chart-pie { width: 112px; flex-basis: 112px; }
+}
+
+.chat-mermaid {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 0.75rem;
+  background: var(--color-ink-900);
+}
+.chat-mermaid > svg {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100% !important;
+  max-height: 280px;
+  margin: 0 auto;
+}
+@media (max-width: 640px) {
+  .chat-mermaid { padding: 0.5rem; }
+  .chat-mermaid > svg { max-height: 240px; }
+}
+.chat-mermaid:focus-visible { outline: 2px solid var(--color-aurora-teal); outline-offset: 2px; }
+
 .chat-md > :first-child { margin-top: 0; }
 .chat-md > :last-child { margin-bottom: 0; }
 .chat-md p { margin: 0.65em 0; }
@@ -465,7 +532,7 @@ select:not([multiple]):not([size]) {
 .dbg-tile[data-tone="bad"] .dbg-tile-value { color: #f0a0a0; }
 .dbg-panel { display: flex; flex-direction: column; height: min(40vh, 420px); border-top: 1px solid #ffffff14; }
 .dbg-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 6px 12px; border-bottom: 1px solid #ffffff0a; }
-.dbg-tabs { display: flex; gap: 2px; }
+.dbg-tabs { display: flex; flex-wrap: wrap; gap: 2px; }
 .dbg-tab { min-height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: inherit; letter-spacing: .14em; text-transform: uppercase; }
 .dbg-tab[aria-selected="true"] { background: #b5c9ee14; color: #dbe6fa; }
 .dbg-turnpick { display: flex; align-items: center; gap: 8px; }
@@ -506,6 +573,18 @@ select:not([multiple]):not([size]) {
 .dbg-reply { margin: 0; padding: 10px 12px; border-left: 2px solid #927cc8; background: #ffffff05; font-family: var(--font-sans); font-size: 13px; color: var(--color-zinc-200); }
 .dbg-state { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .dbg-state h4 { margin: 0 0 4px; font-size: 9px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+.dbg-resources { display: flex; flex-direction: column; gap: 14px; }
+.dbg-resource-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; color: var(--muted); line-height: 1.6; }
+.dbg-resource-table-wrap { overflow-x: auto; }
+.dbg-resource-table { width: 100%; min-width: 350px; border-collapse: collapse; text-align: left; font-variant-numeric: tabular-nums; }
+.dbg-resource-table caption { text-align: left; color: var(--color-zinc-100); margin-bottom: 8px; }
+.dbg-resource-table th, .dbg-resource-table td { padding: 8px 10px; border-bottom: 1px solid #ffffff0a; white-space: nowrap; font-weight: 400; }
+.dbg-resource-table thead { color: var(--muted); font-size: 10px; }
+.dbg-resource-table tfoot { color: var(--color-zinc-100); background: #ffffff05; }
+.dbg-resource-pid { display: block; color: var(--muted); font-size: 9px; margin-top: 3px; }
+.dbg-resource-gpu h4 { margin: 0 0 10px; font-weight: 400; color: var(--color-zinc-100); }
+.dbg-resource-gpu h4 span { margin-left: 8px; color: var(--muted); font-size: 10px; }
+.dbg-resource-notes { margin: 0; padding-left: 16px; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .dbg-tile-value { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 .dbg-context { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 20px; margin: 0; }
 .dbg-context dt { color: var(--muted); font-size: 10px; margin-bottom: 4px; }

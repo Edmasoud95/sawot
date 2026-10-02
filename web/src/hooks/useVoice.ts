@@ -7,7 +7,9 @@ import { useVoiceStore } from "../store";
 import { useChatStore } from "../chatStore";
 import { useVoicePictures, type VoicePicture } from "./useVoicePictures";
 
-export function useVoice() {
+export function useVoice(enabled = true) {
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
   const socketRef = useRef(null);
   const interactionRef = useRef(0);
   const debugTurnRef = useRef<number | null>(null);
@@ -24,14 +26,16 @@ export function useVoice() {
 
   useEffect(() => {
     const socket = new VoiceSocket({
-      onOpen: () => useVoiceStore.getState().setStatus("idle"),
+      onOpen: () => { if (enabledRef.current) useVoiceStore.getState().setStatus("idle"); },
       onClose: () => {
+        if (!enabledRef.current) return;
         finishDebug("failed", "Voice connection closed");
         debugTurnRef.current = null;
         endSession();
         useVoiceStore.getState().setStatus("connecting");
       },
       onEvent: (msg) => {
+        if (!enabledRef.current && msg.type !== "entities") return;
         const s = useVoiceStore.getState();
         if (s.debugEnabled) {
           const d = useDebugStore.getState();
@@ -76,6 +80,7 @@ export function useVoice() {
         }
       },
       onAudio: (buf) => {
+        if (!enabledRef.current) return;
         recorderRef.current?.end();
         // Keep pictures available if synthesis fails or the turn is interrupted
         // after its text arrives but before its history is committed.
@@ -110,6 +115,10 @@ export function useVoice() {
     socketRef.current = socket;
     return () => { endSession(); socket.close(); };
   }, []);
+
+  useEffect(() => {
+    endSession();
+  }, [enabled]);
 
   async function resumeListening() {
     if (!sessionRef.current || !socketRef.current?.ready) return;
@@ -147,8 +156,10 @@ export function useVoice() {
     cancelTurn();
     recorderRef.current?.end();
     const s = useVoiceStore.getState();
-    s.setSessionActive(false);
-    s.setStatus(socketRef.current?.ready ? "idle" : "connecting");
+    if (enabledRef.current) {
+      s.setSessionActive(false);
+      s.setStatus(socketRef.current?.ready ? "idle" : "connecting");
+    }
   }
 
   if (!recorderRef.current) recorderRef.current = new VoiceSessionRecorder({
@@ -197,16 +208,16 @@ export function useVoice() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (!enabledRef.current || event.key !== "Escape" || event.defaultPrevented) return;
       if ((event.target as HTMLElement)?.closest?.('[role="dialog"]') || document.querySelector('dialog[open], :popover-open')) return;
       const status = useVoiceStore.getState().status;
       if (!["thinking", "speaking", "starting", "listening", "recording"].includes(status)) return;
       event.preventDefault();
       endSession();
     };
-    const onHidden = () => { if (document.hidden) endSession(); };
+    const onHidden = () => { if (document.hidden && enabledRef.current) endSession(); };
     const unsubscribe = useVoiceStore.subscribe((state, previous) => {
-      if (state.mode === "chat" && previous.mode !== "chat") endSession();
+      if (enabledRef.current && state.mode === "chat" && previous.mode !== "chat") endSession();
     });
     window.addEventListener("keydown", onKey);
     window.addEventListener("pagehide", endSession);

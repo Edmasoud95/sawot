@@ -1,3 +1,4 @@
+import { analysisHistory } from "./analysis/context.js";
 import { isDeepSeekEndpoint } from "./effort.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -14,6 +15,7 @@ import { executeTool, toOpenAiTools, touchedIdsFor, type Tool } from "./tools.js
 import { createChatCompletion } from "./reasoningFallback.js";
 import type { EffortLevel } from "./effort.js";
 import { voiceSearchSources } from "./search.js";
+import { FINAL_ANSWER_PROMPT, FINAL_ANSWER_ERROR } from "./toolBudget.js";
 
 export const SAFE_ID = /^[0-9a-f]{12}$/;
 const MAX_ROUNDS = 5;
@@ -46,7 +48,7 @@ export function toOpenAiMessages(messages: any[], uploadDir: string, preserveThi
   for (const m of messages) {
     if (m.command) continue;
     if (m.role === "assistant") {
-      out.push({ role: "assistant", content: m.content ?? "", ...(preserveThinking && m.thinking ? { reasoning_content: m.thinking } : {}) });
+      out.push({ role: "assistant", content: (m.content ?? "") + analysisHistory(m.analysis), ...(preserveThinking && m.thinking ? { reasoning_content: m.thinking } : {}) });
       continue;
     }
     let text = m.content ?? "";
@@ -91,9 +93,9 @@ export class ChatStore {
     return join(this.root, cid + ".json");
   }
 
-  create(model: string, homeAssistant = false, webSearch = true): any {
+  create(model: string, homeAssistant = false, webSearch = true, python = true): any {
     const now = Date.now() / 1000;
-    const conv = { id: newId(), title: "New chat", reasoningEffort: null, model, homeAssistant, webSearch, created: now, updated: now, messages: [] };
+    const conv = { id: newId(), title: "New chat", reasoningEffort: null, model, homeAssistant, webSearch, python, created: now, updated: now, messages: [] };
     this.save(conv);
     return conv;
   }
@@ -106,6 +108,7 @@ export class ChatStore {
       conv.messages = (conv.messages ?? []).filter((m: any) => !m.command);
       conv.homeAssistant = Boolean(conv.homeAssistant);
       conv.webSearch = conv.webSearch !== false;
+      conv.python = conv.python !== false;
       conv.reasoningEffort ??= null;
       return conv;
     } catch {
@@ -167,6 +170,7 @@ export class ChatStore {
           reasoningEffort: conv.reasoningEffort ?? null,
           homeAssistant: Boolean(conv.homeAssistant),
           webSearch: conv.webSearch !== false,
+          python: conv.python !== false,
           created: conv.created, updated: conv.updated,
         });
       } catch {
@@ -234,14 +238,19 @@ export async function* runChat(
 ): AsyncGenerator<[string, any]> {
   const convo: any[] = [{ role: "system", content: systemPrompt }, ...messages];
   const touched: string[] = [];
-  let finished = false;
   const fullContent: string[] = [];
   const fullThinking: string[] = [];
   const sources = new Map<string, ReturnType<typeof voiceSearchSources>[number]>();
 
   const turnStart = performance.now();
-  for (let round = 0; round < MAX_ROUNDS; round++) {
+  for (let round = 0; round <= MAX_ROUNDS; round++) {
     signal?.throwIfAborted();
+    const answerOnly = round === MAX_ROUNDS;
+    if (answerOnly) {
+      yield ["debug", { event: "tool_budget_exhausted", data: { rounds: MAX_ROUNDS } }];
+      convo[0] = { role: "system", content: systemPrompt + FINAL_ANSWER_PROMPT };
+      signal?.throwIfAborted();
+    }
     const parser = new ThinkTagParser();
     const contentParts: string[] = [];
     const thinkingParts: string[] = [];
@@ -252,7 +261,7 @@ export async function* runChat(
       model,
       ...(reasoningEffort != null ? { reasoning_effort: reasoningEffort } : {}),
       messages: convo,
-      ...(tools.length ? { tools: toOpenAiTools(tools) } : {}),
+      ...(!answerOnly && tools.length ? { tools: toOpenAiTools(tools) } : {}),
       stream: true,
     }, { preserveReasoning: true, signal });
 
@@ -301,6 +310,9 @@ export async function* runChat(
     const content = contentParts.join("");
     yield ["debug", { event: "llm_round", data: { round: round + 1, latency_ms: Math.round(performance.now() - roundStart),
       tool_calls: toolCalls.size ? [...toolCalls.values()].map((c) => c.name) : null } }];
+    // Some compatible providers may still return calls without tool definitions.
+    // Never execute them beyond the budget or accept an empty final response.
+    if (answerOnly && (toolCalls.size > 0 || !content.trim())) throw new Error(FINAL_ANSWER_ERROR);
     if (toolCalls.size === 0) {
       const finalContent = fullContent.join("").trim();
       yield ["debug", { event: "reply", data: { raw: content, text: finalContent, rounds: round + 1,
@@ -309,7 +321,6 @@ export async function* runChat(
         content: finalContent,
         thinking: fullThinking.join("").trim(),
       }];
-      finished = true;
       break;
     }
 
@@ -360,13 +371,6 @@ export async function* runChat(
       }
       convo.push({ role: "tool", tool_call_id: c.id, content: resultJson });
     }
-  }
-
-  if (!finished) {
-    yield ["final", {
-      content: (fullContent.join("") + "\n\nSorry, I couldn't complete that.").trim(),
-      thinking: fullThinking.join("").trim(),
-    }];
   }
 
   if (touched.length && getCards) {
