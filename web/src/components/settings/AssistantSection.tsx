@@ -1,3 +1,4 @@
+import MemorySettings from "./MemorySettings";
 import NotificationSettings from "./NotificationSettings";
 import { useEffect, useState } from "react";
 import ModelPicker from "../ModelPicker";
@@ -156,6 +157,7 @@ export default function AssistantSection({ data, update }) {
           <ChatInstructions value={data.chatInstructions ?? ""} onChange={update} />
         </Disclosure>
       </div>
+      <MemorySettings />
       <NotificationSettings />
       <Toggle
         label="Detailed drawings"

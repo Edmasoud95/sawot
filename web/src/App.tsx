@@ -5,7 +5,6 @@ import VoiceSources from "./components/VoiceSources";
 import PushToTalk from "./components/PushToTalk";
 import HistoryDrawer from "./components/HistoryDrawer";
 import SettingsPanel from "./components/SettingsPanel";
-import CardGrid from "./components/cards/CardGrid";
 import DebugBar from "./components/DebugBar";
 import ModeSwitch from "./components/ModeSwitch";
 import MobileHeader from "./components/MobileHeader";
@@ -51,13 +50,7 @@ export default function App() {
       ) : (
         <div className="voice-workspace">
           <div className="voice-content" data-search={hasSearch}>
-            {mode === "orb" ? (
-              <div className="orb-stage" aria-hidden="true"><Orb /></div>
-            ) : (
-              <section className="controls-workspace" aria-label="Device controls">
-                <CardGrid sendControl={sendControl} />
-              </section>
-            )}
+            <div className="orb-stage" aria-hidden="true"><Orb /></div>
             <VoiceSources />
             <div className="caption-space" data-visible={hasCaptions}>
               {hasCaptions && <Captions />}

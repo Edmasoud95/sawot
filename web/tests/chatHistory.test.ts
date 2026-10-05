@@ -3,9 +3,9 @@ import test from "node:test";
 import { createRequire } from "node:module";
 const require = createRequire(new URL("../package.json", import.meta.url));
 const { build } = require("esbuild");
-const bundle = await build({ entryPoints: [new URL("../src/chatStore.ts", import.meta.url).pathname], bundle: true, write: false, platform: "node", format: "esm", define: { "import.meta.env": "{}" } });
+const bundle = await build({ stdin: { contents: 'export { useChatStore } from "./chatStore"; export { invalidateMemory } from "./lib/memoryApi";', resolveDir: new URL("../src/", import.meta.url).pathname, loader: "ts" }, bundle: true, write: false, platform: "node", format: "esm", define: { "import.meta.env": "{}" } });
 Object.assign(globalThis, { window: { matchMedia: () => ({ matches: true }) }, location: { protocol: "http:", host: "localhost" }, localStorage: { getItem: () => null } });
-const { useChatStore: store } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text + "\n//# sourceURL=chatStore-test.mjs").toString("base64")}`);
+const { useChatStore: store, invalidateMemory } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text + "\n//# sourceURL=chatStore-test.mjs").toString("base64")}`);
 
 test("status preserves pending attachments for the next model message", async (t) => {
   t.after(() => store.setState({ pendingAttachments: [], conversations: [], active: null, activeId: null, streaming: false }));
@@ -265,7 +265,7 @@ function interruptedChat() {
     stream = controller;
     controller.enqueue(new TextEncoder().encode('data: {"type":"content","delta":"Partial answer"}\n\n'));
   } }));
-  return { response, fail: () => stream.error(new TypeError("Type error")), close: () => stream.close() };
+  return { response, fail: () => stream.error(new TypeError("Type error")), close: () => stream.close(), emit: (event: unknown) => stream.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`)) };
 }
 
 const settleStream = () => new Promise(resolve => setTimeout(resolve, 10));
@@ -502,4 +502,92 @@ test("resuming an idle chat refreshes a stale network error without reopening or
   assert.equal(store.getState().active.messages.at(-1).content, "Saved answer");
   assert.equal(store.getState().active.draftText, "Keep my draft");
   assert.deepEqual(requests, ["/api/chat/conversations/interrupted"]);
+});
+
+test("memory activity survives interruption, reconciles once, and clears on navigation", async () => {
+  const stream = interruptedChat();
+  const event = { type: "memory", id: "saved-event", turnId: "turn", kind: "saved", created: "2026-10-02", memories: [{ id: "fact", revision: 1 }] };
+  const requests: string[] = [];
+  let release!: (response: Response) => void;
+  globalThis.fetch = async url => {
+    requests.push(String(url));
+    if (String(url).endsWith("/messages")) return stream.response;
+    return new Promise(resolve => { release = resolve; });
+  };
+  await store.getState().startStream("Remember my preference");
+  stream.emit(event);
+  stream.emit(event);
+  await settleStream();
+  assert.equal(store.getState().streamMemory.length, 1, "replayed operation replaces its existing indicator");
+  stream.fail();
+  await settleStream();
+  assert.deepEqual(store.getState().active.messages.at(-1).memory, [event], "successful activity stays visible during reconciliation");
+  release(new Response(JSON.stringify({ id: "interrupted", messages: [
+    { role: "user", content: "Remember my preference" },
+    { role: "assistant", content: "Saved answer", memory: [event] }
+  ], responding: false })));
+  await settleStream();
+  assert.deepEqual(store.getState().active.messages.at(-1).memory, [event]);
+  assert.equal(store.getState().active.messages.filter(message => message.memory?.length).length, 1);
+  assert.equal(requests.filter(url => url.endsWith("/messages")).length, 1, "recovery must not repeat a memory operation");
+  globalThis.fetch = async () => new Response(JSON.stringify({ id: "other-memory-chat", messages: [], responding: false }));
+  await store.getState().openConversation("other-memory-chat");
+  assert.deepEqual(store.getState().streamMemory, []);
+  assert.deepEqual(store.getState().active.messages, []);
+  assert.equal(requests.some(url => url.endsWith("/cancel")), false);
+});
+
+test("memory invalidation removes snapshots and preserves active streaming", () => {
+  const memory = [{ id: "event", kind: "recalled", created: "2026-10-02", memories: [{ id: "fact", revision: 2, text: "Private old value", current: { text: "Private current value" } }] }];
+  const active = { id: "memory-invalidation", messages: [{ role: "assistant", content: "Answer", memory }] };
+  store.setState({ activeId: active.id, active, streaming: true, streamText: "Still generating", streamMemory: memory });
+  let refreshes = 0;
+  const oldDispatch = window.dispatchEvent;
+  window.dispatchEvent = event => { assert.equal(event.type, "sawot-memory-change"); refreshes++; return true; };
+  try {
+    invalidateMemory();
+    const expected = [{ ...memory[0], memories: [{ id: "fact", revision: 2 }] }];
+    assert.deepEqual(store.getState().streamMemory, expected);
+    assert.deepEqual(store.getState().active.messages[0].memory, expected);
+    assert.equal(store.getState().activeId, active.id);
+    assert.equal(store.getState().streaming, true);
+    assert.equal(store.getState().streamText, "Still generating");
+    assert.equal(store.getState().active.messages[0].content, "Answer");
+    assert.equal(refreshes, 1);
+  } finally {
+    window.dispatchEvent = oldDispatch;
+    store.setState({ activeId: null, active: null, streaming: false, streamMemory: [], streamText: "" });
+  }
+});
+
+test("editing replaces the prompt while preserving original attachments and the composer draft", async () => {
+  const attachments = [{ id: "abc123abcdef", name: "original.txt" }];
+  const pending = [{ id: "def123abcdef", name: "next.txt" }];
+  store.setState({ activeId: "edit", active: { id: "edit", messages: [{ role: "user", content: "Original", attachments }, { role: "assistant", content: "Old" }], draftText: "Next draft" }, conversations: [], pendingAttachments: pending, streaming: false, reconciling: false });
+  let payload: any;
+  globalThis.fetch = async (_url, init: any) => {
+    payload = JSON.parse(init.body);
+    return new Response('data: {"type":"regenerating","from":0}\n\ndata: {"type":"done","message":{"role":"assistant","content":"New answer"}}\n\n');
+  };
+  assert.equal(typeof store.getState().editMessage, "function");
+  await store.getState().editMessage(0, "Revised");
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(payload, { regenerateFrom: 0, content: "Revised", expectedMessageCount: 2 });
+  assert.deepEqual(store.getState().active.messages.map((m: any) => m.content), ["Revised", "New answer"]);
+  assert.deepEqual(store.getState().active.messages[0].attachments, attachments);
+  assert.equal(store.getState().active.draftText, "Next draft");
+  assert.deepEqual(store.getState().pendingAttachments, pending);
+});
+
+test("failed editing restores original text and later messages", async () => {
+  const messages = [{ role: "user", content: "Original" }, { role: "assistant", content: "Keep answer" }, { role: "user", content: "Later" }];
+  store.setState({ activeId: "edit-fail", active: { id: "edit-fail", messages, draftText: "Next draft" }, conversations: [], streaming: false, reconciling: false });
+  globalThis.fetch = async (url) => String(url).endsWith("/messages")
+    ? new Response('data: {"type":"regenerating","from":0}\n\ndata: {"type":"error","message":"Provider unavailable"}\n\n')
+    : new Response(JSON.stringify({ messages }));
+  await store.getState().editMessage(0, "Revised");
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(store.getState().active.messages, messages);
+  assert.equal(store.getState().active.draftText, "Next draft");
+  assert.match(store.getState().messageError, /Provider unavailable/);
 });

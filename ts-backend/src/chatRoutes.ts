@@ -22,6 +22,8 @@ import { ChatStore, newId, runChat, SAFE_ID, toOpenAiMessages } from "./chat.js"
 import { buildChatSystemPrompt, todayLabel } from "./chatPrompt.js";
 import type { HomeAssistant } from "./ha.js";
 import { toOpenAiTools, type Tool } from "./tools.js";
+import type { MemoryStore, MemoryEvent } from "./memory/store.js";
+import { buildMemoryTools } from "./memory/tools.js";
 
 const MAX_UPLOAD = 10 * 1024 * 1024;
 const TEXT_CAP = 50000;
@@ -37,6 +39,7 @@ const UPLOAD_MEDIA: Record<string, string> = {
 };
 
 export interface ChatCtx {
+  memory?: MemoryStore;
   onResponseCompleted?: (notice: ChatCompletionNotice) => void | Promise<void>;
   analysis?: { files: AnalysisFileStore; runner: Runner };
   store: ChatStore;
@@ -94,6 +97,25 @@ async function maybeTitle(ctx: ChatCtx, conv: any, signal: AbortSignal): Promise
 }
 
 export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
+  const activityReference = (event: MemoryEvent) => ({ ...event, memories: event.memories.map(m => ({ id: m.id, revision: m.revision })) });
+  // Canonical activity lives with the memory store, never duplicated fact text
+  // in conversation JSON. This also recovers operations after a process crash.
+  const withMemory = async (conv: any) => {
+    if (!ctx.memory) return conv;
+    const events = (await ctx.memory.eventsForConversation(conv.id)).map(activityReference);
+    const messages = conv.messages.map((m: any) => ({ ...m, memory: events.filter(e => e.turnId === m.id) }));
+    const seen = new Set(messages.map((m: any) => m.id));
+    for (const event of events) {
+      if (seen.has(event.turnId)) continue;
+      seen.add(event.turnId);
+      const sourceIndex = messages.findIndex((m: any) => m.id === event.sourceMessageId && m.role === "user");
+      // A replaced response's events must not resurrect its old message after
+      // regeneration. Recover only an otherwise unanswered source message.
+      if (sourceIndex < 0 || messages[sourceIndex + 1]?.role === "assistant") continue;
+      messages.splice(sourceIndex + 1, 0, { id: event.turnId, role: "assistant", content: "", memory: events.filter(e => e.turnId === event.turnId) });
+    }
+    return { ...conv, messages };
+  };
   if (ctx.analysis) {
     registerAnalysisRoutes(app, ctx.analysis.files, ctx.store);
     // Recover partial tool outcomes after an interrupted backend process.
@@ -146,7 +168,16 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     if (!conv) return reply.code(404).send({ detail: "not found" });
     const snapshot = activeTurns.get(conv.id)?.snapshot;
     reply.header("Cache-Control", "no-store");
-    return { ...conv, ...(snapshot?.() ?? {}), responding: Boolean(snapshot) };
+    const result = await withMemory({ ...conv, ...(snapshot?.() ?? {}), responding: Boolean(snapshot) });
+    if (!snapshot && !activeTurns.has(conv.id) && result.messages.length !== conv.messages.length) {
+      // Persist crash recovery so the next regeneration's expected message
+      // count agrees with the history returned to the browser.
+      const latest = ctx.store.get(conv.id);
+      if (latest && latest.messages.length === conv.messages.length) {
+        ctx.store.save({ ...latest, messages: result.messages.map(({ memory: _memory, ...m }: any) => m) });
+      }
+    }
+    return result;
   });
 
   app.patch("/api/chat/conversations/:cid", async (req: any, reply: any) => {
@@ -250,7 +281,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     const turnId = randomUUID();
     const regenerating = Object.hasOwn(body, "regenerateFrom");
     if (activeTurns.has(conv.id)) return reply.code(409).send({ detail: "This conversation is still responding. Try again when it finishes." });
-    if (ctx.analysis) {
+    if (ctx.analysis || ctx.memory) {
       for (const message of conv.messages) message.id ??= newId();
       ctx.store.save(conv);
     }
@@ -262,18 +293,23 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       if (body.expectedMessageCount !== conv.messages.length) {
         return reply.code(409).send({ detail: "This conversation changed. Reopen it before regenerating." });
       }
+      const editing = Object.hasOwn(body, "content");
+      if (editing && (typeof body.content !== "string" || (!body.content.trim() && !conv.messages[index].attachments?.length))) {
+        return reply.code(400).send({ detail: "Enter a message before saving." });
+      }
       conv.messages = conv.messages.slice(0, index + 1);
+      if (editing) conv.messages[index] = { ...conv.messages[index], content: body.content };
     }
     const command = regenerating ? null : chatCommand(body.content);
     if (!command && !regenerating) {
       conv.draftText = "";
-      conv.messages.push({ ...(ctx.analysis ? { id: newId() } : {}), role: "user", content: body.content ?? "", attachments: body.attachments ?? [] });
+      conv.messages.push({ ...((ctx.analysis || ctx.memory) ? { id: newId() } : {}), role: "user", content: body.content ?? "", attachments: body.attachments ?? [] });
       conv.updated = Date.now() / 1000;
       ctx.store.save(conv);
     }
 
     const controller = new AbortController();
-    const assistant: any = { ...(ctx.analysis ? { id: newId(), analysis: [] } : {}), role: "assistant", content: "", thinking: "", cards: [] };
+    const assistant: any = { ...((ctx.analysis || ctx.memory) ? { id: newId() } : {}), ...(ctx.analysis ? { analysis: [] } : {}), role: "assistant", content: "", thinking: "", cards: [] };
     if (command) assistant.command = command;
     let finish!: () => void;
     const finished = new Promise<void>(resolve => { finish = resolve; });
@@ -297,6 +333,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     let savedResponse = false;
     let failed = false;
     let completed = false;
+    let stopMemoryWatch: (() => void) | undefined;
     const persist = () => {
       if (command || persisted || (regenerating && (!completed || controller.signal.aborted))) return;
       persisted = true;
@@ -348,7 +385,20 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       addFileInventory(history, availableFiles);
       const homeAssistant = Boolean(conv.homeAssistant) && homeConfigured();
       const searchTools = conv.webSearch !== false ? ctx.searchTools : [];
-      const tools = [...searchTools, ...analysisTools, ...(homeAssistant ? ctx.haTools : [])];
+      const memory = !command ? ctx.memory : undefined;
+      const lastUser = [...conv.messages].reverse().find((m: any) => m.role === "user");
+      const memoryScope = memory && lastUser ? await memory.beginTurn({
+        conversationId: conv.id, turnId: assistant.id, sourceMessageId: lastUser.id,
+        text: String(lastUser.content ?? ""), regenerating, signal: controller.signal,
+      }) : undefined;
+      const emitMemory = (event: MemoryEvent) => { sse({ type: "memory", ...activityReference(event) }); };
+      const memoryTools = memory && memoryScope && memory.isEnabled() ? buildMemoryTools(memory, memoryScope, emitMemory) : [];
+      if (memory && memoryScope && memoryTools.length) {
+        stopMemoryWatch = memory.subscribe(() => {
+          if (!memory.isActive(memoryScope)) controller.abort();
+        });
+      }
+      const tools = [...searchTools, ...analysisTools, ...memoryTools, ...(homeAssistant ? ctx.haTools : [])];
       const system = buildChatSystemPrompt({
         name: ctx.name,
         instructions: ctx.getChatInstructions(),
@@ -357,6 +407,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
         entitySummary: ctx.getEntitySummary(),
         search: searchTools.length > 0,
         analysis: analysisTools.length > 0,
+        memory: memoryTools.length > 0,
       });
       const getCards = homeAssistant && ctx.ha ? (ids: string[]) => ctx.ha!.getCards(ids) : undefined;
       if (command === "status") {
@@ -379,6 +430,35 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       const effort = conv.reasoningEffort ?? ((ctx.getEffortLevels?.(conv.model) ?? []).includes("medium") ? "medium" : null);
       for await (const [event, data] of runChat(
         llm.client, llm.model, tools, system, history, getCards, effort, controller.signal,
+        memory && memoryScope ? { prepare: async (messages) => {
+          // Tool transcripts stay in the current inference loop. Refresh them
+          // too, so a Settings edit/delete cannot leave an old fact in context.
+          const memoryCalls = new Set<string>();
+          for (const message of messages) for (const call of message.tool_calls ?? []) {
+            if (["save_memory", "update_memory", "search_memories", "delete_memory"].includes(call.function?.name)) {
+              memoryCalls.add(call.id);
+              call.function.arguments = JSON.stringify({ details: "Memory operation already executed; see current result." });
+            }
+          }
+          for (const message of messages) if (message.role === "tool" && memoryCalls.has(message.tool_call_id)) {
+            if (!memory.isActive(memoryScope)) {
+              message.content = JSON.stringify({ error: "Memory work expired or was disabled. Do not repeat writes." });
+              continue;
+            }
+            try {
+              const result = JSON.parse(message.content);
+              if (Array.isArray(result.memories)) {
+                result.memories = (await Promise.all(result.memories.map(async (fact: any) => {
+                  try { const current = await memory.get(fact.id); return current.revision === fact.revision ? { id: current.id, revision: current.revision, text: current.text, topic: current.topic } : null; }
+                  catch { return null; }
+                }))).filter(Boolean);
+                message.content = JSON.stringify(result);
+              }
+            } catch { message.content = JSON.stringify({ error: "Memory result unavailable" }); }
+          }
+          // Personal facts enter context only through an explicit memory tool call.
+          return { suffix: "", submitted: async () => {} };
+        } } : undefined,
       )) {
         if (event === "thinking") {
           assistant.thinking += data;
@@ -406,7 +486,8 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       controller.signal.throwIfAborted();
       completed = true;
       persist();
-      sse({ type: "done", message: assistant, title: conv.title });
+      const done = await withMemory({ ...conv, messages: [assistant] });
+      sse({ type: "done", message: done.messages.find((m: any) => m.id === assistant.id) ?? assistant, title: conv.title });
     } catch (e: any) {
       failed = true;
       if (assistant.search?.phase === "start") assistant.search.phase = "error";
@@ -420,6 +501,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       }
       sse({ type: "error", message });
     } finally {
+      stopMemoryWatch?.();
       try {
         persist();
         if (ctx.analysis) {

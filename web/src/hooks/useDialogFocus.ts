@@ -15,6 +15,11 @@ export function useDialogFocus(
     // Let the opening animation make the panel visible before moving focus.
     const frame = requestAnimationFrame(() => focusable()[0]?.focus({ preventScroll: true }));
     const onKey = (event: KeyboardEvent) => {
+      // A portal dialog above this one owns keyboard navigation until it closes.
+      const dialogs = Array.from(document.querySelectorAll<HTMLElement>(
+        '[role="dialog"][aria-modal="true"]:not([inert]), dialog[open]',
+      )).filter(el => el.getClientRects().length > 0);
+      if (dialogs.length && dialogs[dialogs.length - 1] !== panel.current) return;
       if (event.key === "Escape") {
         event.preventDefault();
         onClose();

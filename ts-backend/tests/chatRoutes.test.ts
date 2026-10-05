@@ -432,7 +432,7 @@ test("message read-aloud strips hidden markers and speech tags and returns audio
   } finally { await app.close(); }
 });
 
-test("cancelled regeneration preserves history and concurrent turns are rejected", async () => {
+for (const editing of [false, true]) test(`cancelled ${editing ? "edit" : "regeneration"} preserves history and concurrent turns are rejected`, async () => {
   let started!: () => void;
   const ready = new Promise<void>(resolve => { started = resolve; });
   let wasAborted = false;
@@ -457,7 +457,7 @@ test("cancelled regeneration preserves history and concurrent turns are rejected
     const address = await app.listen({ host: "127.0.0.1", port: 0 });
     const response = await fetch(`${address}/api/chat/conversations/${conv.id}/messages`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ regenerateFrom: 0, expectedMessageCount: 2 }), signal: controller.signal,
+      body: JSON.stringify({ regenerateFrom: 0, expectedMessageCount: 2, ...(editing ? { content: "Revised" } : {}) }), signal: controller.signal,
     });
     await ready;
     const blocked = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "Overlap" } });
@@ -623,4 +623,40 @@ test('Python disabled omits both analysis tools without touching runner', async 
     assert.equal(probes,0);assert.ok(requests.length>=1);
     for (const request of requests) assert.equal(request.tools,undefined);
   } finally {await app.close();}
+});
+
+test("editing resends revised text with original attachments and replaces later history", async () => {
+  const requests: any[] = [];
+  const { app, ctx } = harness({ resolve: () => ({ client: recordingClient(requests), model: "m" }) });
+  try {
+    const conv = ctx.store.create("m");
+    conv.title = "Existing";
+    conv.draftText = "Next draft";
+    conv.messages = [{ role: "user", content: "Original", attachments: [{ id: "123456abcdef", name: "notes.txt", kind: "text" }] }, { role: "assistant", content: "Old" }, { role: "user", content: "Later" }];
+    ctx.store.save(conv);
+    const res = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { regenerateFrom: 0, content: "Revised", expectedMessageCount: 3 } });
+    assert.ok(sseEvents(res.body).some(e => e.type === "done"));
+    assert.match(requests[0].messages.at(-1).content, /Revised.*notes.txt/s);
+    const saved = ctx.store.get(conv.id);
+    assert.deepEqual(saved.messages.map((m: any) => m.content), ["Revised", "done"]);
+    assert.deepEqual(saved.messages[0].attachments, conv.messages[0].attachments);
+    assert.equal(saved.draftText, "Next draft");
+  } finally { await app.close(); }
+});
+
+test("invalid edits and failed edited responses preserve the original history", async () => {
+  const { app, ctx } = harness();
+  try {
+    const conv = ctx.store.create("m");
+    conv.messages = [{ role: "user", content: "Original" }, { role: "assistant", content: "Keep answer" }];
+    ctx.store.save(conv);
+    for (const content of [null, 42, "", "  "]) {
+      const res = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { regenerateFrom: 0, content, expectedMessageCount: 2 } });
+      assert.equal(res.statusCode, 400);
+      assert.deepEqual(ctx.store.get(conv.id).messages, conv.messages);
+    }
+    const failed = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { regenerateFrom: 0, content: "Revised", expectedMessageCount: 2 } });
+    assert.ok(sseEvents(failed.body).some(e => e.type === "error"));
+    assert.deepEqual(ctx.store.get(conv.id).messages, conv.messages);
+  } finally { await app.close(); }
 });

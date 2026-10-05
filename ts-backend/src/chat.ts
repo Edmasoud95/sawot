@@ -226,6 +226,11 @@ export class ThinkTagParser {
   }
 }
 
+export interface ChatContextHooks {
+  /** Refresh mutable personal context immediately before each inference. */
+  prepare: (messages: any[]) => Promise<{ suffix: string; submitted: () => Promise<void> }>;
+}
+
 export async function* runChat(
   client: any,
   model: string,
@@ -235,6 +240,7 @@ export async function* runChat(
   getCards?: (ids: string[]) => Promise<any[]>,
   reasoningEffort?: EffortLevel | null,
   signal?: AbortSignal,
+  contextHooks?: ChatContextHooks,
 ): AsyncGenerator<[string, any]> {
   const convo: any[] = [{ role: "system", content: systemPrompt }, ...messages];
   const touched: string[] = [];
@@ -257,6 +263,9 @@ export async function* runChat(
     const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
 
     const roundStart = performance.now();
+    const context = await contextHooks?.prepare(convo);
+    if (context) convo[0] = { role: "system", content: systemPrompt + context.suffix + (answerOnly ? FINAL_ANSWER_PROMPT : "") };
+    signal?.throwIfAborted();
     const stream = await createChatCompletion<any>(client, {
       model,
       ...(reasoningEffort != null ? { reasoning_effort: reasoningEffort } : {}),
@@ -264,6 +273,7 @@ export async function* runChat(
       ...(!answerOnly && tools.length ? { tools: toOpenAiTools(tools) } : {}),
       stream: true,
     }, { preserveReasoning: true, signal });
+    await context?.submitted();
 
     for await (const chunk of stream) {
       signal?.throwIfAborted();
@@ -344,13 +354,14 @@ export async function* runChat(
       let result: any = undefined;
       const toolStart = performance.now();
       const webTool = ["web_search", "fetch_page", "find_in_page"].includes(c.name);
+      const memoryTool = ["save_memory", "update_memory", "search_memories", "delete_memory"].includes(c.name);
       if (webTool) yield ["search", { tool: c.name, phase: "start", sources: [...sources.values()] }];
       try {
         args = JSON.parse(c.arguments || "{}");
       } catch (e: any) {
         result = { error: "invalid tool arguments: " + (e?.message ?? e) };
       }
-      yield ["debug", { event: "tool_call", data: { name: c.name, args } }];
+      yield ["debug", { event: "tool_call", data: { name: c.name, args: memoryTool ? { redacted: true } : args } }];
       if (result === undefined) {
         result = await executeTool(tools, c.name, args);
       }
@@ -364,8 +375,8 @@ export async function* runChat(
       }
       const resultJson = JSON.stringify(result);
       yield ["debug", { event: "tool_result", data: { name: c.name, ok: !(result && typeof result === "object" && "error" in result),
-        latency_ms: Math.round(performance.now() - toolStart), size_chars: resultJson.length, result: resultJson.slice(0, 600) } }];
-      yield ["tool", { name: c.name, args, result: resultJson.slice(0, 300) }];
+        latency_ms: Math.round(performance.now() - toolStart), size_chars: resultJson.length, result: memoryTool ? "[memory result redacted]" : resultJson.slice(0, 600) } }];
+      if (!memoryTool) yield ["tool", { name: c.name, args, result: resultJson.slice(0, 300) }];
       for (const eid of touchedIdsFor(tools, c.name, args, result)) {
         if (!touched.includes(eid)) touched.push(eid);
       }

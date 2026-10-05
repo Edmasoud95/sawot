@@ -61,7 +61,10 @@ export async function createChatCompletion<T = any>(client: OpenAI, params: Reco
   const preserveEffort = params.reasoning_effort != null || options?.preserveReasoning === true;
   const requestOptions = options?.signal ? { signal: options.signal } : undefined;
   const k = key(client, params.model);
-  const viaChat = (body: Record<string, any>) => client.chat.completions.create(body as any, requestOptions) as unknown as Promise<T>;
+  const viaChat = (body: Record<string, any>) => {
+    options?.signal?.throwIfAborted();
+    return client.chat.completions.create(body as any, requestOptions) as unknown as Promise<T>;
+  };
   const withoutReasoning = { ...params, reasoning_effort: "none" };
 
   switch (transports.get(k)) {

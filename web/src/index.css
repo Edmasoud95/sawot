@@ -276,7 +276,7 @@ select:not([multiple]):not([size]) {
   background-size: 17.6px 17.6px;
   background-repeat: no-repeat;
 }
-.app-shell { position: relative; isolation: isolate; display: flex; flex-direction: column; height: 100dvh; overflow: clip; background: radial-gradient(ellipse at 50% 42%, #12182550, transparent 55%); }
+.app-shell { position: relative; isolation: isolate; display: flex; flex-direction: column; height: 100dvh; overflow: clip; background: #080a0f; }
 .app-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; padding: max(22px, env(safe-area-inset-top)) 32px 12px; z-index: 10; }
 .brand { display: flex; align-items: center; gap: 5px; font-size: 15px; font-weight: 500; letter-spacing: .04em; color: #a3adc0; user-select: none; }
 .brand span { color: #8298bd; font-size: 10px; }
@@ -430,6 +430,14 @@ select:not([multiple]):not([size]) {
 .chat-history-menu { display: none; }
 .chat-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 16px; min-height: 66px; padding: 12px 26px; border-bottom: 1px solid var(--line); }
 .message-scroll { scrollbar-width: thin; }
+.message-editor { width: min(32rem, 65vw); }
+.message-editor textarea { display: block; width: 100%; resize: vertical; min-height: 5rem; padding: .5rem; border: 1px solid #ffffff30; border-radius: .5rem; background: #0002; color: inherit; }
+.message-editor textarea:focus-visible { outline: 2px solid #80d4cb; outline-offset: 2px; }
+.message-editor p { margin-top: .5rem; font-size: .75rem; color: #a1a1aa; }
+.message-editor-buttons { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
+.message-editor-buttons button { min-height: 44px; padding: .5rem .75rem; border-radius: .75rem; background: #ffffff0d; font-size: .875rem; }
+.message-editor-buttons button[type="submit"] { background: #80d4cb26; color: #b1eee7; }
+.message-editor-buttons button:disabled { opacity: .4; cursor: not-allowed; }
 .message-scroll:has(.chat-welcome) { display: flex; flex-direction: column; }
 .message-scroll:has(.chat-welcome) > div:last-child { padding: 0; }
 .composer { padding-bottom: max(20px, env(safe-area-inset-bottom)); }

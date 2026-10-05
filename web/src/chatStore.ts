@@ -38,13 +38,13 @@ function withHistory(conversations, active) {
 }
 
 function retainStream(s) {
-  const hasReply = s.streamText || s.streamThinking || s.streamSearch || s.streamCards.length || s.streamAnalysis?.length;
+  const hasReply = s.streamText || s.streamThinking || s.streamSearch || s.streamCards.length || s.streamAnalysis?.length || s.streamMemory?.length;
   return {
     ...(s.active && hasReply ? { active: { ...s.active, messages: [...s.active.messages, {
-      role: "assistant", content: s.streamText, thinking: s.streamThinking, cards: s.streamCards, analysis: s.streamAnalysis,
+      role: "assistant", content: s.streamText, thinking: s.streamThinking, cards: s.streamCards, analysis: s.streamAnalysis, memory: s.streamMemory,
       ...(s.streamSearch ? { search: s.streamSearch } : {}),
     }] } } : {}),
-    streamText: "", streamThinking: "", streamTools: [], streamAnalysis: [], streamSearch: null, streamCards: [],
+    streamText: "", streamThinking: "", streamTools: [], streamAnalysis: [], streamMemory: [], streamSearch: null, streamCards: [],
   };
 }
 
@@ -59,7 +59,7 @@ export const useChatStore = create<any>()((set, get) => ({
   streaming: false,
   streamText: "",
   streamThinking: "",
-  streamTools: [], streamAnalysis: [],
+  streamTools: [], streamAnalysis: [], streamMemory: [],
   streamSearch: null,
   streamCards: [],
   pendingAttachments: [],
@@ -319,7 +319,14 @@ export const useChatStore = create<any>()((set, get) => ({
     if (from >= 0) return get().startStream("", from);
   },
 
-  startStream: async (content, regenerateFrom?: number) => {
+  editMessage: (index: number, content: string) => {
+    const message = get().active?.messages[index];
+    if (!Number.isInteger(index) || index < 0 || message?.role !== "user" ||
+      typeof content !== "string" || (!content.trim() && !message.attachments?.length)) return;
+    return get().startStream(content, index, true);
+  },
+
+  startStream: async (content, regenerateFrom?: number, editing = false) => {
     const { activeId, active, pendingAttachments } = get();
     if (!activeId || !active || get().streaming || get().settingsSaving || get().reconciling) return;
     const regenerating = regenerateFrom !== undefined;
@@ -357,14 +364,14 @@ export const useChatStore = create<any>()((set, get) => ({
       backgroundResponding: true,
       streamText: "",
       streamThinking: "",
-      streamTools: [], streamAnalysis: [],
+      streamTools: [], streamAnalysis: [], streamMemory: [],
       streamSearch: null,
       streamCards: [],
       ...(!regenerating ? { pendingAttachments: [] } : {}),
     });
 
     const restoreMessages = () => {
-      if (regenerating && get().activeId === activeId) set((s) => ({ active: { ...s.active, messages: active.messages }, streamText: "", streamThinking: "", streamTools: [], streamAnalysis: [], streamSearch: null, streamCards: [] }));
+      if (regenerating && get().activeId === activeId) set((s) => ({ active: { ...s.active, messages: active.messages }, streamText: "", streamThinking: "", streamTools: [], streamAnalysis: [], streamMemory: [], streamSearch: null, streamCards: [] }));
     };
     const reconcile = () => get().recoverConversation(activeId, {
       revision: generation,
@@ -386,13 +393,18 @@ export const useChatStore = create<any>()((set, get) => ({
 
     const abort = streamMessage(
       activeId,
-      { ...(regenerating ? { regenerateFrom, expectedMessageCount: active.messages.length } : { content, attachments: pendingAttachments }),
+      { ...(regenerating ? { regenerateFrom, expectedMessageCount: active.messages.length, ...(editing ? { content } : {}) } : { content, attachments: pendingAttachments }),
         notificationDevice: getNotificationDevice() },
       (event) => {
         if (cancelled || generation !== streamGeneration || get().activeId !== activeId) return;
-        if (event.type !== "content" && event.type !== "thinking") debug()?.logMessage("in", event);
+        if (!["content", "thinking", "memory"].includes(event.type)) {
+          const safeEvent = event.type === "done" ? { ...event, message: { ...event.message, memory: undefined } } : event;
+          debug()?.logMessage("in", safeEvent);
+        }
         if (event.type === "regenerating" && regenerating) {
-          set((s) => ({ active: { ...s.active, messages: active.messages.slice(0, regenerateFrom + 1) } }));
+          const messages = active.messages.slice(0, regenerateFrom + 1);
+          if (editing) messages[regenerateFrom] = { ...messages[regenerateFrom], content };
+          set((s) => ({ active: { ...s.active, messages } }));
         } else if (event.type === "debug") {
           if (debugTurn !== undefined) debug()?.addEvent(event, debugTurn);
         } else if (event.type === "thinking") {
@@ -401,6 +413,8 @@ export const useChatStore = create<any>()((set, get) => ({
           set((s) => ({ streamText: s.streamText + event.delta }));
         } else if (event.type === "tool") {
           set((s) => ({ streamTools: [...s.streamTools, event] }));
+        } else if (event.type === "memory") {
+          set(s => ({ streamMemory: [...s.streamMemory.filter(e => e.id !== event.id), event] }));
         } else if (event.type === "analysis") {
           const analysis = normalizeAnalysisEvent(event);
           if (analysis) set(s => ({ streamAnalysis: mergeAnalysisEvents(s.streamAnalysis, analysis) }));
@@ -429,7 +443,7 @@ export const useChatStore = create<any>()((set, get) => ({
               : s.active,
             streamText: "",
             streamThinking: "",
-            streamTools: [], streamAnalysis: [],
+            streamTools: [], streamAnalysis: [], streamMemory: [],
             streamSearch: null,
             streamCards: [],
           }));

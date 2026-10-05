@@ -17,6 +17,8 @@ import { Agent, buildSystemPrompt, normalizePersonality } from "./agent.js";
 import { registerVoiceRoutes } from "./voiceRoutes.js";
 import { registerDictationRoutes } from "./dictationRoutes.js";
 import { ChatStore } from "./chat.js";
+import { MemoryStore } from "./memory/store.js";
+import { registerMemoryRoutes } from "./memory/routes.js";
 import { registerChatRoutes, type ChatCtx } from "./chatRoutes.js";
 import { BraveSearchClient, buildSearchTools } from "./search.js";
 import { loadConfig } from "./config.js";
@@ -219,7 +221,11 @@ async function main() {
         isConversationAvailable: id => Boolean(chatCtx.store.get(id)) });
   } catch { app.log.warn("Response notifications unavailable: check private storage and VAPID subject configuration"); }
   registerPushRoutes(app, notifications, config.allowedOrigins);
+  const memory = new MemoryStore(dataDir);
+  await memory.init();
+  registerMemoryRoutes(app, memory);
   const chatCtx: ChatCtx = {
+    memory,
     onResponseCompleted: notice => notifications?.enqueue(notice),
     store: new ChatStore(join(dataDir, "data", "conversations")),
     resolve: (model) => registry.resolve(model),

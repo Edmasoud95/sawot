@@ -149,7 +149,10 @@ export async function createViaResponses<T = any>(client: OpenAI, params: Record
   if (maxOut !== undefined) body.max_output_tokens = maxOut;
   if (stream) body.stream = true;
 
-  const send = async (b: Msg) => (client as any).responses.create(b, options);
+  const send = async (b: Msg) => {
+    options?.signal?.throwIfAborted();
+    return (client as any).responses.create(b, options);
+  };
   let result: any;
   try {
     result = await send(body);

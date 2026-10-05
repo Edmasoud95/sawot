@@ -1,3 +1,4 @@
+import MemoryActivity from "./MemoryActivity";
 import AnalysisActivity, { AnalysisFiles } from "./AnalysisActivity";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -192,7 +193,7 @@ function Attachment({ a }) {
   );
 }
 
-function UserMessage({ message, actions, textRef }) {
+function UserMessage({ message, actions, textRef, editor }) {
   return (
     <div className="flex justify-end">
       <div className="user-message-body max-w-[85%]">
@@ -204,11 +205,11 @@ function UserMessage({ message, actions, textRef }) {
             ))}
           </div>
         )}
-        <p ref={textRef} className="whitespace-pre-wrap text-[1rem] font-light leading-relaxed text-zinc-100">
+        {editor || <p ref={textRef} className="whitespace-pre-wrap text-[1rem] font-light leading-relaxed text-zinc-100">
           {message.content}
-        </p>
+        </p>}
       </div>
-      <div className="message-footer message-footer-user">{actions}</div>
+      {!editor && <div className="message-footer message-footer-user">{actions}</div>}
       </div>
     </div>
   );
@@ -216,19 +217,48 @@ function UserMessage({ message, actions, textRef }) {
 
 // One persisted message. Live streaming messages are composed directly in
 // MessageList from the stream buffers using the exported pieces above.
-export default function Message({ conversationId, message, sendControl, reading, onRead, onRegenerate, disabled }) {
+export default function Message({ conversationId, message, sendControl, reading, onRead, onRegenerate, onEdit, disabled }) {
   const textRef = useRef<HTMLDivElement>(null);
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState("");
+  const closeEditor = () => {
+    setEditing(false);
+    requestAnimationFrame(() => textRef.current?.closest(".user-message-body")?.querySelector<HTMLButtonElement>('button[aria-label="Edit message"]')?.focus());
+  };
+  useEffect(() => { if (disabled) setEditing(false); }, [disabled]);
   const actions = <MessageActions text={message.content ?? ""} getSpokenText={() => {
     const node = textRef.current?.cloneNode(true) as HTMLElement | undefined;
     node?.querySelectorAll("button, style, script").forEach(element => element.remove());
     node?.querySelectorAll("p, li, pre, h1, h2, h3, h4, blockquote, tr, br").forEach(block => block.append(document.createTextNode("\n")));
     return node?.textContent?.trim() || message.content || "";
-  }} reading={reading} onRead={onRead} onRegenerate={onRegenerate} disabled={disabled} />;
-  if (message.role === "user") return <UserMessage message={message} actions={actions} textRef={textRef} />;
+  }} reading={reading} onRead={onRead} onRegenerate={onRegenerate} disabled={disabled}
+    onEdit={message.role === "user" ? () => {
+      setEditText(message.content ?? "");
+      setEditing(true);
+    } : undefined} />;
+  if (message.role === "user") return <UserMessage message={message} actions={actions} textRef={textRef}
+    editor={editing ? <form className="message-editor" onSubmit={event => {
+      event.preventDefault();
+      if (disabled || (!editText.trim() && !message.attachments?.length)) return;
+      setEditing(false);
+      onEdit(editText);
+    }}>
+      <textarea aria-label="Edit message text" autoFocus rows={Math.min(10, Math.max(3, editText.split("\n").length))}
+        value={editText} onChange={event => setEditText(event.target.value)} onKeyDown={event => {
+          if (event.key === "Escape") { event.preventDefault(); closeEditor(); }
+          if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); }
+        }} />
+      <p>Resending replaces the replies and messages after this one.</p>
+      <div className="message-editor-buttons">
+        <button type="button" onClick={closeEditor}>Cancel</button>
+        <button type="submit" disabled={disabled || (!editText.trim() && !message.attachments?.length)}>Save &amp; resend</button>
+      </div>
+    </form> : null} />;
   return (
     <div>
       <ThinkingBlock thinking={message.thinking} />
       <AnalysisActivity conversationId={conversationId} events={message.analysis ?? []} />
+      <MemoryActivity events={message.memory ?? []} />
       <div ref={textRef}><Markdown>{message.content}</Markdown></div>
       <AnalysisFiles conversationId={conversationId} events={message.analysis ?? []} />
       <CardGrid cards={message.cards} sendControl={sendControl} />

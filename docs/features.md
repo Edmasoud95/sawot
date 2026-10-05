@@ -38,8 +38,8 @@
 ## Home Assistant
 
 - **Read and control entities** through model tool calls.
-- **Device cards** for entities used in a reply, available in the Devices view
-  and inline in chats with Home Assistant enabled.
+- **Device cards** for entities used in a reply, available inline in chats
+  with Home Assistant enabled.
 - **Touch controls** for lights and switches, brightness, colour temperature,
   light colour, and thermostat targets where supported by the entity.
 - **Optional home tools in chat:** enable Home Assistant per conversation.
@@ -48,6 +48,32 @@
 
 ## General-purpose chat
 
+- **Personal memory:** chat can save personal facts and explicit “remember this”
+  requests, then recall them across conversations and model changes. Click
+  **Memory saved**, **Memory updated**, or **Memories recalled** to inspect the
+  facts, open their source conversation, edit them, or delete them. Recall means
+  the facts were supplied to the model, not that it necessarily used them.
+- **Memory controls:** **Settings → Assistant → Memory** lists saved facts and
+  provides search, editing, individual deletion, and an enable/disable switch.
+  Chat can forget a specifically identified fact. **Delete all memories** is
+  available only in Settings, with confirmation; the model has no bulk-delete
+  tool. Disabling memory retains saved facts while stopping capture and recall.
+  Editing, deleting, or disabling memory can stop a reply in progress to prevent
+  stale personal context from being sent again.
+- **Memory scope and privacy:** this release uses one personal profile for the
+  whole installation. It applies to chat, including dictated chat messages;
+  dedicated Voice and Live sessions do not use it. Facts are stored locally under
+  the configured data directory, but recalled facts are sent to the selected
+  model provider. Deleting a memory removes its stored activity details; it does
+  not erase original conversation messages or retract context already sent.
+  Old chats are not mined for memories, and regeneration cannot recreate deleted
+  facts. Capture depends on the model correctly calling memory tools; source
+  checks are conservative and currently recognize English intent. Inspect and
+  correct memories when needed. Saved memories are not added to every prompt.
+  The assistant is instructed to search before answering personal questions; each
+  search returns at most three matching facts (up to 3,000 characters of fact text).
+  Retrieval uses lexical search; there is no semantic/vector index. Storage supports one backend writer
+  and keeps owner identifiers for a future account migration.
 - **Multiple saved conversations** with automatic titles, deletion,
   and a model choice for each conversation.
 - **Streaming replies**, collapsible model reasoning when supplied, Markdown,
@@ -61,7 +87,7 @@
   Type `/` in the composer to browse command suggestions. Use arrow keys and
   Enter or Tab, or tap a suggestion, to insert it; send when ready. Escape closes
   the suggestions.
-- **Mobile swipes:** move between Orb, Devices, and Chat, or between Settings
+- **Mobile swipes:** move between Voice and Chat, or between Settings
   sections. Gestures avoid interactive controls and horizontally scrolling content.
 - **Mobile conversation view** with history behind a menu and a compact model
   picker beside the composer controls.

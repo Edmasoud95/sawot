@@ -1,22 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReadingState } from "../../lib/messageReader";
 
-function Icon({ kind }: { kind: "copy" | "check" | "speaker" | "stop" | "retry" }) {
+function Icon({ kind }: { kind: "copy" | "check" | "speaker" | "stop" | "retry" | "edit" }) {
   return <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {kind === "copy" && <><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></>}
     {kind === "check" && <path d="m5 12 4 4L19 6" />}
     {kind === "speaker" && <><path d="m11 4-6 5H2v6h3l6 5z" /><path d="M15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14" /></>}
     {kind === "stop" && <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />}
     {kind === "retry" && <><path d="M20 7v5h-5" /><path d="M20 12a8 8 0 1 0-2.4 5.7M20 7v5" /></>}
+    {kind === "edit" && <><path d="m16 3 5 5-12 12-6 1 1-6zM14 5l5 5" /></>}
   </svg>;
 }
 
-export default function MessageActions({ text, getSpokenText, reading, onRead, onRegenerate, disabled }: {
+export default function MessageActions({ text, getSpokenText, reading, onRead, onRegenerate, onEdit, disabled }: {
   text: string;
   getSpokenText: () => string;
   reading: ReadingState;
   onRead: (text: string) => void;
   onRegenerate: () => void;
+  onEdit?: () => void;
   disabled: boolean;
 }) {
   const [copied, setCopied] = useState(false);
@@ -43,6 +45,7 @@ export default function MessageActions({ text, getSpokenText, reading, onRead, o
         {reading?.phase === "loading" ? <span className="message-audio-loading" aria-hidden="true" /> : <Icon kind={active ? "stop" : "speaker"} />}
       </button>
       <button type="button" aria-label="Regenerate answer" title="Regenerate answer" disabled={disabled} onClick={onRegenerate}><Icon kind="retry" /></button>
+      {onEdit && <button type="button" aria-label="Edit message" title="Edit message" disabled={disabled} onClick={onEdit}><Icon kind="edit" /></button>}
     </div>
     {(error || reading?.error) && <p role="alert" className="message-action-error">{error || reading?.error}</p>}
   </div>;
