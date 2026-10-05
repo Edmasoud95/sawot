@@ -75,9 +75,12 @@
   Retrieval uses lexical search; there is no semantic/vector index. Storage supports one backend writer
   and keeps owner identifiers for a future account migration.
 - **Multiple saved conversations** with automatic titles, deletion,
-  and a model choice for each conversation.
+  and a model choice for each conversation. History has date groups and searches
+  titles, drafts, and message text with short matching excerpts. Failed history
+  and new-conversation requests show a retry action.
 - **Streaming replies**, collapsible model reasoning when supplied, Markdown,
-  and highlighted code blocks.
+  and highlighted code blocks. Scrolling up pauses following and preserves your
+  reading position; a Latest / New reply button returns to the bottom.
 - **Chat commands:** `/status` shows the current model and estimated conversation
   context used, capacity, and remaining space; `/help` lists commands. Estimates
   include instructions, enabled tools, and readable attachments, with a rough
@@ -90,13 +93,23 @@
 - **Mobile swipes:** move between Voice and Chat, or between Settings
   sections. Gestures avoid interactive controls and horizontally scrolling content.
 - **Mobile conversation view** with history behind a menu and a compact model
-  picker beside the composer controls.
+  picker beside the composer controls. The burger menu opens chat history
+  and New chat. Hold a message or tap its three-dot button for a compact
+  context menu with larger touch targets. Supported devices give a brief
+  vibration just before a held message's menu opens; scrolling cancels the hold.
+- **Branch in new conversation:** use a saved message's actions to copy the
+  conversation through that message into a separate chat. The branch keeps
+  the model, reasoning effort, tool settings, attachments, and generated files,
+  starts with an empty composer, and leaves the original conversation intact.
 - **Saved text drafts:** drafts of at least three words appear in history;
   conversations with a sent message appear regardless of length.
 - **Click-to-toggle dictation:** click to start, click to stop, then edit the
   transcript and press Send yourself. Dictation does not automatically send.
 - **Image and text attachments:** PNG, JPEG, WebP, GIF, and common text/code
   formats, up to 10 MB per upload. Images require a vision-capable model.
+  Image support is based on explicit provider metadata; absent metadata is shown
+  as unknown. The composer only suggests switching to a model with verified
+  image-input support. Chat tools distinguish permission from service availability.
   PDFs can be uploaded, but their contents are **not yet extracted**.
 - **Separate chat instructions** editable in Settings, independent of the
   voice assistant's personality.

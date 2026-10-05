@@ -50,7 +50,7 @@ test("each provider's models load through their own route, and settings then car
   try {
     const ok = await app.inject({ method: "GET", url: "/api/providers/deepseek/models" });
     assert.equal(ok.statusCode, 200);
-    assert.deepEqual(ok.json(), { id: "deepseek", models: ["deepseek-v4"], effortLevels: { "deepseek-v4": ["low", "high"] } });
+    assert.deepEqual(ok.json(), { id: "deepseek", models: ["deepseek-v4"], effortLevels: { "deepseek-v4": ["low", "high"] }, imageInput: {} });
     const t = Date.now();
     const hung = await app.inject({ method: "GET", url: "/api/providers/local/models" });
     assert.equal(hung.statusCode, 200, "an unreachable provider is a result, not a failure");

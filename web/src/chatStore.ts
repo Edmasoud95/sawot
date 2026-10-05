@@ -9,6 +9,7 @@ import {
   listConversations,
   cancelConversationTurn,
   createConversation,
+  branchConversation,
   getConversation,
   patchConversation,
   deleteConversation,
@@ -23,6 +24,7 @@ let draftTimer: ReturnType<typeof setTimeout> | undefined;
 let draftWrites = Promise.resolve();
 let streamGeneration = 0;
 let navigationGeneration = 0;
+let historyGeneration = 0;
 let commandGeneration = 0;
 let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
 let recoveryRequest: AbortController | undefined;
@@ -50,6 +52,11 @@ function retainStream(s) {
 
 export const useChatStore = create<any>()((set, get) => ({
   conversations: [],
+  historyLoading: false,
+  historyError: "",
+  creatingConversation: false,
+  branchingMessage: null,
+  createError: "",
   activeId: null,
   active: null,
   settingsSaving: false,
@@ -107,13 +114,18 @@ export const useChatStore = create<any>()((set, get) => ({
   },
 
   loadConversations: async () => {
+    const generation = ++historyGeneration;
+    set({ historyLoading: true, historyError: "" });
     try {
       await get().flushDraft();
-      const conversations = await listConversations();
+      const conversations = await listConversations("", AbortSignal.timeout(10000));
+      if (generation !== historyGeneration) return false;
       set({ conversations });
-    } catch (e) {
-      console.error("loadConversations failed", e);
-    }
+      return true;
+    } catch {
+      if (generation === historyGeneration) set({ historyError: "Couldn’t load conversations. Check your connection and retry." });
+      return false;
+    } finally { if (generation === historyGeneration) set({ historyLoading: false }); }
   },
 
   openConversation: async (id) => {
@@ -127,7 +139,7 @@ export const useChatStore = create<any>()((set, get) => ({
       if (navigation !== navigationGeneration) return false;
       const active = await getConversation(id, controller.signal);
       if (navigation !== navigationGeneration) return false;
-      set({ activeId: id, active, pendingAttachments: attachmentDrafts.get(id) ?? [], messageError: active.responseError || "", reconciling: false, retryRecovery: null,
+      set({ activeId: id, active, pendingAttachments: attachmentDrafts.get(id) ?? [], messageError: active.responseError || "", createError: "", reconciling: false, retryRecovery: null,
         backgroundResponding: Boolean(active.responding) });
       if (active.responding) void get().recoverConversation(id);
       return true;
@@ -139,14 +151,16 @@ export const useChatStore = create<any>()((set, get) => ({
   },
 
   newConversation: async (model) => {
+    if (get().creatingConversation) return false;
+    set({ creatingConversation: true, createError: "" });
     const navigation = ++navigationGeneration;
-    if (get().activeId) attachmentDrafts.set(get().activeId, get().pendingAttachments);
-    get().detachStream();
     try {
       await get().flushDraft();
-      if (navigation !== navigationGeneration) return;
-      const conv = await createConversation(model);
-      if (navigation !== navigationGeneration) return;
+      if (navigation !== navigationGeneration) return false;
+      const conv = await createConversation(model, AbortSignal.timeout(10000));
+      if (navigation !== navigationGeneration) return false;
+      if (get().activeId) attachmentDrafts.set(get().activeId, get().pendingAttachments);
+      get().detachStream();
       set((s) => ({
         pendingAttachments: [],
         activeId: conv.id,
@@ -156,9 +170,11 @@ export const useChatStore = create<any>()((set, get) => ({
         retryRecovery: null,
         backgroundResponding: false,
       }));
-    } catch (e) {
-      console.error("newConversation failed", e);
-    }
+      return true;
+    } catch {
+      if (navigation === navigationGeneration) set({ createError: "Couldn’t create a conversation. Check your connection and retry." });
+      return false;
+    } finally { set({ creatingConversation: false }); }
   },
 
   removeConversation: async (id) => {
@@ -311,6 +327,30 @@ export const useChatStore = create<any>()((set, get) => ({
       pendingAttachments: s.pendingAttachments.filter((a) => a.id !== id),
     })),
 
+  branchMessage: async (index: number) => {
+    const source = get().active;
+    if (!source || !Number.isInteger(index) || index < 0 || index >= source.messages.length ||
+      get().branchingMessage !== null || get().streaming || get().backgroundResponding || get().settingsSaving || get().reconciling) return false;
+    const navigation = ++navigationGeneration;
+    set({ branchingMessage: index, messageError: "" });
+    try {
+      await get().flushDraft();
+      if (navigation !== navigationGeneration) return false;
+      const branch = await branchConversation(source.id, index, source.messages.length, source.messages[index].id);
+      set(s => ({ conversations: withHistory(s.conversations, branch) }));
+      if (navigation !== navigationGeneration) return false;
+      attachmentDrafts.set(source.id, get().pendingAttachments);
+      get().detachStream();
+      set({ activeId: branch.id, active: branch, pendingAttachments: [], messageError: "", createError: "",
+        reconciling: false, retryRecovery: null, backgroundResponding: false });
+      return true;
+    } catch (error) {
+      if (navigation === navigationGeneration) set({ messageError: error instanceof Error && error.name !== "TimeoutError"
+        ? `Could not branch: ${error.message}` : "Could not create the branch. Check your connection and try again." });
+      return false;
+    } finally { set({ branchingMessage: null }); }
+  },
+
   regenerateMessage: (index: number) => {
     const messages = get().active?.messages ?? [];
     if (!Number.isInteger(index) || index < 0 || index >= messages.length) return;
@@ -328,7 +368,7 @@ export const useChatStore = create<any>()((set, get) => ({
 
   startStream: async (content, regenerateFrom?: number, editing = false) => {
     const { activeId, active, pendingAttachments } = get();
-    if (!activeId || !active || get().streaming || get().settingsSaving || get().reconciling) return;
+    if (!activeId || !active || get().streaming || get().settingsSaving || get().reconciling || get().branchingMessage !== null) return;
     const regenerating = regenerateFrom !== undefined;
     const command = !regenerating && /^\/(status|help)$/i.exec(content.trim())?.[1].toLowerCase();
     if (command) return get().runCommand(command);

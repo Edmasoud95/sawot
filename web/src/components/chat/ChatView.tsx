@@ -15,6 +15,10 @@ export default function ChatView({ sendControl, mobile }) {
   const loadConversations = useChatStore((s) => s.loadConversations);
   const newConversation = useChatStore((s) => s.newConversation);
   const sidebarOpen = useChatStore((s) => s.sidebarOpen);
+  const creating = useChatStore(s => s.creatingConversation);
+  const createError = useChatStore(s => s.createError);
+  const historyError = useChatStore(s => s.historyError);
+  const historyLoading = useChatStore(s => s.historyLoading);
   const panel = useRef<HTMLElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const closeSidebar = useCallback(() => useChatStore.setState({ sidebarOpen: false }), []);
@@ -51,7 +55,6 @@ export default function ChatView({ sendControl, mobile }) {
       if (cancelled) return;
       if (hasPendingNotificationTarget()) { void openPendingNotificationTarget(); return; }
       if (isMobile && notificationNavigationVersion() === 0) {
-        useChatStore.getState().detachStream();
         void newConversation();
       }
     });
@@ -63,6 +66,10 @@ export default function ChatView({ sendControl, mobile }) {
       <Sidebar panelRef={panel} mobile={mobile} />
       <div className="chat-main" inert={mobile && sidebarOpen}>
         <ChatHeader menuRef={trigger} mobile={mobile} />
+        {!sidebarOpen && (createError || historyError) && <div className="chat-notice" role="alert">
+          <span>{createError || historyError}</span>
+          <button type="button" disabled={creating || historyLoading} onClick={() => createError ? void newConversation() : void loadConversations()}>Retry</button>
+        </div>}
         {active ? (
           <>
             <MessageList sendControl={sendControl} />
@@ -71,7 +78,7 @@ export default function ChatView({ sendControl, mobile }) {
         ) : (
           <>
             {messageError && <p role="alert" className="px-4 pt-4 text-sm text-red-400">{messageError}</p>}
-            <Welcome onStart={() => newConversation()} />
+            <Welcome onStart={() => newConversation()} pending={creating} />
           </>
         )}
       </div>

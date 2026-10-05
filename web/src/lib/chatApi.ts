@@ -6,18 +6,25 @@ async function json(res) {
   return res.json();
 }
 
-export const listConversations = () =>
-  fetch(`${API_BASE}/api/chat/conversations`).then(json);
-export const createConversation = (model) =>
+export const listConversations = (query = "", signal?: AbortSignal) =>
+  fetch(`${API_BASE}/api/chat/conversations${query ? `?q=${encodeURIComponent(query)}` : ""}`, { signal }).then(json);
+export const createConversation = (model, signal?: AbortSignal) =>
   fetch(`${API_BASE}/api/chat/conversations`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal,
     body: JSON.stringify({ ...(model ? { model } : {}), python: pythonPreference() }),
   }).then(json);
 export const cancelConversationTurn = (id) =>
   fetch(`${API_BASE}/api/chat/conversations/${id}/cancel`, { method: "POST" }).then(res => {
     if (!res.ok) throw new Error("Could not stop the response.");
   });
+export const branchConversation = (id: string, messageIndex: number, expectedMessageCount: number, expectedMessageId?: string) =>
+  fetch(`${API_BASE}/api/chat/conversations/${id}/branch`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(15000),
+    body: JSON.stringify({ messageIndex, expectedMessageCount, expectedMessageId }),
+  }).then(json);
 export const getConversation = (id, signal?: AbortSignal) =>
   fetch(`${API_BASE}/api/chat/conversations/${id}`, { signal, cache: "no-store" }).then(json);
 export const patchConversation = (id, patch, keepalive = false) => {

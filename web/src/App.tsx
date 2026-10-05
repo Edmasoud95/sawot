@@ -41,7 +41,7 @@ export default function App() {
         <div className="header-actions">
           <ModeSwitch />
           <span className="header-divider" aria-hidden="true" />
-          <HistoryDrawer />
+          {mode !== "chat" && <HistoryDrawer />}
           <SettingsPanel />
         </div>
       </header>}

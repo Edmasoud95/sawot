@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { effortLevels, lmStudioEffortLevels, type EffortCatalogue, type EffortLevel } from "./effort.js";
 import { chatModelIds } from "./chatModels.js";
+import { imageInputCapability } from "./imageCapabilities.js";
 
 /** An OpenAI-compatible chat endpoint: the built-in local server from
  *  config.yaml, or a user-added provider persisted in settings.json. */
@@ -30,6 +31,7 @@ export const MODEL_SEP = "::";
 export interface ProviderListing extends ProviderInfo {
   models: string[];
   effortLevels?: EffortCatalogue;
+  imageInput?: Record<string, boolean>;
   error?: string;
   state: "pending" | "ready" | "error";
 }
@@ -51,7 +53,7 @@ export interface ContextInfo {
   source: "loaded" | "model" | "default";
 }
 
-async function fetchModelCatalogue(baseUrl: string, apiKey?: string, timeoutMs = MODEL_LIST_TIMEOUT_MS, discoverNative = false): Promise<{ models: string[]; effortLevels: EffortCatalogue; nativeEffortLevels: EffortCatalogue; nativeUnavailable: boolean }> {
+async function fetchModelCatalogue(baseUrl: string, apiKey?: string, timeoutMs = MODEL_LIST_TIMEOUT_MS, discoverNative = false): Promise<{ models: string[]; effortLevels: EffortCatalogue; imageInput: Record<string, boolean>; nativeEffortLevels: EffortCatalogue; nativeUnavailable: boolean }> {
   const headers: Record<string, string> = {};
   if (apiKey) headers.Authorization = "Bearer " + apiKey;
   let resp: Response;
@@ -67,10 +69,13 @@ async function fetchModelCatalogue(baseUrl: string, apiKey?: string, timeoutMs =
   const models = chatModelIds(data.data);
   const capabilities: EffortCatalogue = Object.create(null);
   const nativeEffortLevels: EffortCatalogue = Object.create(null);
+  const imageInput: Record<string, boolean> = Object.create(null);
   let nativeUnavailable = false;
   for (const model of models) {
     const levels = effortLevels(baseUrl, model, data.data.find((entry: any) => entry?.id === model));
     const entry = data.data.find((entry: any) => entry?.id === model);
+    const image = imageInputCapability(entry);
+    if (image !== undefined) imageInput[model] = image;
     if (levels.length || Object.hasOwn(entry ?? {}, "supported_reasoning_efforts")) capabilities[model] = levels;
   }
   // Native LM Studio discovery is read-only and optional. Keep proxy path prefixes.
@@ -85,17 +90,19 @@ async function fetchModelCatalogue(baseUrl: string, apiKey?: string, timeoutMs =
         const info: any = await native.json();
         if (!Array.isArray(info.models)) nativeUnavailable = true;
         if (Array.isArray(info.models)) for (const model of models) {
-          if (Object.hasOwn(capabilities, model)) continue;
           const matches = info.models.filter((entry: any) => entry?.type === "llm" &&
             (entry.key === model || entry.loaded_instances?.some((instance: any) => instance?.id === model)));
           if (matches.length !== 1) continue;
+          const image = imageInputCapability(matches[0]);
+          if (!Object.hasOwn(imageInput, model) && image !== undefined) imageInput[model] = image;
+          if (Object.hasOwn(capabilities, model)) continue;
           const levels = lmStudioEffortLevels(matches[0]);
           if (levels.length) { capabilities[model] = levels; nativeEffortLevels[model] = levels; }
         }
       }
     } catch { nativeUnavailable = true; }
   }
-  return { models, effortLevels: capabilities, nativeEffortLevels, nativeUnavailable };
+  return { models, effortLevels: capabilities, imageInput, nativeEffortLevels, nativeUnavailable };
 }
 
 /** List models on an endpoint before it becomes a provider — used by the
@@ -112,7 +119,7 @@ export class ProviderRegistry {
   private readonly timeoutMs: number;
   // Last known model list per provider, so settings can answer at once and
   // a slow or sleeping provider never holds the others back.
-  private readonly cache = new Map<string, { models: string[]; effortLevels?: EffortCatalogue; nativeEffortLevels?: EffortCatalogue; error?: string }>();
+  private readonly cache = new Map<string, { models: string[]; effortLevels?: EffortCatalogue; imageInput?: Record<string, boolean>; nativeEffortLevels?: EffortCatalogue; error?: string }>();
 
   constructor(builtin: ProviderSpec, custom: ProviderSpec[] = [], options: { timeoutMs?: number } = {}) {
     this.timeoutMs = options.timeoutMs ?? MODEL_LIST_TIMEOUT_MS;
@@ -267,7 +274,7 @@ export class ProviderRegistry {
     return this.list().map((info) => {
       const known = this.cache.get(info.id);
       if (!known) return { ...info, models: [], state: "pending" };
-      return { ...info, models: known.models, effortLevels: known.effortLevels ?? Object.fromEntries(known.models.map(model => [model, effortLevels(info.baseUrl, model)]).filter(([, levels]) => levels.length)), ...(known.error ? { error: known.error, state: "error" as const } : { state: "ready" as const }) };
+      return { ...info, models: known.models, imageInput: known.imageInput ?? {}, effortLevels: known.effortLevels ?? Object.fromEntries(known.models.map(model => [model, effortLevels(info.baseUrl, model)]).filter(([, levels]) => levels.length)), ...(known.error ? { error: known.error, state: "error" as const } : { state: "ready" as const }) };
     });
   }
 

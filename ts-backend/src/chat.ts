@@ -147,7 +147,8 @@ export class ChatStore {
     unlinkSync(path);
   }
 
-  list(): any[] {
+  list(query = ""): any[] {
+    const needle = query.trim().toLocaleLowerCase();
     const out: any[] = [];
     let entries: string[] = [];
     try {
@@ -162,9 +163,19 @@ export class ChatStore {
         const hasMessages = (conv.messages ?? []).some((m: any) => m.role === "user" && !m.command);
         const draftText = String(conv.draftText ?? "").trim();
         if (!hasMessages && draftText.split(/\s+/u).filter(Boolean).length < 3) continue;
+        const title = hasMessages ? conv.title : `Draft: ${draftText.replace(/\s+/gu, " ").slice(0, 80)}`;
+        const texts = [String(title ?? ""), draftText, ...(conv.messages ?? [])
+          .filter((m: any) => ["user", "assistant"].includes(m.role) && !m.command && typeof m.content === "string")
+          .map((m: any) => m.content)].map((text: string) => text.replace(/\s+/gu, " ").trim());
+        const match = needle ? texts.find(text => text.toLocaleLowerCase().includes(needle)) : undefined;
+        if (needle && match === undefined) continue;
+        const at = match?.toLocaleLowerCase().indexOf(needle) ?? 0;
+        const start = Math.max(0, at - 40);
+        const excerpt = match === undefined ? undefined : `${start ? "…" : ""}${match.slice(start, start + 156)}${match.length > start + 156 ? "…" : ""}`;
         out.push({
           id: conv.id,
-          title: hasMessages ? conv.title : `Draft: ${draftText.replace(/\s+/gu, " ").slice(0, 80)}`,
+          title,
+          ...(excerpt !== undefined ? { excerpt } : {}),
           isDraft: !hasMessages,
           model: conv.model,
           reasoningEffort: conv.reasoningEffort ?? null,

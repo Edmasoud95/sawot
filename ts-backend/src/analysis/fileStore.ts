@@ -59,6 +59,25 @@ export class AnalysisFileStore {
   }finally{closeSync(fd);if(existsSync(temp))unlinkSync(temp);}
  }
  listVisible(scope:AnalysisScope):AnalysisFile[]{return this.files.filter(f=>f.conversationId===scope.conversationId&&(f.turnId===scope.turnId||scope.visibleTurnIds.includes(f.turnId))).map(f=>({...f}));}
+ cloneVisible(source:AnalysisScope,target:AnalysisScope):Map<string,string>{
+  this.live(source);this.live(target);
+  const originals=this.listVisible(source),mapping=new Map(originals.map(f=>[f.id,id()]));
+  if(!originals.length)return mapping;
+  const reservation=this.reserve(target,originals.length,originals.reduce((sum,f)=>sum+f.size,0));
+  const copies:AnalysisFile[]=[],written:string[]=[];
+  try{
+   for(const original of originals){
+    const file=this.read(source,original.id),uid=mapping.get(file.id)!;
+    const path=join(this.root,uid),fd=openSync(path,'wx',0o600);written.push(path);
+    try{writeFileSync(fd,file.data);fsyncSync(fd);}finally{closeSync(fd);}
+    copies.push({...original,id:uid,conversationId:target.conversationId,inputIds:original.inputIds.map(input=>mapping.get(input)??input)});
+   }
+   this.files.push(...copies);
+   try{this.persist();}catch(error){this.files=this.files.filter(f=>!copies.includes(f));throw error;}
+   return mapping;
+  }catch(error){for(const path of written)try{unlinkSync(path);}catch{}throw error;}
+  finally{this.release(reservation);}
+ }
  read(scope:AnalysisScope,fileId:string){
   this.live(scope);if(!FILE_ID.test(fileId))throw Error('Invalid file ID');
   const f=this.listVisible(scope).find(f=>f.id===fileId);if(!f)throw Error('File not available to this conversation');

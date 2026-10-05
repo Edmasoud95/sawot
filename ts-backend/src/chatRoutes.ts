@@ -1,6 +1,8 @@
 import { addFileInventory } from "./analysis/context.js";
+import { branchConversation } from "./chatBranch.js";
 import { buildAnalysisTools } from "./analysis/tools.js";
 import { registerAnalysisRoutes, visibleTurns } from "./analysis/routes.js";
+import { registerLinkThumbnailRoute } from "./linkThumbnail.js";
 import { importAnalysisAttachments } from "./analysis/attachments.js";
 import type { AnalysisFileStore } from "./analysis/fileStore.js";
 import type { Runner, AnalysisEvent } from "./analysis/types.js";
@@ -97,13 +99,18 @@ async function maybeTitle(ctx: ChatCtx, conv: any, signal: AbortSignal): Promise
 }
 
 export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
+  registerLinkThumbnailRoute(app);
   const activityReference = (event: MemoryEvent) => ({ ...event, memories: event.memories.map(m => ({ id: m.id, revision: m.revision })) });
   // Canonical activity lives with the memory store, never duplicated fact text
   // in conversation JSON. This also recovers operations after a process crash.
   const withMemory = async (conv: any) => {
     if (!ctx.memory) return conv;
     const events = (await ctx.memory.eventsForConversation(conv.id)).map(activityReference);
-    const messages = conv.messages.map((m: any) => ({ ...m, memory: events.filter(e => e.turnId === m.id) }));
+    const inherited = new Map<string, MemoryEvent[]>();
+    for (const origin of new Set<string>(conv.messages.map((m: any) => m.memorySourceConversationId).filter((id: unknown) => typeof id === "string" && SAFE_ID.test(id)))) {
+      inherited.set(origin, (await ctx.memory.eventsForConversation(origin)).map(activityReference));
+    }
+    const messages = conv.messages.map((m: any) => ({ ...m, memory: (inherited.get(m.memorySourceConversationId) ?? events).filter(e => e.turnId === m.id) }));
     const seen = new Set(messages.map((m: any) => m.id));
     for (const event of events) {
       if (seen.has(event.turnId)) continue;
@@ -154,7 +161,11 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     } finally { reply.raw.off("close", close); }
   });
   app.get("/api/chat/tools", async () => ({ homeAssistant: homeConfigured(), ...(ctx.analysis ? { python: (await ctx.analysis.runner.ready()).ready } : {}) }));
-  app.get("/api/chat/conversations", async () => ctx.store.list());
+  app.get("/api/chat/conversations", async (req: any, reply: any) => {
+    const query = req.query?.q ?? "";
+    if (typeof query !== "string" || query.length > 200) return reply.code(400).send({ detail: "Search must be at most 200 characters." });
+    return ctx.store.list(query);
+  });
 
   app.post("/api/chat/conversations", async (req: any, reply: any) => {
     const body = req.body ?? {};
@@ -178,6 +189,26 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       }
     }
     return result;
+  });
+
+  app.post("/api/chat/conversations/:cid/branch", async (req: any, reply: any) => {
+    if (!SAFE_ID.test(req.params.cid)) return reply.code(400).send({ detail: "Invalid conversation ID" });
+    const source = ctx.store.get(req.params.cid);
+    if (!source) return reply.code(404).send({ detail: "Conversation not found." });
+    const { messageIndex, expectedMessageCount, expectedMessageId } = req.body ?? {};
+    if (!Number.isInteger(messageIndex) || messageIndex < 0 || messageIndex >= source.messages.length) {
+      return reply.code(400).send({ detail: "Choose a saved message to branch from." });
+    }
+    if (activeTurns.has(source.id) || source.pendingAnalysis || expectedMessageCount !== source.messages.length ||
+      (expectedMessageId !== undefined && expectedMessageId !== source.messages[messageIndex].id)) {
+      return reply.code(409).send({ detail: "The conversation changed or is still responding. Reload it before branching." });
+    }
+    try {
+      const branch = branchConversation(ctx.store, source, messageIndex, ctx.analysis?.files);
+      // A temporary activity-store read failure must not report a saved branch as failed.
+      return reply.code(201).send(await withMemory(branch).catch(() => branch));
+    }
+    catch { return reply.code(500).send({ detail: "Could not copy the conversation and its files. Please try again." }); }
   });
 
   app.patch("/api/chat/conversations/:cid", async (req: any, reply: any) => {

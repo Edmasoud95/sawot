@@ -119,3 +119,36 @@ test("native LM Studio effort discovery matches loaded aliases and preserves exp
     assert.deepEqual(registry.effortLevelsFor("custom::loaded-alias"), []);
   } finally { globalThis.fetch = original; }
 });
+
+test("image input comes from explicit metadata, never model names", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async input => new Response(JSON.stringify(String(input).endsWith('/api/v1/models') ? { models: [] } : { data: [
+    { id: "everyday", architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] } },
+    { id: "vision-name-only" },
+    { id: "text-only", architecture: { input_modalities: ["text"], output_modalities: ["text"] } },
+    { id: "legacy-modalities", architecture: { modality: "text+image->text" } },
+  ] }));
+  try {
+    const registry = new ProviderRegistry({ id: "local", name: "Local", baseUrl: "http://localhost:1234/v1" });
+    const listing = await registry.refresh("local") as any;
+    assert.equal(listing.imageInput?.everyday, true);
+    assert.equal(listing.imageInput?.["text-only"], false);
+    assert.equal(listing.imageInput?.["legacy-modalities"], true);
+    assert.equal(listing.imageInput?.["vision-name-only"], undefined);
+    assert.equal(JSON.stringify(listing).includes("apiKey"), false);
+  } finally { globalThis.fetch = original; }
+});
+
+test("native vision metadata matches loaded aliases even when effort metadata is explicit", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async input => new Response(JSON.stringify(String(input).endsWith('/api/v1/models') ? { models: [
+    { type: "llm", key: "model-a", loaded_instances: [{ id: "loaded-alias" }], capabilities: { vision: true } },
+    { type: "llm", key: "text-only", capabilities: { vision: false } },
+  ] } : { data: [{ id: "loaded-alias", supported_reasoning_efforts: [] }, { id: "text-only" }] }));
+  try {
+    const registry = new ProviderRegistry({ id: "local", name: "Local", baseUrl: "http://localhost:1234/v1" });
+    const listing = await registry.refresh("local") as any;
+    assert.equal(listing.imageInput?.["loaded-alias"], true);
+    assert.equal(listing.imageInput?.["text-only"], false);
+  } finally { globalThis.fetch = original; }
+});

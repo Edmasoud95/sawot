@@ -16,7 +16,5 @@ export default function ChatHeader({ menuRef, mobile }) {
     </button>
   }><h2 className="sr-only">{title}</h2></MobileHeader>;
 
-  return <header className="chat-header">
-    <h2 className="min-w-0 flex-1 truncate font-sans text-base font-medium text-zinc-100">{title}</h2>
-  </header>;
+  return null;
 }

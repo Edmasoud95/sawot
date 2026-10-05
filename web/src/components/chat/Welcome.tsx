@@ -1,4 +1,4 @@
-export default function Welcome({ onStart }: { onStart?: () => void }) {
+export default function Welcome({ onStart, pending = false }: { onStart?: () => void; pending?: boolean }) {
   return (
     <section className="chat-welcome">
       <svg className="welcome-chat-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor"
@@ -7,7 +7,7 @@ export default function Welcome({ onStart }: { onStart?: () => void }) {
         <path d="M16 19h16M16 25h10" />
       </svg>
       {onStart ? (
-        <button className="primary-button" onClick={onStart}>New conversation <span aria-hidden="true">↗</span></button>
+        <button className="primary-button" disabled={pending} onClick={onStart}>{pending ? "Creating…" : "New conversation"} <span aria-hidden="true">↗</span></button>
       ) : <p>What’s on your mind?</p>}
     </section>
   );

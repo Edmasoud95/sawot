@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ChatLink from "./ChatLink";
 import { updateVoiceSearch, voiceSearchStatus, type VoiceSearch } from "../../lib/voiceSearch";
 
 function SourceIcon({ src }: { src?: string }) {
@@ -30,10 +31,10 @@ export default function ChatSources({ search }: { search?: VoiceSearch | null })
     {(busy || search.phase === "error" || !safe.sources.length) && <p className="chat-sources-status" role="status">{status}</p>}
     {safe.sources.length > 0 && <ul>
       {safe.sources.map(source => <li key={source.url}>
-        <a href={source.url} target="_blank" rel="noopener noreferrer">
+        <ChatLink href={source.url}>
           <SourceIcon src={source.favicon} />
           <span className="chat-source-copy"><span className="chat-source-title">{source.title}</span><span className="chat-source-host">{new URL(source.url).hostname.replace(/^www\./, "")}{source.read && " · Read"}</span></span>
-        </a>
+        </ChatLink>
       </li>)}
     </ul>}
   </details>;

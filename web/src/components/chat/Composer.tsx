@@ -5,12 +5,12 @@ import ModelPicker from "../ModelPicker";
 import AttachmentPicker from "./AttachmentPicker";
 import ToolsMenu from "./ToolsMenu";
 import DictationButton from "./DictationButton";
-import { useModels, useProviders } from "./useModels";
+import { useProviders } from "./useModels";
 import { commandSuggestions } from "../../lib/chatCommands";
 import CommandSuggestions from "./CommandSuggestions";
+import { firstImageModel, modelImageInput } from "../../lib/modelCapabilities";
 
 const MAX_HEIGHT = 184; // ~8 lines of mono at 0.85rem
-const VISION_RE = /vl|vision/i;
 
 const ArrowUp = () => (
   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -31,14 +31,13 @@ const FileIcon = () => (
 
 export default function Composer() {
   const active = useChatStore((s) => s.active);
-  const settingsSaving = useChatStore((s) => s.settingsSaving || s.reconciling);
+  const settingsSaving = useChatStore((s) => s.settingsSaving || s.reconciling || s.branchingMessage !== null);
   const streaming = useChatStore((s) => s.streaming || s.backgroundResponding);
   const pendingAttachments = useChatStore((s) => s.pendingAttachments);
   const addAttachment = useChatStore((s) => s.addAttachment);
   const removeAttachment = useChatStore((s) => s.removeAttachment);
   const startStream = useChatStore((s) => s.startStream);
   const stopStream = useChatStore((s) => s.stopStream);
-  const models = useModels();
   const providers = useProviders();
   const setEffort = useChatStore((s) => s.setEffort);
   const renameModel = useChatStore((s) => s.renameModel);
@@ -138,9 +137,9 @@ export default function Composer() {
   };
 
   const hasImage = pendingAttachments.some((a) => a.kind === "image");
-  const visionOk = VISION_RE.test(active?.model || "");
-  const visionModel = models.find((m) => VISION_RE.test(m));
-  const showVisionWarning = hasImage && !visionOk;
+  const visionOk = modelImageInput(active?.model || "", providers);
+  const visionModel = firstImageModel(providers);
+  const showVisionWarning = hasImage && visionOk !== true;
 
   return (
     <div className="composer shrink-0 px-4 pb-1 pt-2 sm:px-6">
@@ -148,14 +147,15 @@ export default function Composer() {
       {uploading && <p role="status" className="attachment-feedback">Uploading attachments…</p>}
       {uploadError && <p role="alert" className="attachment-feedback">{uploadError}</p>}
       {showVisionWarning && (
-        <div className="mx-auto mb-2 flex max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-aurora-ember/30 bg-aurora-ember/10 px-3 py-1.5 font-mono text-[0.65rem] text-aurora-ember">
-          <span>model may not support images</span>
+        <div role="status" className="attachment-feedback image-capability-note" data-unsupported={visionOk === false}>
+          <span>{visionOk === false ? "This model doesn’t accept images." : "Image support is unknown for this model."}</span>
           {visionModel && (
             <button
-              onClick={() => useChatStore.getState().renameModel(visionModel)}
-              className="rounded border border-aurora-ember/40 px-2 py-0.5 uppercase tracking-[0.12em] transition-colors duration-200 hover:bg-aurora-ember/20"
+              disabled={settingsSaving}
+              onClick={() => { void renameModel(visionModel).catch(() => setUploadError("Couldn’t switch model. Please try again.")); }}
+              className="image-model-switch"
             >
-              switch to {visionModel}
+              Switch to {visionModel.slice(visionModel.indexOf("::") + 2)}
             </button>
           )}
         </div>
@@ -176,7 +176,7 @@ export default function Composer() {
                   <button
                     onClick={() => removeAttachment(a.id)}
                     aria-label={`Remove ${a.name}`}
-                    className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full border border-white/15 bg-ink-900 text-zinc-400 transition-colors duration-200 hover:bg-white/10 hover:text-zinc-100"
+                    className="attachment-remove attachment-remove-image"
                   >
                     <span className="ui-text-icon" aria-hidden="true">×</span>
                   </button>
@@ -184,7 +184,7 @@ export default function Composer() {
               ) : (
                 <span
                   key={a.id}
-                  className="flex max-w-[180px] items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] py-1 pl-2.5 pr-1.5 font-mono text-[0.62rem] text-zinc-300"
+                  className="flex max-w-[240px] items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] pl-3 font-sans text-sm text-zinc-300"
                 >
                   <span className="text-zinc-500">
                     <FileIcon />
@@ -193,7 +193,7 @@ export default function Composer() {
                   <button
                     onClick={() => removeAttachment(a.id)}
                     aria-label={`Remove ${a.name}`}
-                    className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-white/10 hover:text-zinc-200"
+                    className="attachment-remove"
                   >
                     <span className="ui-text-icon" aria-hidden="true">×</span>
                   </button>

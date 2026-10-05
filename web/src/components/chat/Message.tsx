@@ -14,6 +14,8 @@ import ThinkingBlock from "./ThinkingBlock";
 import ToolChip from "./ToolChip";
 import MessageActions from "./MessageActions";
 import ChatSources from "./ChatSources";
+import ChatLink, { ChatLinkSources } from "./ChatLink";
+import { updateVoiceSearch } from "../../lib/voiceSearch";
 
 const ImageIcon = () => (
   <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
@@ -117,13 +119,18 @@ function MarkdownCodeBlock(props) {
   </MermaidBlock>;
 }
 
-const MD_COMPONENTS = { pre: MarkdownCodeBlock, table: ScrollableTable };
+function MarkdownLink({ node: _node, ...props }) {
+  return <ChatLink {...props} />;
+}
 
-export function Markdown({ children, streaming = false }) {
+const MD_COMPONENTS = { a: MarkdownLink, pre: MarkdownCodeBlock, table: ScrollableTable };
+
+export function Markdown({ children, streaming = false, search = null }) {
   const chart = !streaming && typeof children === "string" ? parseChartWidget(children) : null;
   if (chart) return <div className="chat-md"><ChartWidget key={children} chart={chart} /></div>;
   return (
     <div className="chat-md text-[1rem] font-light leading-relaxed text-zinc-200">
+      <ChatLinkSources.Provider value={search ? updateVoiceSearch(null, { ...search, phase: "complete" })?.sources ?? [] : []}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, [remarkChatMermaid, { streaming }]]}
         rehypePlugins={[rehypeChatCodeLanguages, [rehypeHighlight, { plainText: ["mermaid", "charts_widget_v2"] }]]}
@@ -131,6 +138,7 @@ export function Markdown({ children, streaming = false }) {
       >
         {children}
       </ReactMarkdown>
+      </ChatLinkSources.Provider>
     </div>
   );
 }
@@ -193,11 +201,11 @@ function Attachment({ a }) {
   );
 }
 
-function UserMessage({ message, actions, textRef, editor }) {
+function UserMessage({ message, actions, textRef, bubbleRef, editor }) {
   return (
     <div className="flex justify-end">
       <div className="user-message-body max-w-[85%]">
-      <div className="rounded-2xl bg-white/5 px-4 py-2.5">
+      <div ref={bubbleRef} className="rounded-2xl bg-white/5 px-4 py-2.5">
         {message.attachments?.length > 0 && (
           <div className="mb-1.5 flex flex-wrap items-start gap-1.5">
             {message.attachments.map((a) => (
@@ -217,26 +225,31 @@ function UserMessage({ message, actions, textRef, editor }) {
 
 // One persisted message. Live streaming messages are composed directly in
 // MessageList from the stream buffers using the exported pieces above.
-export default function Message({ conversationId, message, sendControl, reading, onRead, onRegenerate, onEdit, disabled }) {
+export default function Message({ conversationId, message, sendControl, reading, onRead, onRegenerate, onEdit, onBranch, branching, disabled }) {
   const textRef = useRef<HTMLDivElement>(null);
+  const bubbleRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
   const closeEditor = () => {
     setEditing(false);
-    requestAnimationFrame(() => textRef.current?.closest(".user-message-body")?.querySelector<HTMLButtonElement>('button[aria-label="Edit message"]')?.focus());
+    requestAnimationFrame(() => {
+      const body = textRef.current?.closest(".user-message-body");
+      const edit = body?.querySelector<HTMLButtonElement>('button[aria-label="Edit message"]');
+      (edit?.getClientRects().length ? edit : body?.querySelector<HTMLButtonElement>('button[aria-label="More message actions"]'))?.focus();
+    });
   };
   useEffect(() => { if (disabled) setEditing(false); }, [disabled]);
-  const actions = <MessageActions text={message.content ?? ""} getSpokenText={() => {
+  const actions = <MessageActions text={message.content ?? ""} textRef={message.role === "user" ? bubbleRef : textRef} getSpokenText={() => {
     const node = textRef.current?.cloneNode(true) as HTMLElement | undefined;
     node?.querySelectorAll("button, style, script").forEach(element => element.remove());
     node?.querySelectorAll("p, li, pre, h1, h2, h3, h4, blockquote, tr, br").forEach(block => block.append(document.createTextNode("\n")));
     return node?.textContent?.trim() || message.content || "";
-  }} reading={reading} onRead={onRead} onRegenerate={onRegenerate} disabled={disabled}
+  }} reading={reading} onRead={onRead} onRegenerate={onRegenerate} onBranch={onBranch} branching={branching} disabled={disabled}
     onEdit={message.role === "user" ? () => {
       setEditText(message.content ?? "");
       setEditing(true);
     } : undefined} />;
-  if (message.role === "user") return <UserMessage message={message} actions={actions} textRef={textRef}
+  if (message.role === "user") return <UserMessage message={message} actions={actions} textRef={textRef} bubbleRef={bubbleRef}
     editor={editing ? <form className="message-editor" onSubmit={event => {
       event.preventDefault();
       if (disabled || (!editText.trim() && !message.attachments?.length)) return;
@@ -259,7 +272,7 @@ export default function Message({ conversationId, message, sendControl, reading,
       <ThinkingBlock thinking={message.thinking} />
       <AnalysisActivity conversationId={conversationId} events={message.analysis ?? []} />
       <MemoryActivity events={message.memory ?? []} />
-      <div ref={textRef}><Markdown>{message.content}</Markdown></div>
+      <div ref={textRef}><Markdown search={message.search}>{message.content}</Markdown></div>
       <AnalysisFiles conversationId={conversationId} events={message.analysis ?? []} />
       <CardGrid cards={message.cards} sendControl={sendControl} />
       <div className="message-footer">{actions}<ChatSources search={message.search} /></div>

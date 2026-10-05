@@ -1,4 +1,5 @@
 import {analysisFileUrl,normalizeAnalysisEvent,safeSource} from '../../lib/chatAnalysis';
+import ChatLink from './ChatLink';
 
 type Props = {conversationId:string;events:unknown[]};
 
@@ -7,8 +8,8 @@ function FileLink({conversationId,file,source=false}:{conversationId:string;file
   if(!href)return null;
   const origin=source&&safeSource(file.source?.finalUrl);
   return <span className="inline-flex max-w-full flex-wrap gap-2 break-all">
-    <a className="underline underline-offset-2" href={href} download>{file.name}</a>
-    {origin&&<a className="text-zinc-500 underline" href={origin} target="_blank" rel="noreferrer">Source</a>}
+    <a className="underline underline-offset-2" href={href} target="_blank" rel="noopener noreferrer" download>{file.name}</a>
+    {origin&&<ChatLink className="text-zinc-500 underline" href={origin}>Source</ChatLink>}
   </span>;
 }
 

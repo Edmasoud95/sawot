@@ -33,7 +33,7 @@ export function fuzzyMatch(query: string, text: string): FuzzyHit | null {
   return { score, indices };
 }
 
-export interface ProviderLike { id: string; name: string; models: string[]; builtin?: boolean; effortLevels?: Record<string, string[]>; state?: string; error?: string }
+export interface ProviderLike { id: string; name: string; models: string[]; builtin?: boolean; effortLevels?: Record<string, string[]>; imageInput?: Record<string, boolean>; state?: string; error?: string }
 export interface RankedItem { value: string; model: string; indices: number[]; score: number; providerName?: string }
 export interface RankedGroup { id: string; name: string; state: string; error?: string; favorites?: boolean; items: RankedItem[] }
 

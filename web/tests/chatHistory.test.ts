@@ -591,3 +591,137 @@ test("failed editing restores original text and later messages", async () => {
   assert.equal(store.getState().active.draftText, "Next draft");
   assert.match(store.getState().messageError, /Provider unavailable/);
 });
+
+test("history failure preserves cached conversations and retry clears the error", async () => {
+  store.setState({ conversations: [{ id: "cached", title: "Existing chat" }], active: null, activeId: null });
+  globalThis.fetch = async () => { throw new Error("offline"); };
+  assert.equal(await store.getState().loadConversations(), false);
+  assert.match(store.getState().historyError, /load conversations/i);
+  assert.equal(store.getState().historyLoading, false);
+  assert.equal(store.getState().conversations[0].id, "cached");
+  globalThis.fetch = async () => new Response(JSON.stringify([{ id: "fresh", title: "Reloaded chat" }]));
+  assert.equal(await store.getState().loadConversations(), true);
+  assert.equal(store.getState().historyError, "");
+  assert.equal(store.getState().conversations[0].id, "fresh");
+});
+
+test("new chat creation reports pending and failure, preserves the open chat, and blocks duplicate requests", async () => {
+  const active = { id: "existing", title: "Existing chat", messages: [], draftText: "" };
+  store.setState({ active, activeId: active.id, streaming: false, pendingAttachments: [{ id: "kept" }] });
+  let reject!: (error: Error) => void;
+  let started!: () => void;
+  const entered = new Promise<void>(resolve => { started = resolve; });
+  let requests = 0;
+  globalThis.fetch = async () => { requests++; started(); return new Promise((_resolve, fail) => { reject = fail; }); };
+  const creation = store.getState().newConversation();
+  await entered;
+  assert.equal(store.getState().creatingConversation, true);
+  assert.equal(await store.getState().newConversation(), false);
+  assert.equal(requests, 1);
+  reject(new Error("offline"));
+  assert.equal(await creation, false);
+  assert.equal(store.getState().creatingConversation, false);
+  assert.match(store.getState().createError, /create.*conversation/i);
+  assert.equal(store.getState().activeId, active.id);
+  assert.deepEqual(store.getState().pendingAttachments, [{ id: "kept" }]);
+  globalThis.fetch = async () => new Response(JSON.stringify({ id: "created", messages: [], draftText: "" }));
+  assert.equal(await store.getState().newConversation(), true);
+  assert.equal(store.getState().createError, "");
+  assert.equal(store.getState().activeId, "created");
+});
+
+test("an older history failure cannot replace the latest successful reload", async () => {
+  store.setState({ active: null, activeId: null });
+  let reject!: (error: Error) => void;
+  let started!: () => void;
+  const entered = new Promise<void>(resolve => { started = resolve; });
+  let requests = 0;
+  globalThis.fetch = async () => {
+    if (++requests === 1) { started(); return new Promise((_resolve, fail) => { reject = fail; }); }
+    return new Response(JSON.stringify([{ id: "latest", title: "Latest history" }]));
+  };
+  const old = store.getState().loadConversations();
+  await entered;
+  await store.getState().loadConversations();
+  reject(new Error("old failure"));
+  await old;
+  assert.equal(store.getState().historyError, "");
+  assert.equal(store.getState().historyLoading, false);
+  assert.equal(store.getState().conversations[0].id, "latest");
+});
+
+test("late new-chat creation cannot replace a conversation opened during the request", async () => {
+  store.setState({ active: { id: "source", messages: [], draftText: "" }, activeId: "source", createError: "", creatingConversation: false });
+  let release!: (response: Response) => void;
+  let started!: () => void;
+  const entered = new Promise<void>(resolve => { started = resolve; });
+  globalThis.fetch = async (_url, init: any = {}) => {
+    if (init.method === "POST") { started(); return new Promise(resolve => { release = resolve; }); }
+    return new Response(JSON.stringify({ id: "selected", title: "Selected", messages: [], draftText: "" }));
+  };
+  const creating = store.getState().newConversation();
+  await entered;
+  assert.equal(await store.getState().openConversation("selected"), true);
+  release(new Response(JSON.stringify({ id: "late", messages: [], draftText: "" })));
+  assert.equal(await creating, false);
+  assert.equal(store.getState().activeId, "selected");
+  assert.equal(store.getState().creatingConversation, false);
+  assert.equal(store.getState().createError, "");
+});
+
+test("opening another conversation dismisses an earlier new-chat failure", async () => {
+  store.setState({ active: { id: "before", messages: [], draftText: "" }, activeId: "before", createError: "An earlier creation failed." });
+  globalThis.fetch = async () => new Response(JSON.stringify({ id: "opened", messages: [], draftText: "" }));
+  assert.equal(await store.getState().openConversation("opened"), true);
+  assert.equal(store.getState().createError, "");
+});
+
+test("failed new-chat creation preserves a running reply and its subscription", async () => {
+  const active = { id: "still-running", messages: [{ role: "user", content: "Question" }], draftText: "" };
+  let detached = 0;
+  const abort = () => { detached++; };
+  store.setState({ active, activeId: active.id, creatingConversation: false, createError: "", streaming: true,
+    abortStream: abort, streamText: "Partial answer", streamThinking: "", streamTools: [], streamCards: [], streamMemory: [], streamAnalysis: [], streamSearch: null });
+  globalThis.fetch = async () => new Response('{}', { status: 500 });
+  assert.equal(await store.getState().newConversation(), false);
+  assert.equal(detached, 0);
+  assert.equal(store.getState().streaming, true);
+  assert.equal(store.getState().abortStream, abort);
+  assert.equal(store.getState().streamText, "Partial answer");
+  assert.deepEqual(store.getState().active.messages, [{ role: "user", content: "Question" }]);
+  store.setState({ streaming: false, abortStream: null, streamText: "" });
+});
+
+test("branch opens copied history with an empty composer and preserves the original draft and attachments", async () => {
+  const source = { id: "branch-source", title: "Original", messages: [{ id: "user-id", role: "user", content: "Question" }, { id: "reply-id", role: "assistant", content: "Answer" }], draftText: "My original unfinished draft" };
+  const attachment = { id: "upload", name: "pending.txt" };
+  const branch = { ...source, id: "branch-copy", title: "Branch: Original", draftText: "" };
+  store.setState({ activeId: source.id, active: source, pendingAttachments: [attachment], conversations: [source], streaming: false, backgroundResponding: false, settingsSaving: false, reconciling: false, branchingMessage: null });
+  let payload: any;
+  globalThis.fetch = async (url, init: any = {}) => {
+    if (String(url).endsWith('/branch')) { payload = JSON.parse(init.body); return new Response(JSON.stringify(branch)); }
+    return new Response(JSON.stringify(source));
+  };
+  assert.equal(await store.getState().branchMessage(1), true);
+  assert.deepEqual(payload, { messageIndex: 1, expectedMessageCount: 2, expectedMessageId: "reply-id" });
+  assert.equal(store.getState().activeId, branch.id); assert.equal(store.getState().active.draftText, "");
+  assert.deepEqual(store.getState().pendingAttachments, []); assert.equal(store.getState().conversations.length, 2);
+  await store.getState().openConversation(source.id);
+  assert.equal(store.getState().active.draftText, source.draftText); assert.deepEqual(store.getState().pendingAttachments, [attachment]);
+});
+
+test("failed branching leaves the source open and a late branch cannot override newer navigation", async () => {
+  const source = { id: "branch-failure", messages: [{ role: "user", content: "Question" }], draftText: "" };
+  store.setState({ activeId: source.id, active: source, pendingAttachments: [], conversations: [source], streaming: false, backgroundResponding: false, settingsSaving: false, reconciling: false, branchingMessage: null });
+  globalThis.fetch = async () => new Response(JSON.stringify({ detail: "Storage full" }), { status: 500 });
+  assert.equal(await store.getState().branchMessage(0), false);
+  assert.equal(store.getState().activeId, source.id); assert.match(store.getState().messageError, /Storage full/); assert.equal(store.getState().branchingMessage, null);
+  let release!: (response: Response) => void;
+  globalThis.fetch = async url => String(url).endsWith('/branch') ? new Promise(resolve => { release = resolve; }) : new Response(JSON.stringify({ id: 'other', messages: [], draftText: '' }));
+  const pending = store.getState().branchMessage(0); await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(await store.getState().branchMessage(0), false, 'duplicate click is ignored');
+  await store.getState().openConversation('other');
+  release(new Response(JSON.stringify({ id: 'late-branch', title: 'Branch', messages: source.messages, draftText: '' })));
+  assert.equal(await pending, false); assert.equal(store.getState().activeId, 'other');
+  assert.ok(store.getState().conversations.some(c => c.id === 'late-branch'));
+});

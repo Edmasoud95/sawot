@@ -198,7 +198,7 @@ export default function ModelPicker({ label = "Model", value, providers, onChang
           <button ref={trigger} disabled={disabled} type="button" className="composer-model" aria-haspopup="dialog" aria-expanded={open}
             aria-label={`Choose model: ${current || "Select model"}`} title={current}
             onClick={() => { setQuery(""); setOpen(true); }}>
-            <span>{current || "Select model"}</span><ChevronDown />
+            <span className="composer-model-name">{current || "Select model"}</span><span className="composer-model-short" aria-hidden="true">Model</span><ChevronDown />
           </button>
           {open && (
             <dialog ref={dialog} className="model-sheet" aria-labelledby={`${listId}-title`}
