@@ -1,3 +1,4 @@
+import ControlIcon from "../ControlIcon";
 import { useEffect, useRef, useState } from "react";
 import { DictationController, type DictationState } from "../../lib/dictation";
 import { BrowserDictationRecorder } from "../../lib/dictationRecorder";
@@ -54,9 +55,9 @@ export default function DictationButton({ disabled, onText, onBusy }: {
     {expanded && <div className="dictation-panel">
       <Waveform />
       <span role="status" className="dictation-label">{label}</span>
-      <button type="button" className="dictation-action" onClick={() => controller.cancel()} aria-label="Cancel dictation">×</button>
+      <button type="button" className="dictation-action" onClick={() => controller.cancel()} aria-label="Cancel dictation"><ControlIcon name="close" /></button>
     </div>}
-    {state.error && <div className="dictation-error" role="alert">{state.error}<button type="button" onClick={() => controller.cancel()} aria-label="Dismiss dictation error">×</button></div>}
+    {state.error && <div className="dictation-error" role="alert">{state.error}<button type="button" onClick={() => controller.cancel()} aria-label="Dismiss dictation error"><ControlIcon name="close" /></button></div>}
     <button type="button" className="dictation-mic" disabled={disabled || state.mode === "transcribing"}
       aria-label={state.mode === "latched" ? "Finish dictation" : busy ? "Stop dictation" : "Dictate message"} aria-pressed={busy}
       title={busy ? "Stop dictation" : "Start dictation"}

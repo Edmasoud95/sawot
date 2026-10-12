@@ -34,8 +34,9 @@ export function registerMemoryRoutes(app: FastifyInstance, store: MemoryStore) {
     Body: {
       text: string;
       revision: number;
+      private?: boolean;
     };
-  }>('/api/memory/:id', async req => store.edit(req.params.id, req.body?.text, req.body?.revision));
+  }>('/api/memory/:id', async req => store.edit(req.params.id, req.body?.text, req.body?.revision, req.body?.private));
   app.delete<{
     Params: {
       id: string;

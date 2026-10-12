@@ -70,6 +70,7 @@ export function useLiveVoice(enabled: boolean) {
         const state = useVoiceStore.getState();
         if (role === "user") state.setUserCaption(text); else state.setAssistantCaption(text);
       },
+      memory: event => useVoiceStore.getState().showMemory(event),
       search: event => {
         const state = useVoiceStore.getState();
         state.showSearch(event);

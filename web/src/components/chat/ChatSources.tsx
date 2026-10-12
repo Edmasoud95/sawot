@@ -1,5 +1,6 @@
+import { ActivityChevron, ActivityLabel } from "./ToolActivity";
 import { useState } from "react";
-import ChatLink from "./ChatLink";
+import ChatLink, { ChatLinkSources } from "./ChatLink";
 import { updateVoiceSearch, voiceSearchStatus, type VoiceSearch } from "../../lib/voiceSearch";
 
 function SourceIcon({ src }: { src?: string }) {
@@ -19,23 +20,22 @@ export default function ChatSources({ search }: { search?: VoiceSearch | null })
   const safe = updateVoiceSearch(null, { ...search, phase: "complete" });
   if (!safe) return null;
   const { status, busy } = voiceSearchStatus({ ...safe, phase: search.phase });
-  const domains = [...new Map(safe.sources.map(source => [new URL(source.url).hostname, source])).values()];
-  return <details className="chat-sources">
-    <summary aria-label={`Web sources: ${status}`}>
-      {domains.length > 0 && <span className="chat-source-icons">
-        {domains.slice(0, 4).map(source => <SourceIcon key={source.url} src={source.favicon} />)}
-      </span>}
-      <span>{busy ? status : safe.sources.length ? `${safe.sources.length} sources` : status}</span>
-      <svg className="chat-sources-chevron" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+  const query = updateVoiceSearch(safe, search)?.query;
+  return <details className="chat-sources tool-activity" data-error={search.phase === "error" || undefined} data-searching={Boolean(query)}>
+    <summary className="tool-activity-row" aria-label={`Web sources: ${status}${query ? ` ${query}` : ""}`}>
+      <span className="tool-activity-content" role={busy ? "status" : undefined} aria-atomic="true">
+        <ActivityLabel kind="search" label={busy ? status : "Web search"} detail={query || (!busy ? status : undefined)} busy={busy}/>
+      </span>
+      <ActivityChevron/>
     </summary>
-    {(busy || search.phase === "error" || !safe.sources.length) && <p className="chat-sources-status" role="status">{status}</p>}
-    {safe.sources.length > 0 && <ul>
+    {!query && (busy || search.phase === "error" || !safe.sources.length) && <p className="chat-sources-status" role="status">{status}</p>}
+    {safe.sources.length > 0 && <ChatLinkSources.Provider value={safe.sources}><ul>
       {safe.sources.map(source => <li key={source.url}>
         <ChatLink href={source.url}>
           <SourceIcon src={source.favicon} />
           <span className="chat-source-copy"><span className="chat-source-title">{source.title}</span><span className="chat-source-host">{new URL(source.url).hostname.replace(/^www\./, "")}{source.read && " · Read"}</span></span>
         </ChatLink>
       </li>)}
-    </ul>}
+    </ul></ChatLinkSources.Provider>}
   </details>;
 }

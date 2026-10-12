@@ -41,6 +41,7 @@ export default function ChatLink({ children, ...props }: ComponentProps<"a">) {
       const url = new URL(props.href, window.location.href);
       if (!["http:", "https:"].includes(url.protocol)) return;
       const source = sources.find(source => source.url.split("#")[0] === url.href.split("#")[0]);
+      if (source?.blocked) return;
       const rect = anchor.current.getBoundingClientRect();
       const above = window.innerHeight - rect.bottom < 340 && rect.top > window.innerHeight - rect.bottom;
       setPreview({

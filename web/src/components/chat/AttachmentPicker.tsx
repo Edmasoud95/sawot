@@ -1,3 +1,4 @@
+import ControlIcon from "../ControlIcon";
 import { useEffect, useId, useRef, useState } from "react";
 
 const ACCEPT = "image/*,.pdf,.txt,.md,.csv,.xlsx,.json,.py,.js,.ts,.yaml,.yml,.html,.css";
@@ -130,7 +131,7 @@ export default function AttachmentPicker({ disabled, onFiles, imagesOnly = false
       }}>
       <div className="model-sheet-heading">
         <h2 id={title}>{imagesOnly ? "Add pictures" : "Add attachment"}</h2>
-        <button type="button" aria-label="Close attachments" onClick={close}><span className="ui-text-icon" aria-hidden="true">×</span></button>
+        <button type="button" aria-label="Close attachments" onClick={close}><ControlIcon name="close" /></button>
       </div>
       {camera ? <CameraPreview onPhoto={(file) => { close(); onFiles([file]); }} onFallback={() => pick(nativeCamera.current)} />
         : <button type="button" className="attachment-action" onClick={() => setCamera(true)}>Camera</button>}

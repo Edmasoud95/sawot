@@ -1,6 +1,7 @@
+import { messageParts } from "../../lib/messageParts";
 import MemoryActivity from "./MemoryActivity";
 import AnalysisActivity, { AnalysisFiles } from "./AnalysisActivity";
-import { useEffect, useRef, useState } from "react";
+import { createContext, memo, useContext, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -15,6 +16,11 @@ import ToolChip from "./ToolChip";
 import MessageActions from "./MessageActions";
 import ChatSources from "./ChatSources";
 import ChatLink, { ChatLinkSources } from "./ChatLink";
+import ArticleCard from "./ArticleCard";
+import SelectedResults from "./SelectedResults";
+import ProductCards from "./ProductCards";
+import { parseProductCards } from "../../lib/productCards";
+import { rehypeArticleCards } from "../../lib/articleCards";
 import { updateVoiceSearch } from "../../lib/voiceSearch";
 
 const ImageIcon = () => (
@@ -102,10 +108,29 @@ function ScrollableTable({ children, node: _node, ...props }) {
   );
 }
 
+const SelectedCardsMode = createContext<'legacy' | 'selected' | 'unselected'>('legacy');
+
 function MarkdownCodeBlock(props) {
+  const selectedCards = useContext(SelectedCardsMode);
+  const sources = useContext(ChatLinkSources);
   const code = props.node?.children?.[0];
   const fallback = <CodeBlock {...props} />;
   const source = code.children?.map(child => child.value ?? "").join("") ?? "";
+  if (code?.properties?.className?.includes("language-product_cards_v1")) {
+    if (selectedCards !== 'legacy') {
+      if (selectedCards === 'selected' || code.properties.dataMermaidPending) return null;
+      // An older format may still be generated from conversation history. Keep only
+      // its verified links, never model-authored titles, prices or card selection.
+      const legacy = parseProductCards(source);
+      const urls = new Set(legacy?.items.map(item => item.url));
+      const known = sources.filter(item => urls.has(item.url));
+      return known.length ? <div>{known.map(item => <p key={item.url}><ChatLink href={item.url}>{item.title}</ChatLink></p>)}</div>
+        : <p className="text-sm text-zinc-400">No verified product links were provided.</p>;
+    }
+    if (code.properties.dataMermaidPending) return <p className="chat-products-pending" role="status">Preparing products…</p>;
+    const products = parseProductCards(source);
+    return products ? <ProductCards products={products} /> : fallback;
+  }
   if (code?.properties?.className?.includes("language-charts_widget_v2")) {
     if (code.properties.dataMermaidPending) return fallback;
     const chart = parseChartWidget(source);
@@ -119,34 +144,46 @@ function MarkdownCodeBlock(props) {
   </MermaidBlock>;
 }
 
-function MarkdownLink({ node: _node, ...props }) {
+function MarkdownLink({ node, 'data-article-card': _articleCard, ...props }) {
+  if (node?.properties?.dataArticleCard && props.href) return <ArticleCard href={props.href}>{props.children}</ArticleCard>;
   return <ChatLink {...props} />;
 }
 
 const MD_COMPONENTS = { a: MarkdownLink, pre: MarkdownCodeBlock, table: ScrollableTable };
 
-export function Markdown({ children, streaming = false, search = null }) {
+// Saved messages need no Markdown parsing when another response streams.
+export const Markdown = memo(function Markdown({ children, streaming = false, search = null }: { children: string; streaming?: boolean; search?: any }) {
   const chart = !streaming && typeof children === "string" ? parseChartWidget(children) : null;
   if (chart) return <div className="chat-md"><ChartWidget key={children} chart={chart} /></div>;
   return (
     <div className="chat-md text-[1rem] font-light leading-relaxed text-zinc-200">
+      <SelectedCardsMode.Provider value={search?.presentationVersion !== 1 ? 'legacy' : search.presentations?.length ? 'selected' : 'unselected'}>
       <ChatLinkSources.Provider value={search ? updateVoiceSearch(null, { ...search, phase: "complete" })?.sources ?? [] : []}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, [remarkChatMermaid, { streaming }]]}
-        rehypePlugins={[rehypeChatCodeLanguages, [rehypeHighlight, { plainText: ["mermaid", "charts_widget_v2"] }]]}
+        rehypePlugins={[[rehypeArticleCards, { streaming, enabled: search?.presentationVersion !== 1 }], rehypeChatCodeLanguages, [rehypeHighlight, { plainText: ["mermaid", "charts_widget_v2", "product_cards_v1"] }]]}
         components={MD_COMPONENTS}
       >
         {children}
       </ReactMarkdown>
       </ChatLinkSources.Provider>
+      </SelectedCardsMode.Provider>
     </div>
   );
+});
+
+export function MessageBody({ message, streaming = false, search = null }) {
+  const parts = messageParts(message);
+  if (streaming || message.presentationVersion === 1) search = {tool: 'web_search', phase: 'complete', sources: [], ...search, presentationVersion: 1};
+  return <>{parts.map((part, index) => part.type === "thinking"
+    ? <ThinkingBlock key={index} thinking={part.text} live={streaming && index === parts.length - 1} />
+    : <div key={index} data-message-content><Markdown streaming={streaming && index === parts.length - 1} search={search}>{part.text}</Markdown></div>)}<SelectedResults search={search} /></>;
 }
 
 export function ToolChips({ tools }) {
   if (!tools?.length) return null;
   return (
-    <div className="mb-3 flex flex-wrap gap-1.5">
+    <div className="mb-3 flex flex-col items-start">
       {tools.map((tool, i) => (
         <ToolChip key={i} tool={tool} />
       ))}
@@ -156,13 +193,16 @@ export function ToolChips({ tools }) {
 
 export function CardGrid({ cards, sendControl }) {
   if (!cards?.length) return null;
-  return (
-    <div className="mt-3 grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
-      {cards.map((card) => (
-        <EntityCard key={card.entity_id} card={card} sendControl={sendControl} />
-      ))}
+  if (cards.length <= 2) return <div className="chat-device-cards">
+    {cards.map(card => <EntityCard key={card.entity_id} card={card} sendControl={sendControl}/>)}
+  </div>;
+  const visible = cards.slice(0, 30);
+  return <section className="chat-device-list" aria-label="Home Assistant devices">
+    <p className="chat-device-heading">Devices <span>· {visible.length}{cards.length > 30 ? ` of ${cards.length}` : ""}</span></p>
+    <div className="chat-device-scroll" tabIndex={0} role="group" aria-label="Scrollable devices">
+      {visible.map(card => <EntityCard key={card.entity_id} card={card} sendControl={sendControl} compact/>)}
     </div>
-  );
+  </section>;
 }
 
 const uploadUrl = (a) => `/api/chat/uploads/${a.id}`;
@@ -241,7 +281,7 @@ export default function Message({ conversationId, message, sendControl, reading,
   useEffect(() => { if (disabled) setEditing(false); }, [disabled]);
   const actions = <MessageActions text={message.content ?? ""} textRef={message.role === "user" ? bubbleRef : textRef} getSpokenText={() => {
     const node = textRef.current?.cloneNode(true) as HTMLElement | undefined;
-    node?.querySelectorAll("button, style, script").forEach(element => element.remove());
+    node?.querySelectorAll("button, style, script, [data-thinking]").forEach(element => element.remove());
     node?.querySelectorAll("p, li, pre, h1, h2, h3, h4, blockquote, tr, br").forEach(block => block.append(document.createTextNode("\n")));
     return node?.textContent?.trim() || message.content || "";
   }} reading={reading} onRead={onRead} onRegenerate={onRegenerate} onBranch={onBranch} branching={branching} disabled={disabled}
@@ -269,10 +309,9 @@ export default function Message({ conversationId, message, sendControl, reading,
     </form> : null} />;
   return (
     <div>
-      <ThinkingBlock thinking={message.thinking} />
       <AnalysisActivity conversationId={conversationId} events={message.analysis ?? []} />
       <MemoryActivity events={message.memory ?? []} />
-      <div ref={textRef}><Markdown search={message.search}>{message.content}</Markdown></div>
+      <div ref={textRef}><MessageBody message={message} search={message.search} /></div>
       <AnalysisFiles conversationId={conversationId} events={message.analysis ?? []} />
       <CardGrid cards={message.cards} sendControl={sendControl} />
       <div className="message-footer">{actions}<ChatSources search={message.search} /></div>

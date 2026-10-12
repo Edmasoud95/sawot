@@ -28,3 +28,15 @@ test('interrupt stops sound and prevents pending decoding from restarting it', a
   await Promise.resolve(); audio.stopPlayback(); decode({}); await pending;
   assert.equal(sources.length, 1, 'cancelled decoding must not start sound');
 });
+
+test('playback readiness fires once after sound starts, never for cancelled decoding', async () => {
+  let started = 0;
+  const ready = () => { assert.equal(sources.at(-1).started, true); started++; };
+  const pending = audio.playWav(new ArrayBuffer(1), () => {}, ready);
+  await Promise.resolve(); assert.equal(started, 0);
+  decode({}); await pending; assert.equal(started, 1);
+  audio.stopPlayback();
+  const cancelled = audio.playWav(new ArrayBuffer(1), () => {}, ready);
+  await Promise.resolve(); audio.stopPlayback(); decode({}); await cancelled;
+  assert.equal(started, 1);
+});

@@ -33,6 +33,11 @@ export function safeFileName(value: string): string {
 export interface FetchOptions { signal: AbortSignal; deadlineMs: number; maxBytes: number; oversize: 'reject'|'truncate' }
 export interface PublicBody { body: AsyncIterable<Uint8Array>; finalUrl: string; mediaType: string; displayName: string; truncated(): boolean; close(): void }
 export interface PublicDeps { resolve?: Lookup; connect?: typeof connect }
+export class PublicHttpError extends Error {
+  constructor(public status: number, public url: string, public retryBlocked = false) {
+    super(`Download returned HTTP ${status}`);
+  }
+}
 function connect(url: URL, address: string, signal: AbortSignal): Promise<IncomingMessage> {
   return new Promise((accept,reject)=>{
     const request=(url.protocol==='https:'?https:http).request(url,{
@@ -75,7 +80,7 @@ export async function fetchPublic(raw: string, options: FetchOptions, deps: Publ
         if(url.protocol==='https:' && destination.protocol==='http:') throw Error('HTTPS downgrade blocked');
         next=destination.href; continue;
       }
-      if(status<200 || status>=300) throw Error(`Download returned HTTP ${status}`);
+      if(status<200 || status>=300) throw new PublicHttpError(status, url.href);
       if(response.headers['content-encoding'] && response.headers['content-encoding']!=='identity') throw Error('Encoded downloads are unsupported');
       const length=Number(response.headers['content-length']);
       if(options.oversize==='reject' && length>options.maxBytes) throw Error('File exceeds download limit');

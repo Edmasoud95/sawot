@@ -1,3 +1,4 @@
+import MotionButton from "./MotionButton";
 import { useVoiceStore } from "../store";
 import AttachmentPicker from "./chat/AttachmentPicker";
 import VoicePictures from "./VoicePictures";
@@ -39,7 +40,7 @@ export default function PushToTalk({ onTap, onEnd, pictures, onSendPictures, liv
       </p>
       <div className="talk-controls">
         {!live && <AttachmentPicker imagesOnly disabled={locked || pictures.items.length >= 4} onFiles={pictures.add} />}
-        <button
+        <MotionButton
           type="button"
           aria-label={live ? (sessionActive ? "End Live voice session" : "Start Live voice session") : ACTIONS[status]}
           title={live ? (sessionActive ? "End Live voice session" : "Start Live voice session") : ACTIONS[status]}
@@ -54,18 +55,18 @@ export default function PushToTalk({ onTap, onEnd, pictures, onSendPictures, liv
                 : busy ? <><path d="M9 5v14M15 5v14" /></>
                   : <><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-3 0h6" /></>}
           </svg>
-        </button>
+        </MotionButton>
         {sessionActive ? (
-          <button className="voice-session-end" type="button" aria-label="End voice session" title="End voice session · Escape" onClick={onEnd}>
+          <MotionButton className="voice-session-end" type="button" aria-label="End voice session" title="End voice session · Escape" onClick={onEnd}>
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
             <span>End</span>
-          </button>
+          </MotionButton>
         ) : live ? null : (
-          <button className="voice-picture-send" type="button" aria-label="Send pictures" title="Send pictures"
+          <MotionButton className="voice-picture-send" type="button" aria-label="Send pictures" title="Send pictures"
             data-visible={pictures.items.length > 0} tabIndex={pictures.items.length ? 0 : -1}
             aria-hidden={!pictures.items.length} disabled={locked || pictures.uploading || !pictures.items.length} onClick={onSendPictures}>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" /></svg>
-          </button>
+          </MotionButton>
         )}
       </div>
     </div>

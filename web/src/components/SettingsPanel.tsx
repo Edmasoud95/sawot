@@ -1,6 +1,8 @@
+import MotionButton from "./MotionButton";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import gsap from "gsap";
-import { loadProviderModels } from "./chat/useModels";
+import { useArrivalMotion } from "../hooks/useArrivalMotion";
+import { useSurfaceMotion } from "../hooks/useSurfaceMotion";
+import { loadProviderModels, beginProviderRefresh, updateProviderPrivacy } from "./chat/useModels";
 import { useDialogFocus } from "../hooks/useDialogFocus";
 import { useSwipeNavigation } from "../hooks/useSwipeNavigation";
 import { useVoiceStore } from "../store";
@@ -31,6 +33,11 @@ export default function SettingsPanel() {
   const panel = useRef(null);
   const content = useRef<HTMLDivElement>(null);
   const scrim = useRef(null);
+  const page = useRef<HTMLDivElement>(null);
+  const lastSection = useRef(section);
+  const direction = Math.sign(SECTION_ORDER.indexOf(section) - SECTION_ORDER.indexOf(lastSection.current)) as -1 | 0 | 1;
+  useArrivalMotion(page, open ? section : null, "navigate", direction);
+  useLayoutEffect(() => { lastSection.current = section; }, [section]);
   const debugEnabled = useVoiceStore((s) => s.debugEnabled);
   const toggleDebug = useVoiceStore((s) => s.toggleDebug);
   const trigger = useRef(null);
@@ -40,26 +47,7 @@ export default function SettingsPanel() {
     if (content.current) content.current.scrollTop = 0;
   }, [section]);
 
-  // Park the dialog hidden via GSAP itself, mirroring HistoryDrawer — keeping
-  // it mounted lets open/close tween instead of popping in and out.
-  useLayoutEffect(() => {
-    gsap.set(panel.current, { autoAlpha: 0, y: 14, scale: 0.98 });
-  }, []);
-
-  useLayoutEffect(() => {
-    gsap.to(panel.current, {
-      autoAlpha: open ? 1 : 0,
-      y: open ? 0 : 14,
-      scale: open ? 1 : 0.98,
-      duration: 0.55,
-      ease: "power4.out",
-    });
-    gsap.to(scrim.current, {
-      autoAlpha: open ? 1 : 0,
-      duration: 0.4,
-      ease: "power2.out",
-    });
-  }, [open]);
+  useSurfaceMotion({ panel, scrim, open, placement: "lift" });
 
   // Settings answer at once with each provider's last known models; then
   // every provider loads on its own so a slow one never blocks the picker.
@@ -85,10 +73,12 @@ export default function SettingsPanel() {
   useEffect(() => {
     if (!open) return;
     setError("");
-    fetch("/api/settings")
+    const policyRevision = beginProviderRefresh();
+    fetch("/api/settings", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
         const providers = (d.providers ?? []).map((p) => ({ ...p, state: p.state === "ready" ? "ready" : "pending" }));
+        updateProviderPrivacy(providers, policyRevision);
         setData({ ...d, providers });
         refreshProviders(providers);
       })
@@ -153,7 +143,7 @@ export default function SettingsPanel() {
 
   return (
     <>
-      <button
+      <MotionButton
         ref={trigger}
         onClick={() => { setInitialConnection(null); setSection("connections"); setOpen(!open); }}
         aria-label="Settings"
@@ -165,7 +155,7 @@ export default function SettingsPanel() {
           <circle cx="12" cy="12" r="3" />
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
-      </button>
+      </MotionButton>
       <div
         ref={scrim}
         onClick={() => setOpen(false)}
@@ -184,16 +174,16 @@ export default function SettingsPanel() {
         >
           <header className="settings-header flex items-center justify-between gap-3">
             <h2 className="text-xl font-medium text-zinc-100">Settings</h2>
-            <button ref={closeBtn} onClick={() => setOpen(false)} aria-label="Close settings" className="icon-button">
+            <MotionButton ref={closeBtn} onClick={() => setOpen(false)} aria-label="Close settings" className="icon-button">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path d="M6 6l12 12M18 6L6 18" />
               </svg>
-            </button>
+            </MotionButton>
           </header>
           <div className="settings-body">
             <SectionNav sections={SECTIONS} value={section} onChange={setSection} />
             <div ref={content} className="settings-content modal-scroll" role="tabpanel" aria-labelledby={`settings-tab-${section}`}>
-              <div className="settings-page">
+              <div ref={page} className="settings-page">
                 {section === "connections" && (
                   <ConnectionsSection key={`${open}-${initialConnection}`} data={data} update={update}
                     initialConnection={initialConnection} removeProvider={removeProvider}

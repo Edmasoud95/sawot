@@ -17,7 +17,8 @@ from dotenv import load_dotenv
 
 from sidecar.app import create_sidecar_app
 from server.config import load_config
-from server.settings import merge_settings
+from server.settings import merge_settings, KOKORO_VOICES
+from server.idle_engine import IdleEngine
 from server.models import get_model, is_downloaded
 from server.stt import MissingSTT, make_stt_engine
 from server.tts import make_tts_engine
@@ -70,15 +71,18 @@ async def _main() -> None:
         stt = MissingSTT(stt_model)
         stt_model = ""  # nothing active, so selecting it after download loads it
     else:
-        logger.info("loading STT model %s", stt_model)
-        stt = stt_factory(stt_model)
+        logger.info("STT model %s will load on first transcription", stt_model)
+        stt = IdleEngine(None, lambda: stt_factory(stt_model), model_id=stt_model)
 
     def tts_factory(model_id: str):
         return make_tts_engine(model_id, voice=config.tts_voice, lang_code=config.tts_lang_code)
 
     tts_model = _override("tts") or "kokoro"
-    logger.info("loading TTS model %s (voice=%s)", tts_model, config.tts_voice)
-    tts = tts_factory(tts_model)
+    logger.info("TTS model %s will load on first speech request", tts_model)
+    tts = IdleEngine(None, lambda: tts_factory(tts_model), model_id=tts_model,
+                     voices=KOKORO_VOICES if tts_model == "kokoro" else ["default"],
+                     default_voice=(config.tts_voice if config.tts_voice in KOKORO_VOICES else KOKORO_VOICES[0])
+                     if tts_model == "kokoro" else "default")
 
     app = create_sidecar_app(
         stt,

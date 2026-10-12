@@ -17,7 +17,7 @@ export default function ThinkingBlock({ thinking, live = false, seconds = null }
 
   if (live) {
     return (
-      <div className="mb-3">
+      <div data-thinking className="mb-3">
         <p className="thinking-shimmer mb-1.5 font-mono text-[0.65rem] uppercase tracking-[0.25em]">
           Thinking…
         </p>
@@ -34,7 +34,7 @@ export default function ThinkingBlock({ thinking, live = false, seconds = null }
   const label = seconds != null ? `Thought for ${seconds}s` : "Thoughts";
 
   return (
-    <div className="mb-3">
+    <div data-thinking className="mb-3">
       <button
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
@@ -55,7 +55,7 @@ export default function ThinkingBlock({ thinking, live = false, seconds = null }
         {label}
       </button>
       {open && (
-        <div className="mt-1.5 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 font-mono text-[0.7rem] font-light leading-relaxed text-zinc-500">
+        <div className="motion-reveal mt-1.5 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 font-mono text-[0.7rem] font-light leading-relaxed text-zinc-500">
           <p className="whitespace-pre-wrap">{thinking}</p>
         </div>
       )}

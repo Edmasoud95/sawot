@@ -7,6 +7,7 @@ export interface MemoryFact {
   text: string;
   topic: string;
   category: string;
+  private?: boolean;
   sourceConversationId: string;
   sourceMessageId: string;
   captureMode: 'automatic' | 'explicit' | 'settings';
@@ -36,6 +37,7 @@ interface State {
   operations: Record<string, string>;
   sources: Record<string, number>;
   tombstones: string[];
+  privateConversations?: string[];
 }
 export interface MemoryTurnScope {
   conversationId: string;
@@ -47,6 +49,9 @@ export interface MemoryTurnScope {
   signal?: AbortSignal;
   deleteTarget?: string;
   deletionUsed: boolean;
+  privateMemoryAccess?: () => boolean;
+  onPrivateMemory?: () => void;
+  privateMemoryUsed?: boolean;
 }
 const norm = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 const words = (s: string) => norm(s)
@@ -76,7 +81,7 @@ export class MemoryStore {
     return this.state?.enabled ?? false;
   }
   isActive(t: MemoryTurnScope) {
-    return !!this.state?.enabled && t.generation === this.state.generation && !t.signal?.aborted;
+    return !!this.state?.enabled && t.generation === this.state.generation && !t.signal?.aborted && (!t.privateMemoryUsed || t.privateMemoryAccess?.() === true);
   }
   init(): Promise<void> {
     return this.ready ??= this.load();
@@ -134,10 +139,34 @@ export class MemoryStore {
       memories: structuredClone(s.facts)
     };
   }
-  async get(id: string) {
+  private visible(f: Partial<MemoryFact>, t: MemoryTurnScope) {
+    return !f.private || t.privateMemoryAccess?.() === true;
+  }
+  private protect(s: State, fact: Partial<MemoryFact>) {
+    if (!fact.private) return;
+    const ids = new Set(s.privateConversations ?? []);
+    if (fact.sourceConversationId) ids.add(fact.sourceConversationId);
+    for (const event of s.events) if (event.memories.some(m => m.id === fact.id)) ids.add(event.conversationId);
+    s.privateConversations = [...ids].filter(Boolean);
+  }
+  conversationIsPrivate(id: string): boolean {
+    return this.state?.privateConversations?.includes(id) ?? false;
+  }
+  async isConversationPrivate(id: string): Promise<boolean> {
+    await this.read();
+    return this.conversationIsPrivate(id);
+  }
+  private expose(t: MemoryTurnScope, facts: Array<Partial<MemoryFact>>) {
+    if (!facts.some(f => f.private)) return;
+    if (t.privateMemoryAccess?.() !== true) throw new MemoryError(403, "Choose a private provider to use private memories");
+    t.onPrivateMemory?.();
+    t.privateMemoryUsed = true;
+  }
+  async get(id: string, t?: MemoryTurnScope) {
     const s = await this.read();
     const f = s.facts.find(f => f.id === id);
-    if (!f) throw new MemoryError(404, 'Memory no longer exists');
+    if (!f || t && !this.visible(f, t)) throw new MemoryError(404, 'Memory no longer exists');
+    if (t) { this.gate(s, t); this.expose(t, [f]); }
     return structuredClone(f);
   }
   async beginTurn(input: Omit<MemoryTurnScope, 'generation' | 'deletionUsed' | 'regenerating'> & {
@@ -152,14 +181,14 @@ export class MemoryStore {
     };
     if (/\b(forget|delete|remove)\b/i.test(input.text) && !/\b(everything|all|every|entire|not|don't|never)\b/i.test(input.text)) {
       const terms = words(input.text);
-      const matches = s.facts.filter(f => terms.some(w => words(f.topic + ' ' + f.text + ' ' + f.category).includes(w)));
+      const matches = s.facts.filter(f => this.visible(f, scope) && terms.some(w => words(f.topic + ' ' + f.text + ' ' + f.category).includes(w)));
       if (matches.length === 1) scope.deleteTarget = matches[0].id;
     }
     return scope;
   }
   private gate(s: State, t: MemoryTurnScope, write = false) {
     if (!s.enabled) throw new MemoryError(409, 'Memory is disabled');
-    if (t.signal?.aborted || t.generation !== s.generation) throw new MemoryError(409, 'Memory work expired');
+    if (t.signal?.aborted || t.generation !== s.generation || t.privateMemoryUsed && t.privateMemoryAccess?.() !== true) throw new MemoryError(409, 'Memory work expired');
     if (write && (t.regenerating || s.sources[t.sourceMessageId] !== undefined && s.sources[t.sourceMessageId] !== t.generation)) throw new MemoryError(409, 'This source cannot write memory again');
   }
   private event(s: State, t: MemoryTurnScope, kind: MemoryEvent['kind'], facts: MemoryEvent['memories']) {
@@ -172,7 +201,9 @@ export class MemoryStore {
       memories: structuredClone(facts),
       conversationId: t.conversationId
     };
+    this.expose(t, facts);
     s.events.push(e);
+    for (const f of facts) this.protect(s, f);
     return structuredClone(e);
   }
   private validate(text: string) {
@@ -187,12 +218,20 @@ export class MemoryStore {
     id?: string;
     revision?: number;
     captureMode?: 'automatic' | 'explicit';
+    private?: boolean;
   }) {
-    return this.mutate(s => {
+    const event = await this.mutate(s => {
       const op = createHash('sha256').update(`${t.sourceMessageId}:capture:${norm(args.topic ?? '')}`).digest('hex');
       this.gate(s, t, true);
       const existingEvent = s.operations[op];
-      if (existingEvent) return structuredClone(s.events.find(e => e.id === existingEvent)!);
+      if (args.private !== undefined && typeof args.private !== 'boolean') throw new MemoryError(400, 'private must be boolean');
+      if (args.private && t.privateMemoryAccess?.() !== true) throw new MemoryError(403, 'Choose a private provider to save private memories');
+      if (existingEvent) {
+        const event = s.events.find(e => e.id === existingEvent)!;
+        if (event.memories.some(f => !this.visible(f, t))) throw new MemoryError(404, 'Memory no longer exists');
+        this.expose(t, event.memories);
+        return structuredClone(event);
+      }
       this.gate(s, t, true);
       this.validate(args.text);
       if (!args.quote?.trim() || !t.text.includes(args.quote)) throw new MemoryError(400, 'Quote must be an exact span of the current user message');
@@ -210,16 +249,17 @@ export class MemoryStore {
       this.validate(args.topic);
       const topic = norm(args.topic ?? '');
       if (!topic || topic.length > 120) throw new MemoryError(400, 'A short canonical topic is required');
-      let f = args.id ? s.facts.find(f => f.id === args.id) : s.facts.find(f => f.topic === topic || norm(f.text) === norm(args.text));
+      let f = args.id ? s.facts.find(f => f.id === args.id && this.visible(f, t)) : s.facts.find(f => this.visible(f, t) && (f.topic === topic || norm(f.text) === norm(args.text)));
       if (args.id && !f) throw new MemoryError(404, 'Memory no longer exists');
-      if (f && !args.id && norm(f.text) === norm(args.text)) {
+      if (f?.private && args.private === false) throw new MemoryError(403, 'Only the user can remove memory privacy');
+      if (f && !args.id && norm(f.text) === norm(args.text) && (!args.private || f.private)) {
         s.sources[t.sourceMessageId] = s.generation;
         const event = this.event(s, t, 'saved', [f]);
         s.operations[op] = event.id;
         return event;
       }
       const existingId = f?.id;
-      if (existingId && s.facts.some(other => other.id !== existingId && other.topic === topic)) throw new MemoryError(409, 'Another memory already uses this topic');
+      if (existingId && s.facts.some(other => other.id !== existingId && this.visible(other, t) && other.topic === topic)) throw new MemoryError(409, 'Another memory already uses this topic');
       if (f && args.revision !== f.revision) throw new MemoryError(409, 'Reload the current memory revision before updating');
       const now = new Date().toISOString();
       const kind = f ? 'updated' : 'saved';
@@ -229,6 +269,7 @@ export class MemoryStore {
         t.generation = s.generation;
         Object.assign(f, {
           text: args.text,
+          private: f.private || args.private === true,
           topic,
           category: args.category ?? f.category,
           revision: f.revision + 1,
@@ -241,6 +282,7 @@ export class MemoryStore {
         f = {
           id: randomUUID(),
           revision: 1,
+          private: args.private === true,
           text: args.text,
           topic,
           category: args.category ?? 'other',
@@ -257,10 +299,12 @@ export class MemoryStore {
       s.operations[op] = e.id;
       return e;
     });
+    if (!this.isActive(t)) throw new MemoryError(409, "Memory work expired");
+    return event;
   }
-  private select(s: State, query: string) {
+  private select(s: State, query: string, t: MemoryTurnScope) {
     const terms = [...new Set(words(query))];
-    const ranked = s.facts.map(f => ({
+    const ranked = s.facts.filter(f => this.visible(f, t)).map(f => ({
       f,
       score: terms.filter(w => words(f.topic + ' ' + f.text + ' ' + f.category).includes(w)).length,
     })).filter(x => x.score > 0 || !terms.length).sort((a, b) => b.score - a.score);
@@ -271,7 +315,7 @@ export class MemoryStore {
   async recordRecall(t: MemoryTurnScope, facts: MemoryFact[]) {
     return this.mutate(s => {
       if (!s.enabled || t.signal?.aborted || t.generation !== s.generation) return null;
-      const current = facts.filter(f => s.facts.some(c => c.id === f.id && c.revision === f.revision));
+      const current = facts.filter(f => this.visible(f, t) && s.facts.some(c => c.id === f.id && c.revision === f.revision));
       const unseen = current.filter(f => !s.events.some(e => e.kind === 'recalled' && e.turnId === t.turnId && e.conversationId === t.conversationId && e.memories.some(m => m.id === f.id && m.revision === f.revision)));
       return unseen.length ? this.event(s, t, 'recalled', unseen) : null;
     });
@@ -279,17 +323,18 @@ export class MemoryStore {
   async search(t: MemoryTurnScope, query: string) {
     const s = await this.read();
     this.gate(s, t);
-    const facts = this.select(s, /what.*remember|list.*memor/i.test(query) ? '' : query);
+    const facts = this.select(s, /what.*remember|list.*memor/i.test(query) ? '' : query, t);
     const event = await this.recordRecall(t, facts);
     return {
-      memories: this.isActive(t) ? facts.filter(f => this.state.facts.some(m => m.id === f.id && m.revision === f.revision)) : [],
-      event
+      memories: this.isActive(t) ? facts.filter(f => this.visible(f, t) && this.state.facts.some(m => m.id === f.id && m.revision === f.revision)) : [],
+      event: this.isActive(t) ? event : null
     };
   }
   private redact(s: State, id: string) {
     for (const e of s.events) e.memories = e.memories.map(m => m.id === id ? {
       id: m.id,
-      revision: m.revision
+      revision: m.revision,
+      ...(m.private ? { private: true } : {})
     } : m);
     s.tombstones.push(id);
   }
@@ -300,7 +345,9 @@ export class MemoryStore {
         if (t.deletionUsed || t.deleteTarget !== id) throw new MemoryError(403, 'Deletion needs one specific current user target; use Settings to clear memories');
       }
       const f = s.facts.find(f => f.id === id);
-      if (!f) throw new MemoryError(404, 'Memory no longer exists');
+      if (!f || t && !this.visible(f, t)) throw new MemoryError(404, 'Memory no longer exists');
+      if (t) this.expose(t, [f]);
+      this.protect(s, f);
       if (f.revision !== revision) throw new MemoryError(409, 'Reload the current memory revision');
       s.facts = s.facts.filter(f => f.id !== id);
       this.redact(s, id);
@@ -325,9 +372,10 @@ export class MemoryStore {
       }]);
     });
   }
-  async edit(id: string, text: string, revision: number) {
+  async edit(id: string, text: string, revision: number, privateFlag?: boolean) {
     return this.mutate(s => {
       this.validate(text);
+      if (privateFlag !== undefined && typeof privateFlag !== 'boolean') throw new MemoryError(400, 'private must be boolean');
       const f = s.facts.find(f => f.id === id);
       if (!f) throw new MemoryError(404, 'Memory no longer exists');
       if (f.revision !== revision) throw new MemoryError(409, 'Reload the current memory revision');
@@ -335,10 +383,12 @@ export class MemoryStore {
       s.generation++;
       Object.assign(f, {
         text,
+        ...(privateFlag !== undefined ? { private: privateFlag } : {}),
         revision: f.revision + 1,
         updated: new Date().toISOString(),
         captureMode: 'settings'
       });
+      this.protect(s, f);
       return structuredClone(f);
     });
   }

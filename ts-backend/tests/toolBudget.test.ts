@@ -78,16 +78,39 @@ for (const mode of ["chat", "voice"] as const) {
 
   test(`${mode}: refuses further tool execution on the answer-only turn`, async () => {
     const f = fixture({ final: "tool" });
-    await assert.rejects(f.run(), /final answer/i);
+    if (mode === "chat") {
+      const reply = await f.run();
+      assert.match(reply, /couldn’t finish the answer/);
+      assert.match(reply, /https:\/\/example\.com\/5/);
+      assert.equal(f.events.some(([event]) => event === "source_link_fallback"), true);
+    } else {
+      await assert.rejects(f.run(), /final answer/i);
+    }
     assert.equal(f.searches(), 5);
     assert.equal(f.requests.length, 6);
   });
 
-  test(`${mode}: an empty final answer is an error`, async () => {
+  test(`${mode}: an empty final answer ${mode === "chat" ? "preserves collected source links" : "is an error"}`, async () => {
     const f = fixture({ final: "empty" });
-    await assert.rejects(f.run(), /final answer/i);
+    if (mode === "chat") {
+      const reply = await f.run();
+      assert.match(reply, /couldn’t finish the answer/);
+      assert.match(reply, /https:\/\/example\.com\/5/);
+      assert.equal(f.events.some(([event]) => event === "source_link_fallback"), true);
+    } else {
+      await assert.rejects(f.run(), /final answer/i);
+    }
     assert.equal(f.requests.length, 6);
   });
+
+  for (const final of ["tool", "empty"] as const) {
+    test(`${mode}: ${final} final answer without retrieved sources is an error`, async () => {
+      const f = fixture({ final, failedSearch: true });
+      await assert.rejects(f.run(), /final answer/i);
+      assert.equal(f.searches(), 5);
+      assert.equal(f.requests.length, 6);
+    });
+  }
 
   test(`${mode}: propagates provider errors on the answer-only turn`, async () => {
     const f = fixture({ final: "error" });

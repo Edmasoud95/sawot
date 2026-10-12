@@ -14,7 +14,7 @@ test("chat sources survive completion and disk reload, without raw tool output",
   const client = { chat: { completions: { create: async () => (async function* () {
     const name = ["web_search", "fetch_page", "web_search"][round++];
     yield { choices: [{ delta: name
-      ? { tool_calls: [{ index: 0, id: `call-${round}`, function: { name, arguments: "{}" } }] }
+      ? { tool_calls: [{ index: 0, id: `call-${round}`, function: { name, arguments: JSON.stringify({ query: ` search term ${round} ` }) } }] }
       : { content: "A sourced answer" } }] };
   })() } } };
   let searches = 0;
@@ -44,11 +44,16 @@ test("chat sources survive completion and disk reload, without raw tool output",
     const events = reply.body.split("\n").filter(line => line.startsWith("data: ")).map(line => JSON.parse(line.slice(6)));
     const searchEvents = events.filter(event => event.type === "search");
     assert.equal(searchEvents.length, 6, "each web tool reports start and completion/error");
+    assert.equal(searchEvents[0].query, "search term 1");
+    assert.equal(searchEvents[4].query, "search term 3", "a later call shows its own query");
+    for (const event of searchEvents.filter(event => event.phase !== "start" || event.tool === "fetch_page")) {
+      assert.equal(event.query, undefined, "finished calls and page fetches do not retain a query");
+    }
     const done = events.find(event => event.type === "done");
     assert.deepEqual(done.message.search, {
-      tool: "web_search", phase: "error", sources: [
-        { url: "https://example.com/one", title: "First source", read: true },
-        { url: "https://example.org/two", title: "Second source", read: false },
+      tool: "web_search", phase: "error", presentationVersion: 1, presentations: [], sources: [
+        { id: 'r1', url: "https://example.com/one", title: "First source", read: true },
+        { id: 'r2', url: "https://example.org/two", title: "Second source", read: false },
       ],
     });
     assert.doesNotMatch(JSON.stringify(done.message.search), /private|diagnostic|javascript|user:pass/);

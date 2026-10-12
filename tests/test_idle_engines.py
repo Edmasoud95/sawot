@@ -171,3 +171,56 @@ async def test_background_timer_unloads_both_and_http_requests_wake_them():
             assert response.json()["text"] == "speech"
     assert not state.stt.loaded
     assert not state.tts.loaded
+
+
+def test_cold_engine_metadata_does_not_load_and_concurrent_first_use_loads_once():
+    loads = []
+    def factory():
+        loads.append(True)
+        return Engine()
+    engine = IdleEngine(None, factory, voices=["default"], default_voice="default")
+    assert not engine.loaded
+    assert engine.voices() == ["default"]
+    assert engine.default_voice == "default"
+    assert not engine.unload_if_idle()
+    assert not loads
+    with ThreadPoolExecutor() as pool:
+        assert list(pool.map(engine.synthesize, ["one", "two"])) == [b"one", b"two"]
+    assert len(loads) == 1
+
+
+@pytest.mark.asyncio
+async def test_startup_and_metadata_leave_speech_cold_until_independent_first_use(monkeypatch):
+    import httpx
+    import uvicorn
+    from types import SimpleNamespace
+    from sidecar import main
+
+    loads = []
+    monkeypatch.setattr(main, "load_dotenv", lambda: None)
+    monkeypatch.setattr(main, "load_config", lambda: SimpleNamespace(
+        stt_model="test-stt", stt_language="en", tts_voice="af_heart", tts_lang_code="a"))
+    monkeypatch.setattr(main, "_stt_override", lambda: None)
+    monkeypatch.setattr(main, "_override", lambda _: None)
+    monkeypatch.setattr(main, "get_model", lambda *_: None)
+    monkeypatch.setattr(main, "make_stt_engine", lambda *a, **kw: loads.append("stt") or Engine())
+    monkeypatch.setattr(main, "make_tts_engine", lambda *a, **kw: loads.append("tts") or Engine())
+
+    async def serve(server):
+        app = server.config.app
+        async with app.router.lifespan_context(app):
+            assert loads == []
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                assert (await client.get("/health")).status_code == 200
+                voices = await client.get("/api/voices")
+                assert voices.status_code == 200
+                assert "af_heart" in voices.json()["voices"]
+                assert loads == []
+                result = await client.post("/v1/audio/transcriptions", files={"file": ("audio.wav", b"speech")})
+                assert result.json()["text"] == "speech"
+                assert loads == ["stt"]
+                result = await client.post("/v1/audio/speech", json={"input": "hello", "response_format": "wav"})
+                assert result.content == b"hello"
+                assert loads == ["stt", "tts"]
+    monkeypatch.setattr(uvicorn.Server, "serve", serve)
+    await main._main()

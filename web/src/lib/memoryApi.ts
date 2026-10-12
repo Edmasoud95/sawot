@@ -3,6 +3,7 @@ import { API_BASE } from './config';
 export interface MemoryFact {
   id: string;
   revision: number;
+  private?: boolean;
   text: string;
   sourceConversationId: string;
   sourceMessageId: string;
@@ -55,5 +56,6 @@ export function invalidateMemory() {
       }))
     } : s.active
   }));
+  void useChatStore.getState().refreshPrivacy();
   window.dispatchEvent(new Event('sawot-memory-change'));
 }

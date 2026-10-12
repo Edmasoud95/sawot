@@ -92,6 +92,7 @@ function persist(ctx: SettingsCtx): void {
     chatInstructions: ctx.state.chatInstructions,
     detailedDrawings: ctx.state.detailedDrawings,
     providers: ctx.registry.customSpecs(),
+    localPrivateMemoryAccess: ctx.registry.get(ctx.registry.defaultId)?.privateMemoryAccess === true,
   });
 }
 
@@ -321,6 +322,23 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: SettingsCtx): 
     const added = ctx.registry.add(name, baseUrl, apiKey);
     ctx.registry.setModels(added.id, probed);
     persist(ctx);
+    return settingsPayload(ctx);
+  });
+
+  app.patch("/api/providers/:pid/privacy", async (req: any, reply: any) => {
+    const body = req.body;
+    if (!body || typeof body !== "object" || Array.isArray(body)
+      || Object.keys(body).length !== 1 || typeof body.privateMemoryAccess !== "boolean") {
+      return reply.code(400).send({ detail: "privateMemoryAccess must be a boolean and the only field" });
+    }
+    const pid = req.params.pid;
+    const provider = ctx.registry.get(pid);
+    if (!provider) return reply.code(404).send({ detail: "unknown provider: " + pid });
+    // Persist before changing access: a failed save must not silently grant trust.
+    ctx.store.save(provider.builtin
+      ? { localPrivateMemoryAccess: body.privateMemoryAccess }
+      : { providers: ctx.registry.customSpecs().map(p => p.id === pid ? { ...p, privateMemoryAccess: body.privateMemoryAccess } : p) });
+    ctx.registry.setPrivateMemoryAccess(pid, body.privateMemoryAccess);
     return settingsPayload(ctx);
   });
 

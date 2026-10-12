@@ -1,10 +1,16 @@
+import { hapticsEnabled, hapticsSupported, setHapticsEnabled, subscribeHaptics } from "../../lib/haptics";
 import LivePromptSettings from "./LivePromptSettings";
-import { useRef } from "react";
+import { useRef, useSyncExternalStore } from "react";
 import { SectionTitle, Toggle } from "./fields";
 
 export default function AdvancedSection({ data, update, debugEnabled, toggleDebug }) {
   const saving = useRef(false);
+  const touch = useSyncExternalStore(subscribeHaptics, hapticsEnabled, () => false);
+  const supportsTouch = hapticsSupported();
   return <div className="flex flex-col gap-3">
+    <SectionTitle>Interaction</SectionTitle>
+    <Toggle label="Touch feedback" hint={supportsTouch ? "Subtle taps on this device. Paused while a microphone is active." : "Vibration is unavailable in this browser."}
+      checked={supportsTouch && touch} disabled={!supportsTouch} tactile={false} onChange={setHapticsEnabled} />
     <SectionTitle>Experimental</SectionTitle>
     {data && <Toggle label="Enable Live voice trial"
       hint="Unlock continuous OpenAI voice in Speech settings. Off by default. Disabling ends active Live sessions."

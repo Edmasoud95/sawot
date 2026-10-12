@@ -1,3 +1,4 @@
+import { MEMORY_TOOL_NAMES, type VoiceMemoryFactory, type VoiceMemoryTurn } from "./memory/voice.js";
 import { parseExpressionMarkers, expressionPrompt, expressionFromToolArgs, orbTool, ORB_TOOL_NAME, type ExpressionPayload } from "./expressions.js";
 import { appendFileSync, mkdirSync, statSync, truncateSync } from "node:fs";
 import { dirname } from "node:path";
@@ -117,6 +118,7 @@ export class Agent {
     private model: string,
     private tools: Tool[],
     private system: string,
+    private memoryFactory?: VoiceMemoryFactory,
   ) {}
 
   get currentModel(): string {
@@ -141,13 +143,22 @@ export class Agent {
     this.detailedDrawings = on;
   }
 
-  async run(
+  async run(history: HistoryMessage[], userText: string,
+    onEvent?: (event: string, data: any) => void | Promise<void>,
+    options: { expressions?: boolean; speechEngine?: string | null; signal?: AbortSignal; images?: OpenAI.Chat.Completions.ChatCompletionContentPartImage[]; memoryText?: string } = {},
+  ): Promise<string> {
+    const memory = await this.memoryFactory?.(options.memoryText ?? userText, options.signal, async event => { await onEvent?.('memory', event); });
+    try { return await this.runTurn(history, userText, onEvent, { ...options, ...(memory ? { memory, signal: memory.signal } : {}) }); }
+    finally { memory?.close(); }
+  }
+
+  private async runTurn(
     history: HistoryMessage[],
     userText: string,
     onEvent?: (event: string, data: any) => void | Promise<void>,
-    options: { expressions?: boolean; speechEngine?: string | null; signal?: AbortSignal; images?: OpenAI.Chat.Completions.ChatCompletionContentPartImage[] } = {},
+    options: { expressions?: boolean; speechEngine?: string | null; signal?: AbortSignal; images?: OpenAI.Chat.Completions.ChatCompletionContentPartImage[]; memory?: VoiceMemoryTurn } = {},
   ): Promise<string> {
-    const checkCancelled = () => options.signal?.throwIfAborted();
+    const checkCancelled = () => { options.signal?.throwIfAborted(); options.memory?.guard(); };
     checkCancelled();
     const emit = async (event: string, data: any) => {
       checkCancelled();
@@ -162,7 +173,8 @@ export class Agent {
     const readings = new Map<string, TemperatureReading>();
     let toolExpression: ExpressionPayload = { kind: "none" };
     const drawing = { detailed: this.detailedDrawings };
-    const modelTools = options.expressions ? [...this.tools, orbTool(drawing) as unknown as Tool] : this.tools;
+    const turnTools = [...this.tools, ...(options.memory?.tools ?? [])];
+    const modelTools = options.expressions ? [...turnTools, orbTool(drawing) as unknown as Tool] : turnTools;
     // Derive capabilities each turn so personality updates cannot remove search
     // guidance, and the date remains current across long-running sessions.
     const searchPrompt = this.tools.some((tool) => tool.name === "web_search")
@@ -179,10 +191,11 @@ export class Agent {
         await emit("tool_budget_exhausted", { rounds: Agent.MAX_ROUNDS });
         checkCancelled();
       }
+      await options.memory?.prepare(history);
       const t0 = performance.now();
       const response = await createChatCompletion<any>(this.client, {
         model: this.model,
-        messages: [{ role: "system", content: this.system + searchPrompt + (options.expressions ? expressionPrompt(drawing) : "") + speechTagPrompt(options.speechEngine) + (answerOnly ? FINAL_ANSWER_PROMPT : "") }, ...history] as any,
+        messages: [{ role: "system", content: this.system + searchPrompt + (options.memory?.prompt ?? "") + (options.expressions ? expressionPrompt(drawing) : "") + speechTagPrompt(options.speechEngine) + (answerOnly ? FINAL_ANSWER_PROMPT : "") }, ...history] as any,
         ...(!answerOnly ? { tools: toOpenAiTools(modelTools) as any } : {}),
       }, { signal: options.signal });
       checkCancelled();
@@ -206,7 +219,7 @@ export class Agent {
           // A marker in the final reply is the model's latest word; otherwise
           // whatever it showed through the tool stands.
           const expression = parsed.expression.kind !== "none" ? parsed.expression : toolExpression;
-          logReply(Agent.replyLogPath, { user: userText, raw: msg.content ?? "", tool: toolExpression, expression });
+          if (!options.memory?.privateUsed()) logReply(Agent.replyLogPath, { user: userText, raw: msg.content ?? "", tool: toolExpression, expression });
           await emit("expression", expression);
           if (parsed.temperatureEntity && readings.has(parsed.temperatureEntity)) {
             await emit("reading", readings.get(parsed.temperatureEntity));
@@ -229,24 +242,25 @@ export class Agent {
 
       for (const tc of msg.tool_calls as any[]) {
         const t1 = performance.now();
+        const isMemory = MEMORY_TOOL_NAMES.has(tc.function.name);
         const isSearch = ["web_search", "fetch_page", "find_in_page"].includes(tc.function.name);
         if (isSearch) await emit("search", { tool: tc.function.name, phase: "start" });
         let args: Record<string, any> = {};
         let result: any;
         try {
           args = JSON.parse(tc.function.arguments || "{}");
-          await emit("tool_call", { name: tc.function.name, args });
+          await emit("tool_call", { name: tc.function.name, args: isMemory ? { redacted: true } : args });
           checkCancelled();
           if (options.expressions && tc.function.name === ORB_TOOL_NAME) {
             const chosen = expressionFromToolArgs(args, drawing);
             if (chosen.kind === "none") result = { error: "nothing shown: give kind plus a catalogue name, a short text, or sketch strokes" };
             else { toolExpression = chosen; result = { ok: true, shown: chosen.kind }; }
           } else {
-            result = await executeTool(this.tools, tc.function.name, args);
+            result = await executeTool(turnTools, tc.function.name, args);
           }
         } catch (e: any) {
           checkCancelled();
-          await emit("tool_call", { name: tc.function.name, args: tc.function.arguments });
+          await emit("tool_call", { name: tc.function.name, args: isMemory ? { redacted: true } : tc.function.arguments });
           result = { error: "invalid tool arguments: " + (e?.message ?? e) };
         }
         checkCancelled();
@@ -270,7 +284,7 @@ export class Agent {
           ok: !(result && typeof result === "object" && "error" in result),
           latency_ms: Math.round(performance.now() - t1),
           size_chars: content.length,
-          result: truncate(content),
+          result: isMemory ? "[memory result redacted]" : truncate(content),
         });
         const ids = touchedIdsFor(this.tools, tc.function.name, args, result);
         if (ids.length) await emit("touched", { entity_ids: ids });

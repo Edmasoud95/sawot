@@ -1,3 +1,8 @@
+import MotionButton from "../MotionButton";
+import { useDisclosureMotion } from "../../hooks/useDisclosureMotion";
+import { useRef } from "react";
+import { useSpringValue } from "../../hooks/useSpringValue";
+import { haptics } from "../../lib/haptics";
 export const FIELD_CLS =
   "w-full min-w-0 min-h-11 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-base text-zinc-200 outline-none backdrop-blur transition-colors duration-300 hover:border-white/25 focus:border-aurora-teal/50 disabled:opacity-50";
 
@@ -12,7 +17,9 @@ export function SectionTitle({ children }) {
   );
 }
 
-export function Toggle({ label, hint, checked, onChange }) {
+export function Toggle({ label, hint, checked, onChange, disabled = false, tactile = true }) {
+  const knob = useRef<HTMLSpanElement>(null);
+  useSpringValue(knob, checked ? 24 : 4, (element, value) => { element.style.transform = `translateX(${value}px)`; });
   return (
     <div className="flex items-start justify-between gap-4">
       <span className="flex flex-col gap-1">
@@ -25,14 +32,13 @@ export function Toggle({ label, hint, checked, onChange }) {
         role="switch"
         aria-checked={checked}
         aria-label={label}
-        onClick={() => onChange(!checked)}
+        disabled={disabled}
+        onClick={() => { if (tactile) haptics.pulse(); onChange(!checked); }}
         className="relative h-11 w-11 shrink-0 rounded-full"
       >
         <span aria-hidden="true" className={`absolute left-0 top-2.5 h-6 w-11 rounded-full transition-colors duration-300 ${checked ? "bg-aurora-teal/70" : "bg-white/10"}`} />
-        <span aria-hidden="true"
-          className={`absolute left-0 top-3.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-300 ${
-            checked ? "translate-x-6" : "translate-x-1"
-          }`}
+        <span ref={knob} aria-hidden="true"
+          className="absolute left-0 top-3.5 h-4 w-4 rounded-full bg-white shadow"
         />
       </button>
     </div>
@@ -75,9 +81,10 @@ export function Skeleton() {
 /** A settings row that reads its current value at a glance and expands in
  *  place to reveal the controls. */
 export function Disclosure({ id, title, summary, open, onToggle, children }) {
+  const { ref, mounted, finish } = useDisclosureMotion(open);
   return (
     <div className="settings-row">
-      <button
+      <MotionButton
         type="button"
         onClick={onToggle}
         aria-expanded={open}
@@ -91,8 +98,10 @@ export function Disclosure({ id, title, summary, open, onToggle, children }) {
             <path d="M9 6l6 6-6 6" />
           </svg>
         </span>
-      </button>
-      {open && <div id={`${id}-body`} className="settings-row-body">{children}</div>}
+      </MotionButton>
+      <div ref={ref} onFocusCapture={finish} id={`${id}-body`} inert={!open} aria-hidden={!open} className="settings-disclosure-body">
+        {mounted && <div className="settings-row-body">{children}</div>}
+      </div>
     </div>
   );
 }

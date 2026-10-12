@@ -7,6 +7,8 @@ export function branchConversation(store: ChatStore, source: any, index: number,
   const now = Date.now() / 1000;
   const branch = {
     id: newId(), title: `Branch: ${source.title || "New chat"}`.slice(0, 80),
+    privateMemoryUsed: source.privateMemoryUsed === true,
+    privacyAncestors: [...new Set([...(source.privacyAncestors ?? []), source.id])],
     model: source.model, reasoningEffort: source.reasoningEffort ?? null,
     homeAssistant: Boolean(source.homeAssistant), webSearch: source.webSearch !== false, python: source.python !== false,
     created: now, updated: now, draftText: "",

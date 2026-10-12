@@ -1,3 +1,4 @@
+import ControlIcon from "./ControlIcon";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { rankModels, type ProviderLike } from "../lib/fuzzy";
 import { useModelFavorites } from "../lib/modelFavorites";
@@ -210,7 +211,7 @@ export default function ModelPicker({ label = "Model", value, providers, onChang
               }}>
               <div className="model-sheet-heading">
                 <h2 id={`${listId}-title`}>Choose model</h2>
-                <button type="button" aria-label="Close model picker" onClick={() => setOpen(false)}><span className="ui-text-icon" aria-hidden="true">×</span></button>
+                <button type="button" aria-label="Close model picker" onClick={() => setOpen(false)}><ControlIcon name="close" /></button>
               </div>
               {field}
               {list}

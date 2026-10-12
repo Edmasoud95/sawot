@@ -9,26 +9,33 @@ let inflight = null;
 const listeners = new Set<(c: any) => void>();
 const notify = () => listeners.forEach((fn) => fn(cache));
 
-function fetchSettings() {
-  if (cache) return Promise.resolve(cache);
-  if (!inflight) {
-    inflight = fetch(`${API_BASE}/api/settings`)
+let privacyRevision = 0;
+export const beginProviderRefresh = () => ++privacyRevision;
+
+function fetchSettings(refresh = false) {
+  if (cache && !refresh) return Promise.resolve(cache);
+  if (!inflight || refresh) {
+    const revision = beginProviderRefresh();
+    const request = fetch(`${API_BASE}/api/settings`, { cache: "no-store" })
       .then((r) => {
         if (!r.ok) throw new Error(r.statusText);
         return r.json();
       })
       .then((d) => {
-        const providers = (Array.isArray(d.providers) ? d.providers : []).map((p) => ({ ...p, state: p.state === "ready" ? "ready" : "pending" }));
-        cache = { models: flatModels(providers), providers };
-        for (const p of providers) loadProviderModels(p.id).then((result) => patchProvider(p.id, result));
-        return cache;
+        const providers = Array.isArray(d.providers) ? d.providers : [];
+        if (updateProviderPrivacy(providers, revision)) {
+          for (const p of providers) void loadProviderModels(p.id);
+        }
+        return cache ?? { models: [], providers: [] };
       })
-      .catch((e) => {
-        inflight = null; // allow a retry on next mount
-        throw e;
-      });
+      .finally(() => { if (inflight === request) inflight = null; });
+    inflight = request;
   }
   return inflight;
+}
+
+export function refreshProviderPrivacy() {
+  return fetchSettings(true);
 }
 
 const flatModels = (providers) => providers.flatMap((p) => p.models.map((m) => `${p.id}::${m}`));
@@ -60,12 +67,19 @@ function useSettingsField(field) {
     let on = true;
     const listener = (c) => on && setValue(c[field]);
     listeners.add(listener);
+    const refresh = () => {
+      if (document.visibilityState !== "hidden") void refreshProviderPrivacy().catch(() => {});
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
     fetchSettings()
       .then((d) => on && setValue(d[field]))
       .catch(() => {});
     return () => {
       on = false;
       listeners.delete(listener);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
     };
   }, [field]);
   return value;
@@ -87,4 +101,17 @@ export function splitModelId(id) {
   return at >= 0
     ? { provider: id.slice(0, at), model: id.slice(at + 2) }
     : { provider: null, model: id };
+}
+
+/** Apply provider policy changes immediately to every mounted chat picker. */
+export function updateProviderPrivacy(providers, expectedRevision?: number) {
+  if (expectedRevision !== undefined && expectedRevision !== privacyRevision) return false;
+  privacyRevision++;
+  const next = providers.map(p => {
+    const known = cache?.providers.find(q => q.id === p.id);
+    return { ...p, ...(known ? { models: known.models, effortLevels: known.effortLevels, imageInput: known.imageInput, state: known.state } : { models: p.models ?? [], state: p.state === "ready" ? "ready" : "pending" }), privateMemoryAccess: p.privateMemoryAccess === true };
+  });
+  cache = { models: flatModels(next), providers: next };
+  notify();
+  return true;
 }

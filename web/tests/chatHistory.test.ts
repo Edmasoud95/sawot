@@ -43,7 +43,7 @@ test("dismissed command requests cannot reopen the drawer with a late result", a
   assert.deepEqual(store.getState().active.messages, []);
 });
 
-test("new chats stay hidden; drafts restore per chat and disappear below three words", async () => {
+test("new chats stay hidden; short drafts are preserved without appearing in history", async () => {
   const records = new Map<string, any>();
   globalThis.fetch = async (_url, init: any = {}) => {
     const url = String(_url);
@@ -72,7 +72,7 @@ test("new chats stay hidden; drafts restore per chat and disappear below three w
   store.getState().setDraftText("Plan my");
   assert.equal(store.getState().conversations.length, 0);
   await store.getState().flushDraft();
-  assert.equal(records.get(first).draftText, "");
+  assert.equal(records.get(first).draftText, "Plan my");
 });
 
 test("sending a one-word message promotes history and clears the draft", async () => {
@@ -379,28 +379,43 @@ test("a disconnected request that never reached the server restores its draft an
   assert.deepEqual(store.getState().active.messages, []);
 });
 
-test("reopening an active response polls progress until the full saved answer is ready", async () => {
+test("reopening a response catches up once and resumes live UI without resending", async (t) => {
   interruptedChat();
-  let responding = true;
+  t.after(() => store.getState().detachStream());
+  let live!: ReadableStreamDefaultController;
   const requests: string[] = [];
+  const running = { id: "running", title: "Running", responding: true,
+    messages: [{ role: "user", content: "Question" }, { role: "assistant", content: "Partial", thinking: "Reasoning" }] };
   globalThis.fetch = async (url) => {
     requests.push(String(url));
-    return new Response(JSON.stringify({ id: "running", title: "Running", responding,
-      messages: [{ role: "user", content: "Question" }, { role: "assistant", content: responding ? "Partial" : "Complete" }] }));
+    if (String(url).endsWith("/stream")) return new Response(new ReadableStream({ start(c) {
+      live = c;
+      c.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ type: "snapshot", conversation: running })}\n\n`));
+    } }));
+    return new Response(JSON.stringify(running));
   };
   await store.getState().openConversation("running");
   await settleStream();
-  assert.equal(store.getState().backgroundResponding, true);
-  assert.equal(store.getState().reconciling, true);
-  assert.equal(store.getState().active.messages.at(-1).content, "Partial");
-  await store.getState().startStream("Must wait");
-  responding = false;
-  await store.getState().retryRecovery();
-  assert.equal(store.getState().backgroundResponding, false);
-  assert.equal(store.getState().reconciling, false);
+  assert.equal(store.getState().streaming, true);
+  assert.equal(store.getState().messageError, "");
+  assert.equal(store.getState().streamText, "Partial");
+  assert.equal(store.getState().streamThinking, "Reasoning");
+  assert.equal(store.getState().active.messages.length, 1);
+  let renders = 0;
+  const unsubscribe = store.subscribe(() => renders++);
+  for (let i = 0; i < 100; i++) live.enqueue(new TextEncoder().encode('data: {"type":"content","delta":"!"}\n\n'));
+  await new Promise(r => setTimeout(r, 80));
+  unsubscribe();
+  assert.equal(store.getState().streamText, "Partial" + "!".repeat(100));
+  assert.ok(renders < 10, `burst caused ${renders} store updates`);
+  live.enqueue(new TextEncoder().encode('data: {"type":"done","message":{"role":"assistant","content":"Complete"}}\n\n'));
+  live.close();
+  await settleStream();
+  assert.equal(store.getState().streaming, false);
   assert.equal(store.getState().active.messages.at(-1).content, "Complete");
   assert.equal(store.getState().messageError, "");
-  assert.equal(requests.every(url => url.endsWith("/running")), true);
+  assert.equal(requests.filter(u => u.endsWith("/stream")).length, 1);
+  assert.equal(requests.some(u => u.endsWith("/messages") || u.endsWith("/cancel")), false);
 });
 
 test("Stop explicitly cancels a response even after the browser stream disconnected", async () => {
@@ -724,4 +739,173 @@ test("failed branching leaves the source open and a late branch cannot override 
   release(new Response(JSON.stringify({ id: 'late-branch', title: 'Branch', messages: source.messages, draftText: '' })));
   assert.equal(await pending, false); assert.equal(store.getState().activeId, 'other');
   assert.ok(store.getState().conversations.some(c => c.id === 'late-branch'));
+});
+
+test("privacy events and completion preserve the private conversation marker", async () => {
+  for (const type of ['privacy', 'done']) {
+    store.setState({ activeId: 'private-chat', active: { id: 'private-chat', messages: [], draftText: '' },
+      conversations: [{ id: 'private-chat' }], streaming: false, backgroundResponding: false,
+      reconciling: false, settingsSaving: false, branchingMessage: null, pendingAttachments: [] });
+    globalThis.fetch = async (_url, init: any = {}) => {
+      if (init.method === 'PATCH') return new Response('{}');
+      const events = type === 'privacy'
+        ? [{ type: 'privacy', privateMemoryUsed: true }, { type: 'done', message: { role: 'assistant', content: 'Saved.' } }]
+        : [{ type: 'done', privateMemoryUsed: true, message: { role: 'assistant', content: 'Saved.' } }];
+      return new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''));
+    };
+    await store.getState().startStream('Remember this privately');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(store.getState().active.privateMemoryUsed, true);
+    assert.equal(store.getState().conversations.find(c => c.id === 'private-chat').privateMemoryUsed, true);
+    store.getState().detachStream();
+  }
+});
+
+test('memory reclassification refreshes privacy without replacing streaming messages or drafts', async () => {
+  const messages = [{ role: 'user', content: 'Current optimistic message' }];
+  store.setState({ activeId: 'reclassified', active: { id: 'reclassified', messages, draftText: 'Keep this draft' },
+    conversations: [{ id: 'reclassified' }], streaming: true, streamText: 'Partial reply' });
+  globalThis.fetch = async () => new Response(JSON.stringify({ id: 'reclassified', privateMemoryUsed: true, messages: [], draftText: '' }));
+  await store.getState().refreshPrivacy();
+  assert.equal(store.getState().active.privateMemoryUsed, true);
+  assert.equal(store.getState().active.messages, messages);
+  assert.equal(store.getState().active.draftText, 'Keep this draft');
+  assert.equal(store.getState().streamText, 'Partial reply');
+  assert.equal(store.getState().streaming, true);
+  store.setState({ streaming: false });
+});
+
+test('late privacy refresh does not alter another active chat', async () => {
+  store.setState({ activeId: 'old-private', active: { id: 'old-private', messages: [] }, conversations: [{ id: 'old-private' }] });
+  let release!: (response: Response) => void;
+  globalThis.fetch = async () => new Promise(resolve => { release = resolve; });
+  const pending = store.getState().refreshPrivacy();
+  store.setState({ activeId: 'new-public', active: { id: 'new-public', messages: [] } });
+  release(new Response(JSON.stringify({ id: 'old-private', privateMemoryUsed: true })));
+  await pending;
+  assert.equal(store.getState().active.privateMemoryUsed, undefined);
+  assert.equal(store.getState().conversations[0].privateMemoryUsed, true);
+});
+
+test('focus bursts preserve the live bubble and create only one recovery subscription', async (t) => {
+  const initial = interruptedChat();
+  t.after(() => store.getState().detachStream());
+  const requests: string[] = [];
+  let release!: (value: Response) => void;
+  let resumed!: ReadableStreamDefaultController;
+  globalThis.fetch = async url => {
+    requests.push(String(url));
+    if (String(url).endsWith('/messages')) return initial.response;
+    if (String(url).endsWith('/stream')) return new Response(new ReadableStream({ start(c) { resumed = c; } }));
+    return new Promise(resolve => { release = resolve; });
+  };
+  await store.getState().startStream('Question');
+  await settleStream();
+  const pending = store.getState().resumeConversation();
+  void store.getState().resumeConversation();
+  assert.equal(store.getState().streaming, true);
+  assert.equal(store.getState().streamText, 'Partial answer');
+  assert.equal(store.getState().messageError, '');
+  release(new Response(JSON.stringify({ responding: true, messages: [
+    { role: 'user', content: 'Question' }, { role: 'assistant', content: 'Caught up' },
+  ] })));
+  await pending;
+  await settleStream();
+  void store.getState().resumeConversation();
+  assert.equal(requests.filter(u => u.endsWith('/stream')).length, 1);
+  assert.equal(requests.filter(u => u.endsWith('/messages')).length, 1);
+  resumed.close();
+});
+
+test('completion between recovery read and subscription replaces the partial reply once', async (t) => {
+  interruptedChat();
+  t.after(() => store.getState().detachStream());
+  const messages = [{ role: 'user', content: 'Question' }, { role: 'assistant', content: 'Complete' }];
+  globalThis.fetch = async url => String(url).endsWith('/stream')
+    ? new Response(`data: ${JSON.stringify({ type: 'snapshot', conversation: { responding: false, messages } })}\n\n`)
+    : new Response(JSON.stringify({ responding: true, messages: [messages[0], { role: 'assistant', content: 'Partial' }] }));
+  await store.getState().recoverConversation('interrupted');
+  await settleStream();
+  assert.deepEqual(store.getState().active.messages, messages);
+  assert.equal(store.getState().streaming, false);
+  assert.equal(store.getState().backgroundResponding, false);
+  assert.equal(store.getState().messageError, '');
+});
+
+test('Stop after reconnect cancels once and late deltas cannot change the saved answer', async (t) => {
+  interruptedChat();
+  t.after(() => store.getState().detachStream());
+  let stopped = false;
+  let cancels = 0;
+  let resumed!: ReadableStreamDefaultController;
+  globalThis.fetch = async url => {
+    if (String(url).endsWith('/cancel')) { stopped = true; cancels++; return new Response(null, { status: 204 }); }
+    if (String(url).endsWith('/stream')) return new Response(new ReadableStream({ start(c) { resumed = c; } }));
+    return new Response(JSON.stringify({ responding: !stopped, messages: [{ role: 'assistant', content: stopped ? 'Stopped' : 'Partial' }] }));
+  };
+  await store.getState().recoverConversation('interrupted');
+  await settleStream();
+  await store.getState().stopStream();
+  resumed.enqueue(new TextEncoder().encode('data: {"type":"content","delta":"Late"}\n\n'));
+  resumed.close();
+  await settleStream();
+  assert.equal(cancels, 1);
+  assert.equal(store.getState().active.messages.at(-1).content, 'Stopped');
+  assert.equal(store.getState().streamText, '');
+  assert.equal(store.getState().streaming, false);
+});
+
+test('foreground recovery restores unsent text and attachments when POST never reached the server', async (t) => {
+  interruptedChat();
+  t.after(() => store.getState().detachStream());
+  const attachment = { id: 'unsent-upload' };
+  store.setState({ pendingAttachments: [attachment] });
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith('/messages')) return new Promise((_, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))));
+    return new Response(JSON.stringify({ messages: [], responding: false }));
+  };
+  await store.getState().startStream('Do not lose this');
+  await store.getState().resumeConversation();
+  assert.equal(store.getState().active.draftText, 'Do not lose this');
+  assert.deepEqual(store.getState().pendingAttachments, [attachment]);
+});
+
+test('only a newly submitted message requests scrolling to the latest', async () => {
+  const active={id:'abcdef123456',title:'Scroll test',messages:[],draftText:''};
+  store.setState({activeId:active.id,active,streaming:false,backgroundResponding:false,reconciling:false,settingsSaving:false,branchingMessage:null,pendingAttachments:[],conversations:[]});
+  globalThis.fetch=async()=>new Response('data: {"type":"done","message":{"role":"assistant","content":"Reply"}}\n\n');
+  const before=store.getState().scrollToLatestRequest;
+  await store.getState().startStream('New message');
+  const request=store.getState().scrollToLatestRequest;
+  assert.notEqual(request,before);
+  assert.equal(request.conversationId,active.id);
+  await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(store.getState().scrollToLatestRequest,request,'completion must not force another scroll');
+  await store.getState().startStream('',0);
+  assert.equal(store.getState().scrollToLatestRequest,request,'regeneration must preserve reading position');
+  await new Promise(resolve=>setTimeout(resolve,0));
+});
+
+test('resumed chat preserves a second thinking section after reply text, even in a single event batch', async t => {
+  interruptedChat();
+  t.after(() => store.getState().detachStream());
+  let live!: ReadableStreamDefaultController;
+  const first = [{ type: 'thinking', text: 'First reasoning.' }, { type: 'content', text: 'Intermediate reply.' }];
+  const running = { id: 'running', title: 'Running', responding: true, messages: [
+    { role: 'user', content: 'Question' },
+    { role: 'assistant', thinking: first[0].text, content: first[1].text, parts: first },
+  ] };
+  globalThis.fetch = async url => String(url).endsWith('/stream')
+    ? new Response(new ReadableStream({ start(c) { live = c; c.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'snapshot', conversation: running })}\n\n`)); } }))
+    : new Response(JSON.stringify(running));
+  await store.getState().openConversation('running');
+  await settleStream();
+  live.enqueue(new TextEncoder().encode('data: {"type":"content","delta":" More."}\n\ndata: {"type":"thinking","delta":"Second reasoning."}\n\n'));
+  await new Promise(r => setTimeout(r, 80));
+  assert.deepEqual(store.getState().streamParts, [first[0], { type: 'content', text: 'Intermediate reply. More.' }, { type: 'thinking', text: 'Second reasoning.' }]);
+  live.enqueue(new TextEncoder().encode('data: {"type":"content","delta":"Final reply."}\n\n'));
+  await new Promise(r => setTimeout(r, 80));
+  assert.equal(store.getState().streamParts.at(-1).type, 'content');
+  assert.equal(store.getState().streamParts.length, 4);
+  live.close();
 });

@@ -1,9 +1,30 @@
 import { useState } from "react";
-import { FIELD_CLS } from "./fields";
+import { updateProviderPrivacy } from "../chat/useModels";
+import { FIELD_CLS, Toggle } from "./fields";
 
-function ProviderRow({ p, onRemove }) {
+function ProviderRow({ p, onRemove, apply }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function changePrivacy(privateMemoryAccess: boolean) {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/providers/${encodeURIComponent(p.id)}/privacy`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ privateMemoryAccess }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail || "Could not update private memory access.");
+      updateProviderPrivacy(body.providers ?? []);
+      apply(body);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not update private memory access.");
+    } finally { setBusy(false); }
+  }
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5">
+    <div className="rounded-xl border border-white/10 p-3.5">
+    <div className="flex items-center justify-between gap-3">
       <div className="flex min-w-0 flex-col">
         <span className="flex flex-wrap items-center gap-2 text-base font-medium text-zinc-200">
           {p.name}
@@ -29,6 +50,11 @@ function ProviderRow({ p, onRemove }) {
           </svg>
         </button>
       )}
+    </div>
+    <div className="mt-3" aria-busy={busy}>
+      <Toggle label="Allow private memories" hint="Allow this provider to receive private memories and private conversations, including speech." checked={p.privateMemoryAccess === true} onChange={changePrivacy} />
+      {error && <p role="alert" className="mt-2 text-sm text-red-300">{error}</p>}
+    </div>
     </div>
   );
 }
@@ -110,7 +136,7 @@ function AddProviderForm({ apply }) {
 
 export default function ProviderFields({ providers, removeProvider, onProvidersChanged }) {
   return <div className="flex flex-col gap-3">
-    {providers.map(p => <ProviderRow key={p.id} p={p} onRemove={removeProvider} />)}
+    {providers.map(p => <ProviderRow key={p.id} p={p} onRemove={removeProvider} apply={onProvidersChanged} />)}
     <AddProviderForm apply={onProvidersChanged} />
   </div>;
 }

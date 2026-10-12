@@ -1,4 +1,4 @@
-"""Release speech weights after ten idle minutes; reload on actual inference."""
+"""Load speech weights on first use; release after ten idle minutes."""
 import logging
 import threading
 import time
@@ -11,7 +11,7 @@ IDLE_SECONDS = 600
 
 
 class IdleEngine:
-    def __init__(self, engine, factory, *, model_id="", clock=time.monotonic):
+    def __init__(self, engine, factory, *, model_id="", clock=time.monotonic, voices=(), default_voice=None):
         self._engine = engine
         self._model_id = model_id
         self._factory = factory
@@ -20,8 +20,8 @@ class IdleEngine:
         self._lock = threading.Lock()
         self._closed = False
         # Metadata queries must not keep weights alive or trigger a reload.
-        self._voices = list(engine.voices()) if hasattr(engine, "voices") else []
-        self._default_voice = getattr(engine, "default_voice", None)
+        self._voices = list(engine.voices()) if hasattr(engine, "voices") else list(voices)
+        self._default_voice = getattr(engine, "default_voice", default_voice)
 
     @property
     def loaded(self):
@@ -47,7 +47,7 @@ class IdleEngine:
             try:
                 if self._engine is None:
                     self._engine = self._factory()
-                    logger.info("reloaded idle speech model")
+                    logger.info("loaded speech model %s on demand", self._model_id)
                 return getattr(self._engine, method)(*args, **kwargs)
             finally:
                 self._last_used = self._clock()
@@ -66,8 +66,10 @@ class IdleEngine:
             if old is not None and hasattr(old, "close"):
                 old.close()
         finally:
+            had_engine = old is not None
             del old
-            _free_accelerator_memory()
+            if had_engine:
+                _free_accelerator_memory()
 
     def unload_if_idle(self):
         if not self._lock.acquire(blocking=False):

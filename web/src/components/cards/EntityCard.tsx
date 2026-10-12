@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import ControlIcon from "../ControlIcon";
+import { deviceControls, useDeviceControlStore } from "../../deviceControlStore";
+import { useEffect, useId, useRef, useState } from "react";
 import { fractionOf, valueFromPointer } from "../../lib/touchSlider";
 
 // Domain accents come from the shared aurora tokens so the cards sit at the
@@ -88,7 +90,7 @@ function TouchBar({ label, value, min, max, step, format, onCommit, ariaLabel, t
       data-active={active} data-track={Boolean(track)}
       aria-valuemin={min} aria-valuemax={max} aria-valuenow={live} aria-valuetext={format(live)}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onKeyDown={onKeyDown}>
+      onPointerUp={onPointerUp} onPointerCancel={() => { dragging.current = false; setActive(false); setLive(value); }} onKeyDown={onKeyDown}>
       {track && <div className="tbar-track" style={{ background: track }} />}
       <div className="tbar-fill" style={{ width: `${fraction * 100}%` }} />
       <span className="tbar-label">{label}</span>
@@ -151,9 +153,9 @@ function ClimateControls({ card, sendControl }) {
   });
   return (
     <div className="stepper" role="group" aria-label={`${card.name} target temperature`}>
-      <button type="button" className="stepper-button" aria-label="Lower target" onClick={() => step(-0.5)}>−</button>
+      <button type="button" className="stepper-button" aria-label="Lower target" onClick={() => step(-0.5)}><ControlIcon name="minus" /></button>
       <span className="stepper-value"><span className="stepper-caption">Target</span>{target}°</span>
-      <button type="button" className="stepper-button" aria-label="Raise target" onClick={() => step(0.5)}>+</button>
+      <button type="button" className="stepper-button" aria-label="Raise target" onClick={() => step(0.5)}><ControlIcon name="plus" /></button>
     </div>
   );
 }
@@ -174,33 +176,49 @@ function reading(card) {
   }
 }
 
-export default function EntityCard({ card, sendControl }) {
+function DeviceIcon({ domain }) {
+  return <svg className="ecard-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {domain === 'light' ? <><path d="M9 18h6m-5 3h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 2H9s0-1-1-2Z"/></>
+      : domain === 'climate' ? <><path d="M9 14V5a3 3 0 0 1 6 0v9a5 5 0 1 1-6 0Z M12 8v9"/><circle cx="12" cy="17" r="1"/></>
+      : domain === 'sensor' || domain === 'binary_sensor' ? <><path d="M4 18a9 9 0 1 1 16 0Z M12 14l4-5"/><circle cx="12" cy="14" r="1"/></>
+      : domain === 'media_player' ? <><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4m-2-13 5 3-5 3Z"/></>
+      : <><circle cx="12" cy="12" r="8"/><path d="M12 3v8"/></>}
+  </svg>;
+}
+
+export default function EntityCard({ card: sourceCard, sendControl: transport, compact = false }) {
+  const control = useDeviceControlStore(s => s.devices[sourceCard.entity_id]);
+  const card = control?.card ?? sourceCard;
+  const sendControl = (message) => deviceControls.send(card, message, transport);
+  const [expanded, setExpanded] = useState(false);
+  const controlsId = useId();
   const toggleable = ["light", "switch", "media_player"].includes(card.domain);
   const on = card.state === "on";
   const accent = ACCENTS[card.domain] ?? "var(--color-zinc-500)";
   const { value, unit } = reading(card);
+  const hasControls = (card.domain === "light" && on) || (card.domain === "climate" && card.attrs.temperature != null);
+  const title = <><DeviceIcon domain={card.domain}/><span className="ecard-title">
+    <span className="ecard-name" title={card.name}>{card.name}</span>
+    <span className="ecard-eyebrow" role="status">{control?.pending ? "Updating…" : card.area || card.domain.replace(/_/g, " ")}</span>
+  </span></>;
+  const readingElement = <span className="ecard-reading">{value}{unit && <span className="ecard-unit">{unit}</span>}</span>;
   return (
-    <div className="entity-card ecard" data-on={toggleable ? on : undefined}
+    <div className="entity-card ecard" data-compact={compact || undefined} data-on={toggleable ? on : undefined}
       style={{ "--card-accent": accent } as React.CSSProperties}>
       <div className="ecard-head">
-        <div className="ecard-title">
-          <p className="ecard-name">{card.name}</p>
-          <p className="ecard-eyebrow">{card.area || card.domain.replace("_", " ")}</p>
-        </div>
-        {toggleable && (
-          <Switch on={on} label={`Turn ${on ? "off" : "on"} ${card.name}`}
-            onChange={() => sendControl({
-              type: "control", domain: card.domain,
-              service: on ? "turn_off" : "turn_on", entity_id: card.entity_id,
-            })} />
-        )}
+        {compact && hasControls ? <button type="button" className="ecard-summary" aria-expanded={expanded} aria-controls={controlsId}
+          aria-label={`${expanded ? 'Hide' : 'Show'} ${card.name} controls`} onClick={() => setExpanded(!expanded)}>
+          {title}{readingElement}<span className="ecard-chevron" aria-hidden="true"><ControlIcon name={expanded ? "minus" : "plus"} size={16} /></span>
+        </button> : <div className="ecard-summary">{title}{compact && readingElement}</div>}
+        {toggleable && <Switch on={on} label={`Turn ${on ? "off" : "on"} ${card.name}`}
+          onChange={() => sendControl({ type: "control", domain: card.domain, service: on ? "turn_off" : "turn_on", entity_id: card.entity_id })}/>}
       </div>
-      <p className="ecard-reading">
-        {value}
-        {unit && <span className="ecard-unit">{unit}</span>}
-      </p>
-      {card.domain === "light" && on && <LightControls card={card} sendControl={sendControl} />}
-      {card.domain === "climate" && <ClimateControls card={card} sendControl={sendControl} />}
+      {control?.error && <p className="ecard-error" role="alert">{control.error}</p>}
+      {!compact && readingElement}
+      {hasControls && <div id={controlsId} className="ecard-controls" hidden={compact && !expanded}>
+        {card.domain === "light" && on && <LightControls card={card} sendControl={sendControl} />}
+        {card.domain === "climate" && <ClimateControls card={card} sendControl={sendControl} />}
+      </div>}
     </div>
   );
 }

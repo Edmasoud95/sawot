@@ -1,3 +1,4 @@
+import { haptics } from "./haptics";
 import { VoiceTurnDetector, encodeWav } from './voiceTurnDetector';
 import { levelBus } from './levelBus';
 
@@ -11,6 +12,7 @@ const loaded = new WeakMap<AudioContext, Promise<void>>();
 
 /** Owns one microphone session. Reply audio and cancelled turns never enter its buffer. */
 export class VoiceSessionRecorder {
+  private releaseHaptics?: () => void;
   private generation = 0;
   private stream?: MediaStream;
   private source?: MediaStreamAudioSourceNode;
@@ -30,6 +32,7 @@ export class VoiceSessionRecorder {
 
   async start(): Promise<boolean> {
     this.end();
+    this.releaseHaptics = haptics.suppress();
     const generation = this.generation;
     try {
       const context = this.callbacks.context();
@@ -141,6 +144,8 @@ export class VoiceSessionRecorder {
       track.removeEventListener('mute', this.deviceLost);
       track.stop();
     }
+    this.releaseHaptics?.();
+    this.releaseHaptics = undefined;
     this.stream = this.source = this.node = this.context = this.detector = undefined;
   }
 }

@@ -1,3 +1,4 @@
+import ControlIcon from "../ControlIcon";
 import { useEffect, useId, useRef, useState } from "react";
 import { openHomeAssistantSettings } from "../../lib/settingsNavigation";
 import { useChatStore } from "../../chatStore";
@@ -80,7 +81,7 @@ export default function ToolsMenu() {
       }}>
       <div className="model-sheet-heading">
         <h2 id={title}>Chat tools</h2>
-        <button type="button" aria-label="Close tools" onClick={() => setOpen(false)}><span className="ui-text-icon" aria-hidden="true">×</span></button>
+        <button type="button" aria-label="Close tools" onClick={() => setOpen(false)}><ControlIcon name="close" /></button>
       </div>
       {TOOLS.map(({ key, label }) => {
         const unavailable = key === "homeAssistant" && haConfigured !== true;

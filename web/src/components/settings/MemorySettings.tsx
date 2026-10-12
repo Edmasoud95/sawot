@@ -62,7 +62,7 @@ export default function MemorySettings() {
   const matching = data?.memories.filter(f => f.text.toLocaleLowerCase().includes(query.toLocaleLowerCase())) ?? [];
   return <section aria-label="Memory" className="min-w-0 space-y-3 border-t border-white/10 pt-5">
     <h3 className="text-sm text-zinc-200">Memory</h3>
-    <p className="text-sm text-zinc-500">Chat can remember personal facts. Recalled facts are sent to your selected model provider. Disabling memory keeps saved facts and stops new capture and recall.</p>
+    <p className="text-sm text-zinc-500">Chat can remember personal facts. Private facts are only sent to providers with private memory access. Other recalled facts are sent to your selected model provider. Disabling memory keeps saved facts and stops new capture and recall.</p>
     {error && <p role="alert" className="text-sm text-red-300">
       {error}
     </p>}

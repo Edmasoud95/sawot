@@ -1,8 +1,9 @@
+import MotionButton from "../MotionButton";
 export default function SectionNav({ sections, value, onChange }) {
   return (
     <nav className="settings-nav" role="tablist" aria-label="Settings sections">
       {sections.map((s) => (
-        <button
+        <MotionButton
           key={s.key}
           id={`settings-tab-${s.key}`}
           role="tab"
@@ -11,7 +12,7 @@ export default function SectionNav({ sections, value, onChange }) {
           className={`settings-nav-item ${value === s.key ? "is-active" : ""}`}
         >
           {s.label}
-        </button>
+        </MotionButton>
       ))}
     </nav>
   );

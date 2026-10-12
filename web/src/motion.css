@@ -1,0 +1,50 @@
+/* Shared timing in milliseconds; JS reads these same values for GSAP. */
+:root {
+  --motion-press: 80;
+  --motion-release: 440;
+  --motion-reveal: 300;
+  --motion-surfaceOpen: 440;
+  --motion-surfaceClose: 320;
+  --motion-navigate: 240;
+  --motion-state: 220;
+  --motion-release-ease: .2, 1.35, .4, 1;
+  --motion-ease: .22, 1, .36, 1;
+  --ease-flow: cubic-bezier(var(--motion-ease));
+  --time-state: calc(var(--motion-state) * 1ms);
+  --time-reveal: calc(var(--motion-reveal) * 1ms);
+}
+@keyframes motion-reveal {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes motion-menu {
+  from { opacity: 0; transform: translateY(10px) scale(.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes motion-fade { from { opacity: 0; } to { opacity: 1; } }
+/* Explicit opt-in; only artwork moves, leaving targets and layout fixed. */
+.motion-control-artwork { display: inline-flex; align-items: center; justify-content: center; gap: inherit; pointer-events: none; transform-origin: center; }
+html[data-page-hidden="true"] *, html[data-page-hidden="true"] *::before, html[data-page-hidden="true"] *::after { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+.mode-workspace { display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; }
+.mpick-pop, .command-suggestions, .settings-toast-inner, .model-sheet[open],
+.voice-sources-popover:popover-open, .message-context-menu:popover-open,
+.motion-reveal { animation: motion-reveal var(--time-reveal) var(--ease-flow); }
+.mpick-pop, .model-sheet[open], .command-suggestions { transform-origin: center bottom; }
+.tool-activity[open] > :not(summary), .tool-activity details[open] > :not(summary) { animation: motion-fade var(--time-reveal) var(--ease-flow); }
+.tool-activity-chevron { transition: transform var(--time-state) var(--ease-flow); }
+/* Utility-based controls share the same timing as authored CSS. */
+.app-shell .transition-colors, .app-shell .transition-opacity, .app-shell .transition-transform {
+  transition-duration: var(--time-state);
+  transition-timing-function: var(--ease-flow);
+}
+@media (prefers-reduced-motion: reduce) {
+  .motion-reveal, .mpick-pop, .command-suggestions, .settings-toast-inner, .model-sheet[open],
+  .voice-sources-popover:popover-open, .message-context-menu:popover-open { animation: none; }
+}
+
+/* Existing controls keep their layout; only state feedback changes. */
+.settings-disclosure-body { overflow: clip; }
+.settings-row-head > .motion-control-artwork { display: flex; width: 100%; justify-content: space-between; }

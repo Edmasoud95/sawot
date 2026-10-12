@@ -4,8 +4,10 @@ import { build } from '../node_modules/esbuild/lib/main.js';
 
 // Real orchestration hook; recorder/browser lifecycle is covered separately.
 const modules = {
+  "../deviceControlStore": `export const deviceControls = {refresh() {}};`,
   react: `export const useRef = current => ({current}); export const useEffect = fn => { globalThis.h.effects.push(fn); };`,
-  '../lib/audio': `export const meterFrom = () => {}; export const audioContext = () => ({}); export const playReadyCue = () => {globalThis.h.cues++;}; export const stopPlayback = () => {}; export const playWav = async (_, ended) => {globalThis.h.captureDuringPlayback = globalThis.h.captureActive; globalThis.h.playbackEnded = ended;};`,
+  '../lib/audio': `export const meterFrom = () => {}; export const audioContext = () => ({}); export const playReadyCue = () => {globalThis.h.cues++;}; export const stopPlayback = () => {}; export const playWav = async (_, ended, started) => {globalThis.h.captureDuringPlayback = globalThis.h.captureActive; globalThis.h.playbackEnded = ended; globalThis.h.playbackStarted = started;};`,
+  '../lib/haptics': `export const haptics = {pulse(kind) {globalThis.h.pulses.push({kind, captureActive: globalThis.h.captureActive});}};`,
   '../lib/voiceSessionRecorder': `export class VoiceSessionRecorder {
     constructor(callbacks) {this.c = callbacks; globalThis.h.recorder = this;}
     start() {globalThis.h.captureActive = true; return new Promise((resolve, reject) => {globalThis.h.ready = resolve; globalThis.h.rejectReady = reject;});}
@@ -29,7 +31,7 @@ const { useVoice } = await import('data:text/javascript;base64,' + Buffer.from(o
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function setup() {
   const h = {effects: [], sent: [], socket: null as any, recorder: null as any, ready: null as any,
-    captureActive: false, captureDuringPlayback: undefined, rejectReady: null as any, playbackEnded: null as any, modeChanged: null as any, cues: 0, listens: 0,
+    captureActive: false, captureDuringPlayback: undefined, rejectReady: null as any, playbackEnded: null as any, playbackStarted: null as any, pulses: [] as any[], modeChanged: null as any, cues: 0, listens: 0,
     state: {status: 'idle', sessionActive: false, debugEnabled: false, mode: 'orb',
       setSessionActive(active) {this.sessionActive=active;}, setStatus(status) {this.status = status;}, clearSearch() {}, beginResponse() {}, clearExpression() {}, clearCaptions() {}, setAssistantCaption() {}},
   };
@@ -97,4 +99,24 @@ test('microphone reopen failure ends the hands-free session', async () => {
   assert.equal(f.h.state.status,'starting'); f.h.rejectReady(new Error('device unavailable')); await restart;
   assert.equal(f.h.state.status,'idle'); assert.equal(f.h.state.sessionActive,false);
   assert.equal(f.h.captureActive,false); f.cleanup();
+});
+
+test('voice feedback waits for playback to start, with microphone released', async () => {
+  const f = setup(); await f.start(); f.h.recorder.c.utterance(new ArrayBuffer(48));
+  f.h.socket.handlers.onAudio(new ArrayBuffer(48)); await tick();
+  assert.deepEqual(f.h.pulses, [], 'receiving audio is not playback readiness');
+  assert.equal(typeof f.h.playbackStarted, 'function');
+  f.h.playbackStarted();
+  assert.equal(f.h.state.status, 'speaking');
+  assert.deepEqual(f.h.pulses, [{kind: 'confirmation', captureActive: false}]);
+  f.cleanup();
+});
+
+test('cancelled voice turn cannot give a late playback cue', async () => {
+  const f = setup(); await f.start(); f.h.recorder.c.utterance(new ArrayBuffer(48));
+  f.h.socket.handlers.onAudio(new ArrayBuffer(48)); await tick();
+  assert.equal(typeof f.h.playbackStarted, 'function');
+  f.voice.endSession(); f.h.playbackStarted();
+  assert.deepEqual(f.h.pulses, []);
+  assert.equal(f.h.state.status, 'idle'); f.cleanup();
 });

@@ -1,3 +1,4 @@
+import { VoiceMemoryError } from "./memory/voice.js";
 import type { TemperatureReading } from "./temperature.js";
 import type { Agent, HistoryMessage } from "./agent.js";
 import { InferenceError, type InferenceClient } from "./inference.js";
@@ -24,6 +25,7 @@ export async function runVoiceTurn(
   provider?: { providerId: string; providerName: string; contextWindow?: number },
   signal?: AbortSignal,
   images: OpenAI.Chat.Completions.ChatCompletionContentPartImage[] = [],
+  guard: () => void = () => {},
 ): Promise<void> {
   const transportSend = send;
   send = (kind, payload) => { if (!signal?.aborted) return transportSend(kind, payload); };
@@ -57,6 +59,7 @@ export async function runVoiceTurn(
   let expression: Record<string, unknown> | null = null;
   let activity: { tool: string; domain: string; service?: string } | null = null;
   const onAgentEvent = async (event: string, data: any) => {
+    if (event === "memory") { await send("memory", data); return; }
     if (event === "search") {
       await send("search", data);
       return;
@@ -108,16 +111,18 @@ export async function runVoiceTurn(
   const checkpoint = history.length;
   let reply: string;
   try {
+    guard();
     reply = await agent.run(history, text, onAgentEvent, { expressions: true, speechEngine, signal, images });
   } catch (error) {
     history.splice(checkpoint);
-    await send("error", { message: isContextOverflow(error) ? conversationErrorMessage(error, "voice") : images.length
+    await send("error", { message: error instanceof VoiceMemoryError ? error.message : isContextOverflow(error) ? conversationErrorMessage(error, "voice") : images.length
       ? "Couldn’t read the pictures. Check that your selected model supports images, then try again."
       : "LLM backend offline" });
     return;
   }
 
   if (signal?.aborted) return;
+  guard();
   await send("assistant_text", { text: stripSpeechTags(reply) });
   if (getCards && touched.length) {
     try {
@@ -132,6 +137,7 @@ export async function runVoiceTurn(
   const spoken = forSpeech(reply, speechEngine);
   let wav: Buffer;
   try {
+    guard();
     wav = await inference.synthesize(spoken, voice, signal);
   } catch (e) {
     await send("error", { message: speechError(e) });
@@ -144,5 +150,6 @@ export async function runVoiceTurn(
   // Begin the expression with playback, so slow synthesis cannot use up its lifetime.
   if (expression) await send("expression", expression);
   if (reading) await send("reading", reading);
+  guard();
   await send("wav", wav);
 }

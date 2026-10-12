@@ -32,10 +32,12 @@ export const useVoiceStore = create<any>()((set) => ({
   expression: null,
   search: null,
   pendingSearch: null,
+  memoryActivity: [],
+  showMemory: event => set(s => ({ memoryActivity: [...s.memoryActivity.filter(e => e.id !== event.id), event].slice(-8) })),
 
   setStatus: (status) => set({ status, ...(["starting", "listening", "recording", "connecting"].includes(status) ? { expression: null } : {}), ...(status === "connecting" ? { search: null, pendingSearch: null } : {}) }),
   // Retain the displayed answer's sources while the next turn is generated.
-  beginResponse: () => set({ pendingSearch: null }),
+  beginResponse: () => set({ pendingSearch: null, memoryActivity: [] }),
   showSearch: (event) => set((s) => {
     const pendingSearch = updateVoiceSearch(s.pendingSearch, event);
     return { pendingSearch, ...(!s.assistantCaption ? { search: pendingSearch } : {}) };
@@ -47,7 +49,7 @@ export const useVoiceStore = create<any>()((set) => ({
   clearExpression: (expected?) => set((s) => !expected || s.expression === expected ? { expression: null } : {}),
   setUserCaption: (text) => set({ userCaption: text }),
   setAssistantCaption: (text) => set((s) => ({ assistantCaption: text, search: s.pendingSearch })),
-  clearCaptions: () => set({ userCaption: "", assistantCaption: "", search: null, pendingSearch: null }),
+  clearCaptions: () => set({ userCaption: "", assistantCaption: "", search: null, pendingSearch: null, memoryActivity: [] }),
   addTurn: (role, text, traceId = null, pictures = []) =>
     set((s) => ({ history: [...s.history, { role, text, traceId, pictures }] })),
   toggleDrawer: () => set((s) => ({ drawerOpen: !s.drawerOpen })),

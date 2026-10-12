@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import MotionButton from "../MotionButton";
+import { useEffect, useState, useRef } from "react";
+import { useSurfaceMotion } from "../../hooks/useSurfaceMotion";
 import { useChatStore } from "../../chatStore";
 import { listConversations } from "../../lib/chatApi";
 
@@ -42,6 +44,7 @@ const railBtn =
   "icon-button";
 
 export default function Sidebar({ panelRef, mobile }) {
+  const scrim = useRef<HTMLDivElement>(null);
   const conversations = useChatStore((s) => s.conversations);
   const activeId = useChatStore((s) => s.activeId);
   const sidebarOpen = useChatStore((s) => s.sidebarOpen);
@@ -81,6 +84,8 @@ export default function Sidebar({ panelRef, mobile }) {
     finally { setDeleting(false); }
   };
 
+  useSurfaceMotion({ panel: panelRef, scrim, open: sidebarOpen, placement: "left", enabled: mobile });
+
   const setOpen = (sidebarOpen) => useChatStore.setState({ sidebarOpen });
   const startNew = async () => {
     if (openingId) return;
@@ -98,47 +103,44 @@ export default function Sidebar({ panelRef, mobile }) {
     } finally { setOpeningId(null); }
   };
 
-  if (!sidebarOpen) {
-    return (
-      <div className="sidebar-rail">
-        <button onClick={() => setOpen(true)} aria-label="Open sidebar" className={railBtn}>
-          <ChevronRight />
-        </button>
-        <button onClick={() => void startNew()} disabled={creating} aria-label={creating ? "Creating conversation" : "New chat"} className={railBtn}>
-          <Plus />
-        </button>
-      </div>
-    );
-  }
-
   const sorted = [...(trimmed ? search?.query === trimmed ? search.results : [] : conversations)].sort((a, b) => b.updated - a.updated);
   const groups = ["Today", "Yesterday", "Earlier"].map(label => ({ label, items: sorted.filter(c => dateGroup(c.updated) === label) })).filter(group => group.items.length);
 
   return (
     <>
+      {!sidebarOpen && !mobile && (      <div className="sidebar-rail">
+        <MotionButton onClick={() => setOpen(true)} aria-label="Open sidebar" className={railBtn}>
+          <ChevronRight />
+        </MotionButton>
+        <MotionButton onClick={() => void startNew()} disabled={creating} aria-label={creating ? "Creating conversation" : "New chat"} className={railBtn}>
+          <Plus />
+        </MotionButton>
+      </div>)}
       <div
+        ref={scrim}
+        style={{ pointerEvents: mobile && sidebarOpen ? "auto" : "none" }}
         onClick={() => setOpen(false)}
         aria-hidden="true"
         className="absolute inset-0 z-20 bg-black/40 backdrop-blur-[2px] sm:hidden"
       />
-      <aside id="chat-history" ref={panelRef} role={mobile ? "dialog" : undefined}
-        aria-modal={mobile ? true : undefined} aria-label="Chat history" className="chat-sidebar">
+      <aside style={!mobile && !sidebarOpen ? { display: "none" } : undefined} id="chat-history" ref={panelRef} role={mobile ? "dialog" : undefined}
+        inert={mobile && !sidebarOpen} aria-modal={mobile && sidebarOpen ? true : undefined} aria-label="Chat history" className="chat-sidebar">
         <div className="flex items-center justify-between px-4 pb-3 pt-1">
           {mobile ? <h1 className="brand" aria-label="SAWOT">sawot<span aria-hidden="true">•</span></h1> : <h2 className="eyebrow">
             Conversations
           </h2>}
-          <button onClick={() => setOpen(false)} aria-label="Collapse sidebar" className={railBtn}>
+          <MotionButton onClick={() => setOpen(false)} aria-label="Collapse sidebar" className={railBtn}>
             <ChevronLeft />
-          </button>
+          </MotionButton>
         </div>
         <div className="px-4 pb-3">
-          <button
+          <MotionButton
             onClick={() => void startNew()}
             disabled={creating || Boolean(openingId)}
             className="new-chat-button"
           >
             <Plus /> {creating ? "Creating…" : "New conversation"}
-          </button>
+          </MotionButton>
         </div>
         <div className="history-search">
           <input type="search" aria-label="Search conversations" placeholder="Search conversations" maxLength={200}

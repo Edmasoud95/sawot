@@ -1,3 +1,4 @@
+import { haptics } from "./haptics";
 import { LiveIdleClock, LiveTranscript } from "./liveVoiceState";
 
 interface LiveOptions { providerId: string; voice: string }
@@ -6,11 +7,13 @@ interface Handlers {
   caption(role: "user" | "assistant", text: string): void;
   level(value: number, microphone: number): void;
   search?(event: any): void;
+  memory?(event: any): void;
   ended(reason: string, turns: { role: "user" | "assistant"; text: string }[]): void;
 }
 
 /** One explicitly-started WebRTC session; never retries a paid creation. */
 export class LiveVoiceSession {
+  private releaseHaptics?: () => void;
   private readonly id = crypto.randomUUID().replace(/-/g, "");
   private peer: RTCPeerConnection | null = null;
   private events: RTCDataChannel | null = null;
@@ -43,6 +46,7 @@ export class LiveVoiceSession {
 
   async start(options: LiveOptions) {
     this.status("starting");
+    this.releaseHaptics = haptics.suppress();
     this.startup = setTimeout(() => this.end("Live connection timed out. Tap the microphone to try again."), 30_000);
     try {
       this.context = new AudioContext();
@@ -197,6 +201,7 @@ export class LiveVoiceSession {
       const result = await response.json();
       if (this.closed) return;
       if (!response.ok || typeof result.content !== "string") throw new Error("Live tool request failed");
+      for (const memory of result.memory ?? []) this.handlers.memory?.(memory);
       for (const search of result.searches ?? []) this.handlers.search?.(search);
       this.send({ type: "session.commentary.append", event_id: `result_${id}`, delegation_id: id, content: result.content });
     } catch {
@@ -221,6 +226,8 @@ export class LiveVoiceSession {
     clearTimeout(this.startup);
     clearInterval(this.interval);
     this.microphone?.getTracks().forEach(track => { track.onended = null; track.stop(); });
+    this.releaseHaptics?.();
+    this.releaseHaptics = undefined;
     this.output?.pause();
     if (this.output) this.output.srcObject = null;
     this.meters.forEach(source => source.disconnect());

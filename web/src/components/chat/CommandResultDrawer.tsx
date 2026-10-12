@@ -1,3 +1,4 @@
+import ControlIcon from "../ControlIcon";
 import { useEffect, useId, useRef } from "react";
 import { useChatStore } from "../../chatStore";
 import { Markdown } from "./Message";
@@ -31,7 +32,7 @@ export default function CommandResultDrawer() {
     <div className="model-sheet-heading">
       <h2 id={title}>/{result.command}</h2>
       <button type="button" aria-label="Close command result" onClick={dismiss}>
-        <span className="ui-text-icon" aria-hidden="true">×</span>
+        <ControlIcon name="close" />
       </button>
     </div>
     <div className="command-result-content" aria-live="polite" aria-busy={result.loading}>

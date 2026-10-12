@@ -1,10 +1,10 @@
+import { chatPositions } from "../../lib/chatVisit";
 import MemoryActivity from "./MemoryActivity";
 import AnalysisActivity, { AnalysisFiles } from "./AnalysisActivity";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMessageReader } from "../../hooks/useMessageReader";
 import { useChatStore } from "../../chatStore";
-import Message, { Markdown, ToolChips, CardGrid } from "./Message";
-import ThinkingBlock from "./ThinkingBlock";
+import Message, { MessageBody, ToolChips, CardGrid } from "./Message";
 import Welcome from "./Welcome";
 import ChatSources from "./ChatSources";
 
@@ -13,6 +13,8 @@ const BOTTOM_TOLERANCE_PX = 24;
 export default function MessageList({ sendControl }) {
   const active = useChatStore((s) => s.active);
   const streaming = useChatStore((s) => s.streaming);
+  const scrollToLatestRequest = useChatStore(s => s.scrollToLatestRequest);
+  const consumedScrollRequest = useRef(scrollToLatestRequest);
   const { reading, reader } = useMessageReader(active?.id, streaming);
   const regenerate = useChatStore(s => s.regenerateMessage);
   const edit = useChatStore(s => s.editMessage);
@@ -22,6 +24,7 @@ export default function MessageList({ sendControl }) {
   const settingsSaving = useChatStore(s => s.settingsSaving || s.reconciling);
   const messageError = useChatStore(s => s.messageError);
   const streamText = useChatStore((s) => s.streamText);
+  const streamParts = useChatStore(s => s.streamParts);
   const streamThinking = useChatStore((s) => s.streamThinking);
   const streamMemory = useChatStore(s => s.streamMemory);
   const streamAnalysis = useChatStore(s => s.streamAnalysis);
@@ -38,26 +41,6 @@ export default function MessageList({ sendControl }) {
   const lastScrollTop = useRef(0);
   const touchY = useRef<number | null>(null);
 
-  // Thinking duration, measured client-side from first thinking delta to
-  // first content delta. Reset when a fresh stream begins.
-  const thinkStartRef = useRef(null);
-  const [thinkSecs, setThinkSecs] = useState(null);
-  useEffect(() => {
-    if (streaming && !streamThinking && !streamText) {
-      thinkStartRef.current = null;
-      setThinkSecs(null);
-      return;
-    }
-    if (streamThinking && thinkStartRef.current == null) {
-      thinkStartRef.current = performance.now();
-    }
-    if (streamText && thinkStartRef.current != null) {
-      setThinkSecs((prev) =>
-        prev ?? Math.max(1, Math.round((performance.now() - thinkStartRef.current) / 1000))
-      );
-    }
-  }, [streaming, streamThinking, streamText]);
-
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
@@ -67,6 +50,7 @@ export default function MessageList({ sendControl }) {
     const away = el.scrollHeight - el.scrollTop - el.clientHeight > BOTTOM_TOLERANCE_PX;
     setAwayFromBottom(away);
     if (!away) setNewReply(false);
+    if (active?.id) chatPositions.set(active.id, { top: el.scrollTop, following: nearBottomRef.current });
   };
 
   const jumpToLatest = () => {
@@ -79,17 +63,30 @@ export default function MessageList({ sendControl }) {
     setNewReply(false);
   };
 
-  // Jump to bottom when switching conversations.
-  useEffect(() => {
+  // Keep a position per conversation across mode switches and cold restoration.
+  useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
-    nearBottomRef.current = true;
+    if (!el || !active?.id) return;
+    const id = active.id;
+    const position = chatPositions.get(id);
+    nearBottomRef.current = position?.following ?? true;
     previousReply.current = null;
-    setAwayFromBottom(false);
     setNewReply(false);
-    el.scrollTop = el.scrollHeight;
+    el.scrollTop = nearBottomRef.current ? el.scrollHeight : position.top;
     lastScrollTop.current = el.scrollTop;
+    setAwayFromBottom(el.scrollHeight - el.scrollTop - el.clientHeight > BOTTOM_TOLERANCE_PX);
+    return () => { chatPositions.set(id, { top: el.scrollTop, following: nearBottomRef.current }); };
   }, [active?.id]);
+
+  // A local send explicitly resumes following. Consume once so reply updates
+  // and remounting this conversation cannot pull the reader back down.
+  useLayoutEffect(() => {
+    if (consumedScrollRequest.current === scrollToLatestRequest) return;
+    consumedScrollRequest.current = scrollToLatestRequest;
+    if (scrollToLatestRequest?.conversationId !== active?.id) return;
+    jumpToLatest();
+    if (scrollRef.current) chatPositions.set(active.id, { top: scrollRef.current.scrollTop, following: true });
+  }, [scrollToLatestRequest, active?.id]);
 
   // Follow new content, but only when the user is already near the bottom.
   useEffect(() => {
@@ -122,7 +119,16 @@ export default function MessageList({ sendControl }) {
   }, []);
 
   const messages = active?.messages || [];
-  const liveThinking = streaming && !streamText;
+  // Token updates only change the live bubble; saved message trees stay intact.
+  const savedMessages = useMemo(() => messages.map((msg, i) => (
+          <Message key={`${active.id}:${i}`} message={msg} conversationId={active.id} sendControl={sendControl}
+            reading={reading?.key === `${active.id}:${i}` ? reading : null}
+            onRead={text => void reader.toggle(`${active.id}:${i}`, text)}
+            onEdit={text => { reader.stop(); void edit(i, text); }}
+            onBranch={() => { reader.stop(); void branch(i); }} branching={branchingMessage === i}
+            onRegenerate={() => { reader.stop(); void regenerate(i); }} disabled={streaming || backgroundResponding || settingsSaving || branchingMessage !== null} />
+        )),
+    [messages, active?.id, sendControl, reading, reader, edit, branch, branchingMessage, regenerate, streaming, backgroundResponding, settingsSaving]);
 
   return (
     <div className="message-list-region">
@@ -144,26 +150,14 @@ export default function MessageList({ sendControl }) {
     >
       {messages.length === 0 && !streaming && <Welcome />}
       <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-6 py-6">
-        {messages.map((msg, i) => (
-          <Message key={`${active.id}:${i}`} message={msg} conversationId={active.id} sendControl={sendControl}
-            reading={reading?.key === `${active.id}:${i}` ? reading : null}
-            onRead={text => void reader.toggle(`${active.id}:${i}`, text)}
-            onEdit={text => { reader.stop(); void edit(i, text); }}
-            onBranch={() => { reader.stop(); void branch(i); }} branching={branchingMessage === i}
-            onRegenerate={() => { reader.stop(); void regenerate(i); }} disabled={streaming || backgroundResponding || settingsSaving || branchingMessage !== null} />
-        ))}
+        {savedMessages}
         {messageError && <p role="alert" className="message-action-error">{messageError}</p>}
         {streaming && (
           <div>
-            <ThinkingBlock
-              thinking={streamThinking}
-              live={liveThinking}
-              seconds={thinkSecs}
-            />
-            <ToolChips tools={streamTools.filter(tool => !["web_search", "fetch_page", "find_in_page", "download_file", "run_python"].includes(tool.name))} />
+            <ToolChips tools={streamTools.filter(tool => !["web_search", "fetch_page", "find_in_page", "present_results", "download_file", "run_python"].includes(tool.name))} />
             <AnalysisActivity conversationId={active.id} events={streamAnalysis} />
             <MemoryActivity events={streamMemory} />
-            {streamText && <Markdown streaming search={streamSearch}>{streamText}</Markdown>}
+            <MessageBody message={{ parts: streamParts, content: streamText, thinking: streamThinking }} streaming search={streamSearch} />
             <AnalysisFiles conversationId={active.id} events={streamAnalysis} />
             {!streamThinking && !streamText && streamTools.length === 0 && !streamAnalysis?.length && !streamMemory?.length && (
               <p className="thinking-shimmer font-mono text-[0.65rem] uppercase tracking-[0.25em]">

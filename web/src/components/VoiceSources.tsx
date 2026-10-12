@@ -1,3 +1,4 @@
+import ControlIcon from "./ControlIcon";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useVoiceStore } from "../store";
 import { voiceSearchStatus, type VoiceSearch } from "../lib/voiceSearch";
@@ -87,7 +88,7 @@ function SourceRow({ search }: { search: VoiceSearch }) {
       >
         <div className="voice-sources-heading">
           <h2 id={`${id}-title`}>Web sources</h2>
-          <button className="icon-button" popoverTarget={id} popoverTargetAction="hide" aria-label="Close web sources" autoFocus><span className="ui-text-icon" aria-hidden="true">×</span></button>
+          <button className="icon-button" popoverTarget={id} popoverTargetAction="hide" aria-label="Close web sources" autoFocus><ControlIcon name="close" /></button>
         </div>
         {(busy || search.phase === "error" || !search.sources.length) && <p className="voice-sources-status">{status}</p>}
         {!!search.sources.length && (

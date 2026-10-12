@@ -1,7 +1,9 @@
+import { deviceControls } from "../deviceControlStore";
 import { useEffect, useRef } from "react";
 import { VoiceSocket } from "../lib/socket";
 import { audioContext, playReadyCue, playWav, stopPlayback } from "../lib/audio";
 import { VoiceSessionRecorder } from "../lib/voiceSessionRecorder";
+import { haptics } from "../lib/haptics";
 import { useDebugStore } from "../debugStore";
 import { useVoiceStore } from "../store";
 import { useChatStore } from "../chatStore";
@@ -45,7 +47,9 @@ export function useVoice(enabled = true) {
             d.addEvent(msg, debugTurnRef.current);
           }
         }
-        if (msg.type === "reading") {
+        if (msg.type === "memory") {
+          s.showMemory(msg);
+        } else if (msg.type === "reading") {
           s.showReading(msg);
         } else if (msg.type === "expression") {
           s.showExpression(msg);
@@ -65,6 +69,7 @@ export function useVoice(enabled = true) {
           s.setAssistantCaption(msg.text);
           s.addTurn("assistant", msg.text);
         } else if (msg.type === "entities") {
+          for (const card of msg.entities) deviceControls.refresh(card);
           s.setCards(msg.entities);
           // Keep inline chat cards in sync with control refreshes.
           useChatStore.getState().patchCards(msg.entities);
@@ -89,7 +94,6 @@ export function useVoice(enabled = true) {
         const interaction = interactionRef.current;
         const debugTurn = debugTurnRef.current;
         if (useVoiceStore.getState().debugEnabled) useDebugStore.getState().logMessage("in", `audio ${buf.byteLength} bytes`);
-        useVoiceStore.getState().setStatus("speaking");
         playWav(buf, () => {
           if (interaction !== interactionRef.current) return;
           finishDebug("completed", undefined, debugTurn);
@@ -100,6 +104,10 @@ export function useVoice(enabled = true) {
               if (interaction === interactionRef.current) resumeListening();
             }, 220);
           } else useVoiceStore.getState().setStatus("idle");
+        }, () => {
+          if (interaction !== interactionRef.current || !enabledRef.current) return;
+          useVoiceStore.getState().setStatus("speaking");
+          haptics.pulse("confirmation");
         }).catch(() => {
           if (interaction !== interactionRef.current) return;
           finishDebug("failed", "Audio playback failed", debugTurn);
@@ -261,7 +269,11 @@ export function useVoice(enabled = true) {
     },
     sendControl: (message) => {
       if (useVoiceStore.getState().debugEnabled) useDebugStore.getState().logMessage("out", message);
-      socketRef.current?.sendControl(message);
+      if (!socketRef.current) return Promise.reject(new Error("Connection unavailable."));
+      return socketRef.current.requestControl(message).then(card => {
+        useChatStore.getState().patchCards([card]);
+        return card;
+      });
     },
   };
 }

@@ -38,31 +38,55 @@
 ## Home Assistant
 
 - **Read and control entities** through model tool calls.
-- **Device cards** for entities used in a reply, available inline in chats
-  with Home Assistant enabled.
+- **Device cards** appear as Home Assistant tools finish, before the final chat
+  answer. One or two devices use compact cards; larger sets use a scrollable
+  list capped at 30 devices, with expandable controls.
 - **Touch controls** for lights and switches, brightness, colour temperature,
-  light colour, and thermostat targets where supported by the entity.
+  light colour, and thermostat targets where supported by the entity. Changes
+  appear immediately with an updating status, then reconcile with Home Assistant.
+  Failed or unconfirmed changes restore the last confirmed display with an error;
+  a lost confirmation does not guarantee the physical device was unchanged.
+  Rapid changes are ordered per device, and refreshes fetch only that device.
 - **Optional home tools in chat:** enable Home Assistant per conversation.
   Voice mode exposes home tools by default; configure Home Assistant before
   using them. General chat works without a Home Assistant connection.
 
 ## General-purpose chat
 
-- **Personal memory:** chat can save personal facts and explicit “remember this”
-  requests, then recall them across conversations and model changes. Click
+- **Selected result cards:** after searching, the assistant selects short result IDs
+  with `present_results`. The app supplies the retrieved titles, links and thumbnails;
+  new replies do not depend on model-written card JSON or special Markdown. Only
+  selected results become cards; other results stay in Sources and citations remain
+  ordinary links. News cards are wide and stacked vertically. Product cards are tall
+  in a horizontal row with touch scrolling, arrow controls and keyboard navigation.
+  Unknown prices are omitted. Selections survive reloads and remain in model context
+  for follow-up questions. Images load near the viewport through the bounded thumbnail
+  service. Older saved card markup remains readable.
+- **Blocked pages:** HTTP 403 from page-reading tools produces a non-retryable,
+  link-only result. Both page readers share a five-minute, per-URL cooldown, including
+  known redirect targets. Chat also prevents retrying that page through the file
+  downloader during the turn. A repeated attempt ends tool use and requests a final
+  answer; if the model still asks for tools, the app supplies a plain-link explanation.
+  Selected blocked pages stay plain links and do not request thumbnail previews.
+
+- **Personal memory:** chat, Voice, and Live voice can save personal facts and explicit “remember this”
+  requests, then recall them across conversations and model changes. The assistant
+  is instructed to proactively save useful details as they are shared, such as
+  preferences, relationships, equipment, and ongoing goals, while skipping passing
+  states and hypothetical statements. Click
   **Memory saved**, **Memory updated**, or **Memories recalled** to inspect the
-  facts, open their source conversation, edit them, or delete them. Recall means
+  facts, open their source chat when available, edit them, or delete them. Voice
+  captures are labeled as coming from a voice session. Recall means
   the facts were supplied to the model, not that it necessarily used them.
 - **Memory controls:** **Settings → Assistant → Memory** lists saved facts and
   provides search, editing, individual deletion, and an enable/disable switch.
-  Chat can forget a specifically identified fact. **Delete all memories** is
+  The assistant can forget a specifically identified fact. **Delete all memories** is
   available only in Settings, with confirmation; the model has no bulk-delete
   tool. Disabling memory retains saved facts while stopping capture and recall.
   Editing, deleting, or disabling memory can stop a reply in progress to prevent
   stale personal context from being sent again.
 - **Memory scope and privacy:** this release uses one personal profile for the
-  whole installation. It applies to chat, including dictated chat messages;
-  dedicated Voice and Live sessions do not use it. Facts are stored locally under
+  whole installation. It applies to chat, including dictated chat messages, and to Voice and Live sessions. Facts are stored locally under
   the configured data directory, but recalled facts are sent to the selected
   model provider. Deleting a memory removes its stored activity details; it does
   not erase original conversation messages or retract context already sent.
@@ -70,17 +94,39 @@
   facts. Capture depends on the model correctly calling memory tools; source
   checks are conservative and currently recognize English intent. Inspect and
   correct memories when needed. Saved memories are not added to every prompt.
-  The assistant is instructed to search before answering personal questions; each
+  The assistant is instructed to recall relevant facts before answering personal
+  questions and before searches, recommendations, comparisons, or plans that
+  depend on personal context, including shopping region for product searches. Each
   search returns at most three matching facts (up to 3,000 characters of fact text).
   Retrieval uses lexical search; there is no semantic/vector index. Storage supports one backend writer
   and keeps owner identifiers for a future account migration.
+- **Private memories:** mark a fact private in its editor, or let the assistant mark
+  sensitive facts private when saving with a trusted provider. In Settings →
+  Connections, enable **Allow private memories** only for providers you trust.
+  Access defaults off for every provider, including the built-in model server.
+  Non-private providers cannot recall or modify private facts; only the user can
+  remove a fact's private flag. Existing memories remain non-private until changed.
+  Chats that save or recall private facts stay restricted to trusted providers,
+  including branches. Marking an old fact private also restricts its source and
+  earlier recall conversations. Start a fresh chat to use a non-private provider.
+  Read-aloud uses local speech or an explicitly trusted speech provider for those
+  chats. Voice private recall requires a trusted model and local or trusted speech;
+  Live voice requires both its speech provider and backend model to be trusted.
+  Sessions that use private facts cannot continue through untrusted providers;
+  reload to start a fresh voice session. Web search stays enabled, so search queries can still transmit sensitive
+  content. The setting controls access; it does not verify a provider's location,
+  encrypt memory storage, or retract data already sent to a service.
 - **Multiple saved conversations** with automatic titles, deletion,
   and a model choice for each conversation. History has date groups and searches
   titles, drafts, and message text with short matching excerpts. Failed history
   and new-conversation requests show a retry action.
 - **Streaming replies**, collapsible model reasoning when supplied, Markdown,
   and highlighted code blocks. Scrolling up pauses following and preserves your
-  reading position; a Latest / New reply button returns to the bottom.
+  reading position; a Latest / New reply button returns to the bottom. Returning
+  to a running conversation catches up with the current response and resumes
+  live text, reasoning, and tool activity. Reconnection does not restart the
+  request; Stop explicitly cancels it. Rapid text updates are batched to keep
+  rendering responsive.
 - **Chat commands:** `/status` shows the current model and estimated conversation
   context used, capacity, and remaining space; `/help` lists commands. Estimates
   include instructions, enabled tools, and readable attachments, with a rough
@@ -101,8 +147,16 @@
   conversation through that message into a separate chat. The branch keeps
   the model, reasoning effort, tool settings, attachments, and generated files,
   starts with an empty composer, and leaves the original conversation intact.
-- **Saved text drafts:** drafts of at least three words appear in history;
-  conversations with a sent message appear regardless of length.
+- **Chat continuity:** switching between Chat, Voice, and Settings preserves the
+  selected conversation, draft, and reading position. On a fresh app visit,
+  chats used within 30 minutes or still responding on the server reopen
+  automatically. After a longer absence, a fresh composer offers a compact
+  **Continue previous chat** or **Resume draft** shortcut. Explicit New chat
+  choices and notification destinations take priority. The browser stores only
+  the last conversation ID, visit time, and scroll position for this feature.
+- **Saved text drafts:** even short drafts are preserved with their conversation.
+  Drafts of at least three words appear in history; conversations with a sent
+  message appear regardless of length.
 - **Click-to-toggle dictation:** click to start, click to stop, then edit the
   transcript and press Send yourself. Dictation does not automatically send.
 - **Image and text attachments:** PNG, JPEG, WebP, GIF, and common text/code
@@ -139,7 +193,9 @@
   them with Chatterbox. A WAV in `models/tts/voices/` also becomes a named voice.
   Selecting Chatterbox’s default voice restores its built-in voice after using a clone.
 - **Download and switch speech models** from Settings, with download progress.
-  Speech engines release weights after ten idle minutes and reload on use;
+  At startup, local speech models stay unloaded until the first transcription
+  or speech request. Voice-list queries do not load weights. Speech engines
+  release weights after ten idle minutes and reload on use;
   the first request after that pause may take longer.
 - **Custom personality:** use Rita's default sassy persona, choose plain, or
   write a custom brief. The selected model can generate or refine the brief.

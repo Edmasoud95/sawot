@@ -3,7 +3,7 @@ import type { Agent } from "./agent.js";
 import { stripSpeechTags } from "./speechTags.js";
 
 export interface LiveTurn { role: "user" | "assistant"; text: string; start: number; end: number }
-export interface LiveToolResult { content: string; searches: any[] }
+export interface LiveToolResult { content: string; searches: any[]; memory?: any[] }
 
 export const liveBackendPrompt = (system: string, custom = "") => (custom.trim() || DEFAULT_LIVE_BACKEND_PROMPT).replace(/\{device_context\}/g, () => system);
 
@@ -33,6 +33,7 @@ export class LiveToolSession {
     if (this.requests.size >= 64) return Promise.resolve({ content: "This session has reached its task limit. Please reconnect to continue.", searches: [] });
     const work = this.queue.then(async (): Promise<LiveToolResult> => {
       const searches: any[] = [];
+      const memory: any[] = [];
       const signal = AbortSignal.any([this.controller.signal, AbortSignal.timeout(75_000)]);
       let attempts: string[] = [];
       try {
@@ -47,15 +48,16 @@ export class LiveToolSession {
         const context = JSON.stringify({ conversation: turns, earlierBackendRecords: this.records });
         const result = await this.createAgent().run([], "Handle the latest real user request in this voice context:\n" + context,
           (event, data) => {
+            if (event === "memory") memory.push(data);
             if (event === "tool_call") attempts.push(JSON.stringify({ tool: data.name, args: data.args }).slice(0, 1000));
             if (event === "tool_result") attempts.push(JSON.stringify({ tool: data.name, ok: data.ok, result: data.result }).slice(0, 1000));
             if (event === "search" && data.phase !== "start") searches.push(data);
-          }, { signal, expressions: false });
+          }, { signal, expressions: false, memoryText: lastUser.text });
         signal.throwIfAborted();
         const content = shortResult(result) || "The backend returned no answer. Ask the user to clarify; do not claim an action succeeded.";
         this.records.push(JSON.stringify({ request: lastUser.text, attempts, result: content }));
         this.records = this.records.slice(-12);
-        return { content, searches: searches.slice(-8) };
+        return { content, searches: searches.slice(-8), ...(memory.length ? { memory } : {}) };
       } catch {
         // A service may have completed before cancellation reached the model.
         const content = "The task could not be completed or confirmed. Some actions may already have run. Do not repeat them automatically; check their state first.";

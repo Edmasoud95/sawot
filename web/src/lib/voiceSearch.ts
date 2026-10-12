@@ -1,4 +1,6 @@
 export interface VoiceSource {
+  id?: string;
+  blocked?: boolean;
   url: string;
   title: string;
   read: boolean;
@@ -6,9 +8,12 @@ export interface VoiceSource {
 }
 
 export interface VoiceSearch {
+  presentationVersion?: 1;
+  presentations?: { kind: 'products' | 'news'; ids: string[] }[];
   tool: "web_search" | "fetch_page" | "find_in_page";
   phase: "start" | "complete" | "error";
   sources: VoiceSource[];
+  query?: string;
 }
 
 function safeFavicon(value: unknown): string | undefined {
@@ -36,7 +41,7 @@ export function updateVoiceSearch(current: VoiceSearch | null, event: VoiceSearc
   if (!["web_search", "fetch_page", "find_in_page"].includes(event.tool) ||
       !["start", "complete", "error"].includes(event.phase)) return current;
   const sources = new Map((current?.sources ?? []).map(source => [source.url, source]));
-  if (event.phase === "complete" && Array.isArray(event.sources)) {
+  if (["complete", "error"].includes(event.phase) && Array.isArray(event.sources)) {
     for (const source of event.sources) {
       try {
         const url = new URL(source.url);
@@ -48,10 +53,25 @@ export function updateVoiceSearch(current: VoiceSearch | null, event: VoiceSearc
           url: url.href,
           title: (typeof source.title === "string" && source.title.trim() ? source.title : url.hostname).slice(0, 240),
           read: previous?.read || source.read === true,
+          ...((typeof source.id === 'string' && /^r(?:[1-9]|[1-3]\d|40)$/.test(source.id)) ? {id: source.id} : previous?.id ? {id: previous.id} : {}),
+          ...((source.blocked === true || previous?.blocked) ? {blocked: true, read: false} : {}),
           ...(favicon ? { favicon } : {}),
         });
       } catch { /* malformed links cannot become clickable sources */ }
     }
   }
-  return { tool: event.tool, phase: event.phase, sources: [...sources.values()] };
+  const query = event.tool === "web_search" && event.phase === "start" && typeof event.query === "string"
+    ? event.query.trim() : "";
+  const deterministic = event.presentationVersion === 1 || current?.presentationVersion === 1;
+  const groups = event.presentations ?? current?.presentations ?? [];
+  const presentations: NonNullable<VoiceSearch['presentations']> = [];
+  const ids = [...sources.values()].map(source => source.id).filter(Boolean);
+  if (deterministic && Array.isArray(groups)) for (const group of groups.slice(0, 2)) {
+    if (!group || !['products', 'news'].includes(group.kind) || presentations.some(p => p.kind === group.kind) ||
+        !Array.isArray(group.ids) || !group.ids.length || group.ids.length > 12 ||
+        group.ids.some(id => typeof id !== 'string' || ids.filter(known => known === id).length !== 1)) continue;
+    presentations.push({kind: group.kind, ids: [...new Set(group.ids)]});
+  }
+  return { tool: event.tool, phase: event.phase, sources: [...sources.values()], ...(query ? { query } : {}),
+    ...(deterministic ? {presentationVersion: 1, presentations} : {}) };
 }

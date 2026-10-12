@@ -1,4 +1,5 @@
 import { analysisHistory } from "./analysis/context.js";
+import { presentationHistory, searchPageKind, citedProductIds } from "./resultPresentation.js";
 import { isDeepSeekEndpoint } from "./effort.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -16,6 +17,7 @@ import { createChatCompletion } from "./reasoningFallback.js";
 import type { EffortLevel } from "./effort.js";
 import { voiceSearchSources } from "./search.js";
 import { FINAL_ANSWER_PROMPT, FINAL_ANSWER_ERROR } from "./toolBudget.js";
+import { ToolMarkupFilter, TOOL_MARKUP_ERROR, toolMarkupRecovery } from "./toolMarkup.js";
 
 export const SAFE_ID = /^[0-9a-f]{12}$/;
 const MAX_ROUNDS = 5;
@@ -48,7 +50,7 @@ export function toOpenAiMessages(messages: any[], uploadDir: string, preserveThi
   for (const m of messages) {
     if (m.command) continue;
     if (m.role === "assistant") {
-      out.push({ role: "assistant", content: (m.content ?? "") + analysisHistory(m.analysis), ...(preserveThinking && m.thinking ? { reasoning_content: m.thinking } : {}) });
+      out.push({ role: "assistant", content: (m.content ?? "") + presentationHistory(m.search) + analysisHistory(m.analysis), ...(preserveThinking && m.thinking ? { reasoning_content: m.thinking } : {}) });
       continue;
     }
     let text = m.content ?? "";
@@ -117,6 +119,7 @@ export class ChatStore {
   }
 
   save(conv: any): void {
+    if (this.get(conv.id)?.privateMemoryUsed) conv.privateMemoryUsed = true;
     writeFileSync(this.path(conv.id), JSON.stringify(conv, null, 2));
   }
 
@@ -255,27 +258,84 @@ export async function* runChat(
 ): AsyncGenerator<[string, any]> {
   const convo: any[] = [{ role: "system", content: systemPrompt }, ...messages];
   const touched: string[] = [];
+  const cards = new Map<string, any>();
   const fullContent: string[] = [];
   const fullThinking: string[] = [];
-  const sources = new Map<string, ReturnType<typeof voiceSearchSources>[number]>();
+  const sources = new Map<string, ReturnType<typeof voiceSearchSources>[number] & { id: string }>();
+  const selectable = tools.some(tool => tool.name === 'web_search');
+  let presentations: { kind: 'products' | 'news'; ids: string[] }[] = [];
+  let productSelectionRequested = false;
+  const presentationState = () => selectable ? { presentationVersion: 1, presentations } : {};
+  if (selectable) tools = [...tools, {
+    name: 'present_results',
+    description: 'Show only the chosen search results as product or news cards. Choose their short result IDs, such as r1 and r3. The app supplies all card details. Blocked pages become plain links. No card JSON in your answer.',
+    parameters: { type: 'object', properties: { kind: {type: 'string', enum: ['products', 'news']}, ids: {type: 'array', items: {type: 'string'}, minItems: 1, maxItems: 12} }, required: ['kind', 'ids'], additionalProperties: false },
+    handler: async args => {
+      if (!args || !['products', 'news'].includes(args.kind) || !Array.isArray(args.ids) || !args.ids.length || args.ids.length > 12 ||
+          Object.keys(args).some(key => !['kind', 'ids'].includes(key)) || args.ids.some(id => typeof id !== 'string' || ![...sources.values()].some(source => source.id === id)))
+        return { error: 'Select 1 to 12 existing result IDs with kind products or news. Do not invent IDs, URLs or card fields.' };
+      const ids = [...new Set<string>(args.ids)];
+      if (args.kind === 'products') {
+        productSelectionRequested = true;
+        const rejected = [...sources.values()].filter(source => ids.includes(source.id) && searchPageKind(source.url) === 'listing');
+        if (rejected.length) return {
+          error: 'These IDs link to search or category pages, not individual products. Products mentioned in their snippets are not the linked page. Choose relevant direct_product_ids, or search for individual product pages. Do not present listing pages as products.',
+          rejected_ids: rejected.map(source => source.id),
+          direct_product_ids: [...sources.values()].filter(source => searchPageKind(source.url) === 'product').map(source => source.id),
+        };
+      }
+      presentations = [...presentations.filter(group => group.kind !== args.kind), {kind: args.kind, ids}];
+      return { shown: ids, kind: args.kind, instruction: 'The app displays these results. Explain your recommendation in normal prose; do not write card markup or repeat the list.' };
+    },
+  }];
+  let blockedRetry = false;
+  const blockedPages = new Map<string, any>();
+  const pageKey = (raw: unknown) => { try { const url = new URL(String(raw)); url.hash = ''; return url.href; } catch { return ''; } };
+  const blockedAnswerPrompt = '\n\nA blocked page was requested again. Tools are now unavailable for this turn. Finish using the results already collected. Give relevant links, explain that the page could not be read, and do not invent its contents.';
+
+  // A failed final inference must not discard sources already retrieved. Only
+  // use this turn's source registry, never URLs from malformed model output.
+  function* finishWithSources(reason: string): Generator<[string, any]> {
+    const all = [...sources.values()].filter(source => !productSelectionRequested || searchPageKind(source.url) !== 'listing');
+    const selectedIds = new Set(presentations.flatMap(group => group.ids));
+    const selected = all.filter(source => selectedIds.has(source.id));
+    const blocked = all.filter(source => source.blocked);
+    const chosen = (selected.length ? selected : blocked.length ? blocked : all).slice(0, 6);
+    const links = chosen.map(source => {
+      const title = source.title.replace(/[\\[\]]/g, '\\$&').replace(/\s+/g, ' ');
+      const url = source.url.replace(/[()<>\s]/g, char => '%' + char.charCodeAt(0).toString(16).toUpperCase());
+      return `- [${title}](${url})${source.blocked ? ' — I could not read this page.' : ''}`;
+    });
+    const fallback = links.length
+      ? '\n\nI couldn’t finish the answer. Here are links found during this search; their details have not been verified:\n\n' + links.join('\n')
+      : '\n\nI couldn’t find an individual product link. The retrieved links were search or category pages.';
+    yield ['debug', { event: 'source_link_fallback', data: { reason, sources: chosen.length } }];
+    yield ['content', fallback];
+    yield ['final', { content: (fullContent.join('') + fallback).trim(), thinking: fullThinking.join('').trim() }];
+  }
 
   const turnStart = performance.now();
+  let repairedMarkup = false;
+  let repairPrompt = "";
+  let budgetReported = false;
   for (let round = 0; round <= MAX_ROUNDS; round++) {
     signal?.throwIfAborted();
-    const answerOnly = round === MAX_ROUNDS;
-    if (answerOnly) {
+    const answerOnly = blockedRetry || round === MAX_ROUNDS;
+    if (round === MAX_ROUNDS && !budgetReported) {
+      budgetReported = true;
       yield ["debug", { event: "tool_budget_exhausted", data: { rounds: MAX_ROUNDS } }];
       convo[0] = { role: "system", content: systemPrompt + FINAL_ANSWER_PROMPT };
       signal?.throwIfAborted();
     }
     const parser = new ThinkTagParser();
+    const markup = new ToolMarkupFilter();
     const contentParts: string[] = [];
     const thinkingParts: string[] = [];
     const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
 
     const roundStart = performance.now();
     const context = await contextHooks?.prepare(convo);
-    if (context) convo[0] = { role: "system", content: systemPrompt + context.suffix + (answerOnly ? FINAL_ANSWER_PROMPT : "") };
+    convo[0] = { role: "system", content: systemPrompt + (context?.suffix ?? "") + (blockedRetry ? blockedAnswerPrompt : answerOnly ? FINAL_ANSWER_PROMPT : "") + repairPrompt };
     signal?.throwIfAborted();
     const stream = await createChatCompletion<any>(client, {
       model,
@@ -297,7 +357,9 @@ export async function* runChat(
         yield ["thinking", reasoning];
       }
       if (delta.content) {
-        for (const [kind, text] of parser.feed(delta.content)) {
+        for (const [kind, parsed] of parser.feed(delta.content)) {
+          const text = kind === "content" ? markup.feed(parsed) : parsed;
+          if (!text) continue;
           if (kind === "content") {
             contentParts.push(text);
             fullContent.push(text);
@@ -317,7 +379,9 @@ export async function* runChat(
       }
     }
 
-    for (const [kind, text] of parser.flush()) {
+    for (const [kind, parsed] of parser.flush()) {
+      const text = kind === "content" ? markup.feed(parsed) : parsed;
+      if (!text) continue;
       if (kind === "content") {
         contentParts.push(text);
         fullContent.push(text);
@@ -327,15 +391,48 @@ export async function* runChat(
       }
       yield [kind, text];
     }
+    const tail = markup.flush();
+    if (tail) {
+      contentParts.push(tail);
+      fullContent.push(tail);
+      yield ["content", tail];
+    }
 
     const content = contentParts.join("");
     yield ["debug", { event: "llm_round", data: { round: round + 1, latency_ms: Math.round(performance.now() - roundStart),
       tool_calls: toolCalls.size ? [...toolCalls.values()].map((c) => c.name) : null } }];
+    if (markup.detected) {
+      yield ["debug", { event: "tool_markup_rejected", data: { round: round + 1, answerOnly } }];
+      if (toolCalls.size === 0 && !blockedRetry) {
+        if (repairedMarkup) {
+          if (!sources.size) throw new Error(TOOL_MARKUP_ERROR);
+          yield* finishWithSources('invalid_tool_markup');
+          break;
+        }
+        repairedMarkup = true;
+        repairPrompt = toolMarkupRecovery(answerOnly || tools.length === 0);
+        // Retry inference only, preserving tool results. No tool handlers are replayed.
+        round--;
+        continue;
+      }
+    }
+    repairPrompt = "";
     // Some compatible providers may still return calls without tool definitions.
     // Never execute them beyond the budget or accept an empty final response.
-    if (answerOnly && (toolCalls.size > 0 || !content.trim())) throw new Error(FINAL_ANSWER_ERROR);
+    if (answerOnly && (toolCalls.size > 0 || !content.trim() || (blockedRetry && markup.detected))) {
+      if (!sources.size) throw new Error(FINAL_ANSWER_ERROR);
+      yield* finishWithSources(blockedRetry ? 'blocked_page_retry' : 'tool_budget_exhausted');
+      break;
+    }
     if (toolCalls.size === 0) {
       const finalContent = fullContent.join("").trim();
+      if (selectable && !presentations.some(group => group.kind === 'products')) {
+        const ids = citedProductIds(finalContent, [...sources.values()]);
+        if (ids.length) {
+          presentations = [...presentations, {kind: 'products', ids}];
+          yield ['search', {tool: 'web_search', phase: 'complete', sources: [...sources.values()], ...presentationState()}];
+        }
+      }
       yield ["debug", { event: "reply", data: { raw: content, text: finalContent, rounds: round + 1,
         latency_ms: Math.round(performance.now() - turnStart) } }];
       yield ["final", {
@@ -366,40 +463,61 @@ export async function* runChat(
       const toolStart = performance.now();
       const webTool = ["web_search", "fetch_page", "find_in_page"].includes(c.name);
       const memoryTool = ["save_memory", "update_memory", "search_memories", "delete_memory"].includes(c.name);
-      if (webTool) yield ["search", { tool: c.name, phase: "start", sources: [...sources.values()] }];
       try {
         args = JSON.parse(c.arguments || "{}");
       } catch (e: any) {
         result = { error: "invalid tool arguments: " + (e?.message ?? e) };
       }
+      if (webTool) yield ["search", { tool: c.name, phase: "start", sources: [...sources.values()],
+        ...presentationState(),
+        ...(c.name === "web_search" && typeof args?.query === "string" && args.query.trim()
+          ? { query: args.query.trim() } : {}),
+      }];
       yield ["debug", { event: "tool_call", data: { name: c.name, args: memoryTool ? { redacted: true } : args } }];
       if (result === undefined) {
-        result = await executeTool(tools, c.name, args);
+        const blocked = ['fetch_page', 'find_in_page', 'download_file'].includes(c.name) && blockedPages.get(pageKey(args?.url));
+        result = blocked ? {...blocked, retryBlocked: true} : await executeTool(tools, c.name, args);
+      }
+      if (result?.link_only && result.status === 403) {
+        const repeated = result.retryBlocked && [args?.url, result.url, result.blocked_url].some(raw => blockedPages.has(pageKey(raw)));
+        for (const raw of [args?.url, result.url, result.blocked_url]) { const key = pageKey(raw); if (key) blockedPages.set(key, result); }
+        if (repeated) {
+          blockedRetry = true;
+          yield ['debug', { event: 'blocked_page_retry_stopped', data: {url: result.url} }];
+        }
       }
       if (webTool) {
         for (const source of voiceSearchSources(c.name, result)) {
           const previous = sources.get(source.url);
           if (!previous && sources.size >= 40) continue;
-          sources.set(source.url, { ...previous, ...source, read: previous?.read || source.read });
+          sources.set(source.url, { ...previous, ...source, id: previous?.id ?? `r${sources.size + 1}`,
+            ...(source.blocked && previous ? { title: previous.title } : {}),
+            read: source.blocked ? false : previous?.read || source.read });
         }
-        yield ["search", { tool: c.name, phase: result?.error ? "error" : "complete", sources: [...sources.values()] }];
+        if (c.name === 'web_search' && Array.isArray(result?.results)) result = { ...result, results: result.results.map((page: any) => {
+          let id: string | undefined;
+          try { const url = new URL(page.url); url.hash = ''; id = sources.get(url.href)?.id; } catch { /* Invalid results cannot be selected. */ }
+          return {...page, id, page_kind: searchPageKind(page.url)};
+        }) };
+        yield ["search", { tool: c.name, phase: result?.error ? "error" : "complete", sources: [...sources.values()], ...presentationState() }];
       }
+      if (c.name === 'present_results' && !result?.error) yield ['search', {tool: 'web_search', phase: 'complete', sources: [...sources.values()], ...presentationState()}];
       const resultJson = JSON.stringify(result);
       yield ["debug", { event: "tool_result", data: { name: c.name, ok: !(result && typeof result === "object" && "error" in result),
         latency_ms: Math.round(performance.now() - toolStart), size_chars: resultJson.length, result: memoryTool ? "[memory result redacted]" : resultJson.slice(0, 600) } }];
       if (!memoryTool) yield ["tool", { name: c.name, args, result: resultJson.slice(0, 300) }];
-      for (const eid of touchedIdsFor(tools, c.name, args, result)) {
-        if (!touched.includes(eid)) touched.push(eid);
+      const changed = touchedIdsFor(tools, c.name, args, result);
+      for (const eid of changed) {
+        if (!touched.includes(eid) && touched.length < 30) touched.push(eid);
+      }
+      if (changed.length && getCards) {
+        try {
+          const refreshed = await getCards(changed.filter(id => touched.includes(id)));
+          for (const card of refreshed) if (touched.includes(card.entity_id)) cards.set(card.entity_id, card);
+          yield ["entities", touched.flatMap(id => cards.has(id) ? [cards.get(id)] : [])];
+        } catch { signal?.throwIfAborted(); /* Card refresh remains best-effort. */ }
       }
       convo.push({ role: "tool", tool_call_id: c.id, content: resultJson });
-    }
-  }
-
-  if (touched.length && getCards) {
-    try {
-      yield ["entities", await getCards(touched.slice(0, 8))];
-    } catch {
-      /* cards refresh is best-effort */
     }
   }
 }

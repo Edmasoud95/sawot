@@ -1,5 +1,5 @@
 import { hasPendingNotificationTarget, notificationNavigationVersion, openPendingNotificationTarget } from "../../lib/notificationNavigation";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { useChatStore } from "../../chatStore";
 import Sidebar from "./Sidebar";
@@ -19,6 +19,11 @@ export default function ChatView({ sendControl, mobile }) {
   const createError = useChatStore(s => s.createError);
   const historyError = useChatStore(s => s.historyError);
   const historyLoading = useChatStore(s => s.historyLoading);
+  const restoreVisit = useChatStore(s => s.restoreVisit);
+  const visitLoading = useChatStore(s => s.visitLoading);
+  const visitError = useChatStore(s => s.visitError);
+  const previous = useChatStore(s => s.previousConversation);
+  const [continuing, setContinuing] = useState(false);
   const panel = useRef<HTMLElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const closeSidebar = useCallback(() => useChatStore.setState({ sidebarOpen: false }), []);
@@ -32,6 +37,7 @@ export default function ChatView({ sendControl, mobile }) {
     const resume = () => {
       if (document.visibilityState !== "visible") return;
       if (hasPendingNotificationTarget()) { void openPendingNotificationTarget(); return; }
+      void useChatStore.getState().refreshPrivacy();
       void useChatStore.getState().resumeConversation();
     };
     document.addEventListener("visibilitychange", resume);
@@ -48,18 +54,36 @@ export default function ChatView({ sendControl, mobile }) {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const isMobile = window.matchMedia("(max-width: 639px)").matches;
-    if (isMobile) closeSidebar();
-    void loadConversations().then(() => {
-      if (cancelled) return;
-      if (hasPendingNotificationTarget()) { void openPendingNotificationTarget(); return; }
-      if (isMobile && notificationNavigationVersion() === 0) {
-        void newConversation();
-      }
-    });
-    return () => { cancelled = true; };
-  }, [loadConversations, newConversation, closeSidebar]);
+    const version = notificationNavigationVersion();
+    void loadConversations();
+    if (hasPendingNotificationTarget()) { void openPendingNotificationTarget(); return; }
+    // Decide immediately so later user navigation always supersedes startup.
+    void restoreVisit(() => notificationNavigationVersion() === version && !hasPendingNotificationTarget());
+  }, [loadConversations, restoreVisit]);
+
+  useEffect(() => {
+    let lastSaved = 0;
+    const save = () => {
+      useChatStore.getState().rememberVisit();
+      void useChatStore.getState().flushDraft(true).catch(() => {});
+      lastSaved = Date.now();
+    };
+    const activity = () => { if (Date.now() - lastSaved > 10000) save(); };
+    const visibility = () => { if (document.visibilityState === "hidden") save(); };
+    // Save on selection/exit, not on token updates. No continuous storage writes.
+    useChatStore.getState().rememberVisit();
+    window.addEventListener("pagehide", save);
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("pointerdown", activity, { passive: true });
+    window.addEventListener("keydown", activity);
+    return () => {
+      save();
+      window.removeEventListener("pagehide", save);
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("pointerdown", activity);
+      window.removeEventListener("keydown", activity);
+    };
+  }, [active?.id]);
 
   return (
     <div className="chat-workspace">
@@ -72,13 +96,31 @@ export default function ChatView({ sendControl, mobile }) {
         </div>}
         {active ? (
           <>
+            {active.privateMemoryUsed && <div className="chat-notice" role="status">
+              <span>Private chat · Only providers with private memory access can continue this conversation.</span>
+              <button type="button" disabled={creating} onClick={() => void newConversation()}>New chat</button>
+            </div>}
             <MessageList sendControl={sendControl} />
+            {previous && !active.messages.length && !active.draftText?.trim() && <button
+              className="mx-auto mb-3 flex max-w-[calc(100%_-_2rem)] items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
+              disabled={continuing || creating} onClick={async () => {
+                setContinuing(true);
+                try { await useChatStore.getState().openConversation(previous.id); }
+                finally { setContinuing(false); }
+              }}>
+              <span className="shrink-0">{continuing ? "Opening…" : previous.hasDraft ? "Resume draft" : "Continue previous chat"}</span>
+              <span className="truncate">— {previous.title}</span>
+            </button>}
             <Composer />
           </>
         ) : (
           <>
             {messageError && <p role="alert" className="px-4 pt-4 text-sm text-red-400">{messageError}</p>}
-            <Welcome onStart={() => newConversation()} pending={creating} />
+            {visitLoading ? <p role="status" className="m-auto text-sm text-zinc-500">Opening your chat…</p> : <>
+              {visitError && <div className="chat-notice" role="alert"><span>{visitError}</span>
+                <button onClick={() => void restoreVisit()}>Retry</button></div>}
+              <Welcome onStart={() => newConversation()} pending={creating} />
+            </>}
           </>
         )}
       </div>

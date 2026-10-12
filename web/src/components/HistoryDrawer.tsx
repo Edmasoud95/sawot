@@ -1,5 +1,7 @@
-import { useLayoutEffect, useRef } from "react";
-import gsap from "gsap";
+import ControlIcon from "./ControlIcon";
+import MotionButton from "./MotionButton";
+import { useRef } from "react";
+import { useSurfaceMotion } from "../hooks/useSurfaceMotion";
 import { useVoiceStore } from "../store";
 import { useDialogFocus } from "../hooks/useDialogFocus";
 import { API_BASE } from "../lib/config";
@@ -55,29 +57,11 @@ export default function HistoryDrawer({ mobileMenu = false }) {
   const trigger = useRef(null);
   useDialogFocus(drawerOpen, panel, trigger, toggleDrawer);
 
-  // Park the panel off-screen via GSAP itself — a Tailwind translate class
-  // would be read as a pixel `x` offset that xPercent then adds to.
-  useLayoutEffect(() => {
-    gsap.set(panel.current, { xPercent: mobileMenu ? -100 : 100, autoAlpha: 0 });
-  }, [mobileMenu]);
-
-  useLayoutEffect(() => {
-    gsap.to(panel.current, {
-      xPercent: drawerOpen ? 0 : mobileMenu ? -100 : 100,
-      autoAlpha: drawerOpen ? 1 : 0,
-      duration: 0.55,
-      ease: "power4.out",
-    });
-    gsap.to(scrim.current, {
-      autoAlpha: drawerOpen ? 1 : 0,
-      duration: 0.4,
-      ease: "power2.out",
-    });
-  }, [drawerOpen, mobileMenu]);
+  useSurfaceMotion({ panel, scrim, open: drawerOpen, placement: mobileMenu ? "left" : "right" });
 
   return (
     <>
-      <button
+      <MotionButton
         ref={trigger}
         onClick={toggleDrawer}
         aria-label={mobileMenu ? "Open voice history" : "Toggle conversation history"}
@@ -88,7 +72,7 @@ export default function HistoryDrawer({ mobileMenu = false }) {
         <svg viewBox="0 0 24 24" width={mobileMenu ? 20 : 16} height={mobileMenu ? 20 : 16} fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
           <path d={mobileMenu ? "M4 6h16M4 12h16M4 18h16" : "M3 11a9 9 0 1 1 3 8M3 5v6h6M12 7v5l3 2"} />
         </svg>
-      </button>
+      </MotionButton>
       <div
         ref={scrim}
         onClick={toggleDrawer}
@@ -106,11 +90,11 @@ export default function HistoryDrawer({ mobileMenu = false }) {
       >
         <div className="mb-6 flex items-center justify-between">
           {mobileMenu ? <h1 className="brand" aria-label="SAWOT">sawot<span aria-hidden="true">•</span></h1> : <h2 className="history-title">Voice history</h2>}
-          <button onClick={toggleDrawer} aria-label="Close history" className="icon-button"><span className="ui-text-icon" aria-hidden="true">×</span></button>
+          <MotionButton onClick={toggleDrawer} aria-label="Close history" className="icon-button"><ControlIcon name="close" /></MotionButton>
         </div>
         {mobileMenu && <h2 className="eyebrow mb-4">Voice history</h2>}
         <div className="mb-6">
-          <button
+          <MotionButton
             onClick={toggleDebug}
             aria-pressed={debugEnabled}
             className={`rounded-full border px-3 py-1 font-mono text-[0.6rem] uppercase tracking-[0.2em] transition-colors duration-300 ${
@@ -120,7 +104,7 @@ export default function HistoryDrawer({ mobileMenu = false }) {
             }`}
           >
             Debug bar
-          </button>
+          </MotionButton>
         </div>
         {history.length === 0 && (
           <p className="text-[0.95rem] text-zinc-600">

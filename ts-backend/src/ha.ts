@@ -7,6 +7,7 @@ export interface Entity {
 }
 
 export interface Card {
+  updatedAt?: number;
   entity_id: string;
   domain: string;
   name: string;
@@ -97,11 +98,13 @@ export class HomeAssistant {
     service: string,
     entityId: string,
     data?: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<{ ok: true }> {
     const resp = await fetch(this.baseUrl + "/api/services/" + domain + "/" + service, {
       method: "POST",
       headers: this.headers({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ entity_id: entityId, ...(data ?? {}) }),
+      body: JSON.stringify({ ...(data ?? {}), entity_id: entityId }),
+      signal,
     });
     if (!resp.ok) throw new Error("HA service failed: " + resp.status);
     return { ok: true };
@@ -115,11 +118,14 @@ export class HomeAssistant {
       .join("\n");
   }
 
-  async getCards(entityIds: string[]): Promise<Card[]> {
+  async getCards(entityIds: string[], signal: AbortSignal = AbortSignal.timeout(8000)): Promise<Card[]> {
+    if (!entityIds.length) return [];
     const wanted = new Set(entityIds);
-    const resp = await fetch(this.baseUrl + "/api/states", { headers: this.headers() });
+    const single = entityIds.length === 1;
+    const resp = await fetch(this.baseUrl + "/api/states" + (single ? "/" + encodeURIComponent(entityIds[0]) : ""), { headers: this.headers(), signal });
     if (!resp.ok) throw new Error("HA states failed: " + resp.status);
-    const states: any[] = await resp.json();
+    const payload = await resp.json();
+    const states: any[] = single ? [payload] : payload;
     const byId = new Map<string, Card>();
     for (const s of states) {
       if (!wanted.has(s.entity_id)) continue;
@@ -128,6 +134,7 @@ export class HomeAssistant {
         if (k in (s.attributes ?? {})) attrs[k] = s.attributes[k];
       }
       byId.set(s.entity_id, {
+        ...(Number.isFinite(Date.parse(s.last_updated)) ? { updatedAt: Date.parse(s.last_updated) } : {}),
         entity_id: s.entity_id,
         domain: s.entity_id.split(".")[0],
         name: s.attributes?.friendly_name ?? s.entity_id,

@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { beginVoiceMemory, guardVoicePrivacy, privateProviderGuard, VoiceMemoryError, type VoiceMemorySession } from "./memory/voice.js";
+import { createControlHandler } from "./controls.js";
 import { buildLivePrompt } from "./livePrompts.js";
 import { liveBackendPrompt } from "./liveTools.js";
 import { PushNotifications } from "./pushNotifications.js";
@@ -49,37 +52,6 @@ function repoRoot(): string {
   return resolve(".");
 }
 
-async function handleControl(
-  socket: any,
-  ha: HomeAssistant,
-  raw: string,
-  controls: Record<string, string[]>,
-): Promise<void> {
-  let msg: any;
-  try {
-    msg = JSON.parse(raw);
-  } catch {
-    socket.send(JSON.stringify({ type: "error", source: "control", message: "malformed message" }));
-    return;
-  }
-  if (msg.type !== "control") {
-    socket.send(JSON.stringify({ type: "error", source: "control", message: "unknown message type" }));
-    return;
-  }
-  const { domain, service, entity_id } = msg;
-  if (!entity_id || !(controls[domain] ?? []).includes(service)) {
-    socket.send(JSON.stringify({ type: "error", source: "control", message: "control not allowed" }));
-    return;
-  }
-  try {
-    await ha.callService(domain, service, entity_id, msg.data);
-    const cards = await ha.getCards([entity_id]);
-    socket.send(JSON.stringify({ type: "entities", entities: cards }));
-  } catch {
-    socket.send(JSON.stringify({ type: "error", source: "control", message: "control failed" }));
-  }
-}
-
 async function main() {
   const config = loadConfig();
   const root = repoRoot();
@@ -107,6 +79,7 @@ async function main() {
 
   const localInference = new InferenceClient(config.sidecarUrl);
   const ha = new HomeAssistant(config.haUrl, config.haToken);
+  const handleControl = createControlHandler(ha, config.allowedControls ?? DEFAULT_ALLOWED_CONTROLS);
   const tools = buildHaTools(ha);
   const searchTools = config.braveApiKey
     ? buildSearchTools(new BraveSearchClient(config.braveApiKey))
@@ -115,7 +88,7 @@ async function main() {
   const store = new SettingsStore(join(dataDir, "settings.json"));
   const overrides = store.load();
   const registry = new ProviderRegistry(
-    { id: "local", name: "Local server", baseUrl: config.llmUrl, builtin: true },
+    { id: "local", name: "Local server", baseUrl: config.llmUrl, builtin: true, privateMemoryAccess: overrides.localPrivateMemoryAccess === true },
     Array.isArray(overrides.providers) ? overrides.providers : [],
   );
   // Warm every provider's model list in the background so pickers have
@@ -166,14 +139,23 @@ async function main() {
   systemPrompt = buildSystemPrompt(summary, state.personality, config.assistantName, state.personalityPrompt);
   agent.setSystemPrompt(systemPrompt);
 
+  const memory = new MemoryStore(dataDir);
+  await memory.init();
+
   const liveVoice = registerLiveVoiceRoutes(app, {
-    registry, allowedOrigins: config.allowedOrigins, enabled: () => state.liveVoiceEnabled === true,
+    registry, memory, allowedOrigins: config.allowedOrigins, enabled: () => state.liveVoiceEnabled === true,
     instructions: () => buildLivePrompt({ name: config.assistantName, personality: state.personality, personalityPrompt: state.personalityPrompt,
-      template: state.liveVoicePrompt, tools: true, search: searchTools.length > 0 }),
-    createAgent: () => {
+      template: state.liveVoicePrompt, tools: true, search: searchTools.length > 0, memory: memory.isEnabled() }),
+    createAgent: session => {
       const selected = registry.resolve(state.model);
+      const modelPrivate = privateProviderGuard(registry, selected.providerId);
+      const speechPrivate = session.speechPrivate;
+      const allowed = () => modelPrivate() && speechPrivate();
+      session.canUsePrivate = allowed;
+      guardVoicePrivacy(session, allowed);
       return new Agent(selected.client, selected.model, [...tools, ...searchTools], liveBackendPrompt(
-        buildSystemPrompt(summary, "plain", config.assistantName), state.liveBackendPrompt));
+        buildSystemPrompt(summary, "plain", config.assistantName), state.liveBackendPrompt),
+        (text, signal, event) => beginVoiceMemory(memory, session, text, allowed, signal, event));
     },
   });
   registerSettingsRoutes(app, {
@@ -221,14 +203,29 @@ async function main() {
         isConversationAvailable: id => Boolean(chatCtx.store.get(id)) });
   } catch { app.log.warn("Response notifications unavailable: check private storage and VAPID subject configuration"); }
   registerPushRoutes(app, notifications, config.allowedOrigins);
-  const memory = new MemoryStore(dataDir);
-  await memory.init();
   registerMemoryRoutes(app, memory);
   const chatCtx: ChatCtx = {
     memory,
     onResponseCompleted: notice => notifications?.enqueue(notice),
     store: new ChatStore(join(dataDir, "data", "conversations")),
     resolve: (model) => registry.resolve(model),
+    isPrivateProvider: model => registry.isPrivate(model),
+    isPrivateSpeechProvider: () => !state.ttsProviderId || state.ttsProviderId === "local" || registry.get(state.ttsProviderId)?.privateMemoryAccess === true,
+    prepareSpeech: () => {
+      const id = state.ttsProviderId ?? "local";
+      const voice = state.voice;
+      const provider = id === "local" ? undefined : registry.get(id);
+      if (id !== "local" && (!provider || !isOpenAiSpeechProvider(provider))) {
+        throw new InferenceError(400, "Select an available speech provider in Settings → Speech.", "synthesize");
+      }
+      const remote = provider ? { baseUrl: provider.baseUrl, apiKey: provider.apiKey ?? "", model: state.ttsModel ?? "gpt-4o-mini-tts" } : undefined;
+      const speech = new InferenceClient(config.sidecarUrl, () => remote);
+      return {
+        isPrivate: () => id === "local" || registry.get(id)?.privateMemoryAccess === true,
+        synthesize: (text: string, signal: AbortSignal) => speech.synthesize(text, voice, signal),
+      };
+    },
+    subscribeProviderPrivacy: listener => registry.subscribePrivacy(listener),
     synthesize: (text, signal) => inference.synthesize(text, state.voice, signal),
     getContextWindow: (model) => registry.contextWindowFor(model),
     getEffortLevels: (model) => registry.effortLevelsFor(model),
@@ -276,10 +273,10 @@ async function main() {
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws: any) => {
+      const voiceMemory: VoiceMemorySession = { id: `voice:${randomUUID()}` };
       let pendingTurnId: number | null = null;
       let pendingImageIds: unknown;
       let legacyTurnId = 0;
-      const controls = config.allowedControls ?? DEFAULT_ALLOWED_CONTROLS;
       const session = new VoiceSession((turnId, kind, payload) => {
         if (ws.readyState !== 1) return;
         if (kind === "wav") {
@@ -287,22 +284,43 @@ async function main() {
           ws.send(payload);
         } else ws.send(JSON.stringify({ type: kind, ...payload, turnId }));
       });
-      ws.on("close", () => session.cancel());
+      const stopVoiceMemory = memory.subscribe(() => {
+        if (memory.conversationIsPrivate(voiceMemory.id)) voiceMemory.privateMemoryUsed = true;
+      });
+      ws.on("close", () => { stopVoiceMemory(); session.cancel(); });
       const getCards = (ids: string[]) => ha.getCards(ids);
 
       const startTurn = (turnId: number, audio: Buffer | null, imageIds: unknown) => {
         const selectedModel = state.model;
         const llm = registry.resolve(selectedModel);
-        const turnAgent = new Agent(llm.client, llm.model, [...tools, ...searchTools], systemPrompt);
+        const modelPrivate = privateProviderGuard(registry, llm.providerId);
+        const speechId = state.ttsProviderId || "local";
+        const speechPrivate = speechId === "local" ? () => true : privateProviderGuard(registry, speechId);
+        const allowed = () => modelPrivate() && speechPrivate();
+        const turnAgent = new Agent(llm.client, llm.model, [...tools, ...searchTools], systemPrompt,
+          (text, signal, event) => beginVoiceMemory(memory, voiceMemory, text, allowed, signal, event));
         turnAgent.setDetailedDrawings(state.detailedDrawings);
         const voice = state.voice;
         void session.start(turnId, async (history, send, signal) => {
-          const turnInference = inference.snapshot();
-          const [images, contextWindow] = await Promise.all([
-            loadVoiceImages(imageIds, chatCtx.uploadDir), registry.contextWindowFor(selectedModel),
-          ]);
-          if (signal.aborted) return;
-          await runVoiceTurn(turnInference, turnAgent, audio, history, send, voice, getCards, { ...llm, contextWindow }, signal, images);
+          const controller = new AbortController();
+          const turnSignal = AbortSignal.any([signal, controller.signal]);
+          const guard = () => guardVoicePrivacy(voiceMemory, allowed);
+          const check = () => { try { guard(); } catch { controller.abort(); } };
+          const stopPrivacy = registry.subscribePrivacy(check);
+          const stopMemory = memory.subscribe(() => { check(); if (!memory.isEnabled()) controller.abort(); });
+          try {
+            guard();
+            const turnInference = inference.snapshot();
+            const [images, contextWindow] = await Promise.all([
+              loadVoiceImages(imageIds, chatCtx.uploadDir), registry.contextWindowFor(selectedModel),
+            ]);
+            if (turnSignal.aborted) return;
+            await runVoiceTurn(turnInference, turnAgent, audio, history, send, voice, getCards, { ...llm, contextWindow }, turnSignal, images, guard);
+          } catch (error) {
+            if (error instanceof VoiceMemoryError) await send("error", { message: error.message });
+            else throw error;
+          } finally { stopPrivacy(); stopMemory(); }
+
         });
       };
 
@@ -329,7 +347,7 @@ async function main() {
             pendingImageIds = undefined;
             startTurn(message.turnId, null, message.imageIds);
           } else {
-            handleControl(ws, ha, data.toString(), controls);
+            void handleControl(ws, data.toString());
           }
         }
       });

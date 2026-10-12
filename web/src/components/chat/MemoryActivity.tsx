@@ -1,10 +1,11 @@
+import { ActivityChevron, ActivityLabel } from "./ToolActivity";
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useDialogFocus } from '../../hooks/useDialogFocus';
 import { useChatStore } from '../../chatStore';
 import { API_BASE } from '../../lib/config';
 import { invalidateMemory, memoryRequest, type MemoryEvent, type MemoryFact } from '../../lib/memoryApi';
-import { BUTTON_CLS, FIELD_CLS } from '../settings/fields';
+import { BUTTON_CLS, FIELD_CLS, Toggle } from '../settings/fields';
 export function MemoryEditor({
   fact,
   onChange
@@ -14,13 +15,15 @@ export function MemoryEditor({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(fact.text);
+  const [privateDraft, setPrivateDraft] = useState(fact.private === true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
     setDraft(fact.text);
+    setPrivateDraft(fact.private === true);
     setEditing(false);
     setError('');
-  }, [fact.text, fact.revision]);
+  }, [fact.text, fact.revision, fact.private]);
   async function mutate(remove = false) {
     setBusy(true);
     setError('');
@@ -29,7 +32,8 @@ export function MemoryEditor({
         revision: fact.revision
       } : {
         revision: fact.revision,
-        text: draft.trim()
+        text: draft.trim(),
+        private: privateDraft
       });
       invalidateMemory();
       onChange();
@@ -43,14 +47,16 @@ export function MemoryEditor({
   return <div className="space-y-2">
     {editing ? <>
       <textarea aria-label="Memory text" maxLength={1000} rows={4} className={`${FIELD_CLS} w-full resize-y`} value={draft} onChange={e => setDraft(e.target.value)} />
+      <Toggle label="Private memory" hint="Only providers with private memory access can recall this fact." checked={privateDraft} onChange={value => { if (!busy) setPrivateDraft(value); }} />
       <button className={BUTTON_CLS} disabled={busy || !draft.trim()} onClick={() => void mutate()}>Save</button>
       <button className={BUTTON_CLS} disabled={busy} onClick={() => setEditing(false)}>Cancel</button>
     </> : <>
       <p className="whitespace-pre-wrap break-words text-sm text-zinc-200">
         {fact.text}
       </p>
+      {fact.private && <span className="text-xs text-zinc-400">Private memory</span>}
       <div className="flex flex-wrap gap-2">
-        <button className={BUTTON_CLS} disabled={busy} onClick={() => setEditing(true)}>Edit</button>
+        <button className={BUTTON_CLS} disabled={busy} onClick={() => { setDraft(fact.text); setPrivateDraft(fact.private === true); setEditing(true); }}>Edit</button>
         <button className={BUTTON_CLS} disabled={busy} onClick={() => void mutate(true)}>Delete memory</button>
       </div>
     </>}
@@ -77,7 +83,7 @@ export function MemoryDialog({
   return createPortal(<div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-3" onClick={e => {
     if (e.target === e.currentTarget) onClose();
   }}>
-    <div ref={panel} role="dialog" aria-modal="true" aria-labelledby={id} className="max-h-[85dvh] w-full min-w-0 max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-ink-900 p-4">
+    <div ref={panel} role="dialog" aria-modal="true" aria-labelledby={id} className="motion-reveal max-h-[85dvh] w-full min-w-0 max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-ink-900 p-4">
       <div className="mb-4 flex items-center justify-between gap-2">
         <h2 id={id} className="text-zinc-100">
           {title}
@@ -146,8 +152,9 @@ function ActivityButton({
     }
   }
   return <>
-    <button ref={trigger} type="button" onClick={() => setOpen(true)} className="min-h-9 rounded-full border border-white/10 px-3 text-xs text-zinc-400 hover:text-zinc-200">
-      {label}
+    <button ref={trigger} type="button" onClick={() => setOpen(true)} className="tool-activity-row">
+      <ActivityLabel kind="memory" label={event.kind === 'recalled' ? 'Memories recalled' : `Memory ${event.kind}`} detail={event.kind === 'recalled' ? String(event.memories.length) : undefined}/>
+      <ActivityChevron/>
     </button>
     {open && <MemoryDialog title={label} trigger={trigger} onClose={close}>
       <p className="mb-3 text-xs text-zinc-500">
@@ -166,7 +173,7 @@ function ActivityButton({
               <p>The memory has changed since this activity.</p>
               {m.text && <p className="whitespace-pre-wrap break-words">Previously supplied: {m.text}</p>}
             </div>}
-            <button className={BUTTON_CLS} onClick={() => void source(m.current!)}>Open source conversation</button>
+            {/^(voice|live):/.test(m.current.sourceConversationId) ? <p className="text-xs text-zinc-500">Saved from a voice session.</p> : <button className={BUTTON_CLS} onClick={() => void source(m.current!)}>Open source conversation</button>}
           </>}
         </div>)}
       </div>
@@ -179,7 +186,7 @@ export default function MemoryActivity({
 }: {
   events: MemoryEvent[];
 }) {
-  return events?.length ? <div className="my-3 flex flex-wrap gap-2" aria-label="Memory activity">
+  return events?.length ? <div className="tool-activity my-3 flex flex-col items-start" aria-label="Memory activity">
     {events.map(e => <ActivityButton key={e.id} event={e} />)}
   </div> : null;
 }

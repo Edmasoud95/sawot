@@ -11,7 +11,7 @@ export function useMessageReader(conversationId: string, streaming: boolean) {
     unlock: () => audioContext().resume(),
     request: async (text, signal) => {
       const response = await fetch(`${API_BASE}/api/chat/speech`, {
-        method: "POST", signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+        method: "POST", signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, conversationId }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -26,7 +26,7 @@ export function useMessageReader(conversationId: string, streaming: boolean) {
       void playWav(audio, finish).catch(error => { signal.removeEventListener("abort", finish); reject(error); });
     }),
     stop: stopPlayback,
-  }, setReading), []);
+  }, setReading), [conversationId]);
   useEffect(() => () => reader.stop(), [reader, conversationId]);
   useEffect(() => { if (streaming || mode !== "chat") reader.stop(); }, [reader, streaming, mode]);
   return { reading, reader };

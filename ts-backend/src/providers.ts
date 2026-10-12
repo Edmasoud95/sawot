@@ -11,6 +11,7 @@ export interface ProviderSpec {
   baseUrl: string;
   apiKey?: string;
   builtin?: boolean;
+  privateMemoryAccess?: boolean;
 }
 
 /** Public shape — never includes the API key. */
@@ -20,6 +21,7 @@ export interface ProviderInfo {
   baseUrl: string;
   builtin: boolean;
   hasKey: boolean;
+  privateMemoryAccess: boolean;
 }
 
 /** Separator for provider-qualified model ids ("local::qwen3-8b").
@@ -114,6 +116,7 @@ export async function probeEndpoint(baseUrl: string, apiKey?: string, timeoutMs 
 export class ProviderRegistry {
   private providers = new Map<string, ProviderSpec>();
   private clients = new Map<string, OpenAI>();
+  private privacyListeners = new Set<(providerId: string) => void>();
   readonly defaultId: string;
 
   private readonly timeoutMs: number;
@@ -124,10 +127,10 @@ export class ProviderRegistry {
   constructor(builtin: ProviderSpec, custom: ProviderSpec[] = [], options: { timeoutMs?: number } = {}) {
     this.timeoutMs = options.timeoutMs ?? MODEL_LIST_TIMEOUT_MS;
     this.defaultId = builtin.id;
-    this.providers.set(builtin.id, { ...builtin, builtin: true });
+    this.providers.set(builtin.id, { ...builtin, builtin: true, privateMemoryAccess: builtin.privateMemoryAccess === true });
     for (const p of custom) {
       if (p?.id && p?.baseUrl && !this.providers.has(p.id)) {
-        this.providers.set(p.id, { ...p, builtin: false });
+        this.providers.set(p.id, { ...p, builtin: false, privateMemoryAccess: p.privateMemoryAccess === true });
       }
     }
   }
@@ -139,6 +142,7 @@ export class ProviderRegistry {
       baseUrl: p.baseUrl,
       builtin: !!p.builtin,
       hasKey: !!p.apiKey,
+      privateMemoryAccess: p.privateMemoryAccess === true,
     }));
   }
 
@@ -146,7 +150,7 @@ export class ProviderRegistry {
   customSpecs(): ProviderSpec[] {
     return [...this.providers.values()]
       .filter((p) => !p.builtin)
-      .map(({ id, name, baseUrl, apiKey }) => ({ id, name, baseUrl, ...(apiKey ? { apiKey } : {}) }));
+      .map(({ id, name, baseUrl, apiKey, privateMemoryAccess }) => ({ id, name, baseUrl, privateMemoryAccess: privateMemoryAccess === true, ...(apiKey ? { apiKey } : {}) }));
   }
 
   get(id: string): ProviderSpec | undefined {
@@ -163,6 +167,7 @@ export class ProviderRegistry {
       baseUrl: baseUrl.replace(/\/+$/, ""),
       ...(apiKey ? { apiKey } : {}),
       builtin: false,
+      privateMemoryAccess: false,
     };
     this.providers.set(id, spec);
     return spec;
@@ -173,7 +178,36 @@ export class ProviderRegistry {
     if (!p || p.builtin) return false;
     this.providers.delete(id);
     this.clients.delete(id);
+    this.notifyPrivacyRevoked(id);
     return true;
+  }
+
+  /** Legacy bare model ids use the built-in provider. Removed explicit ids
+   * must never inherit that provider's private-memory permission. */
+  isPrivate(model: string): boolean {
+    const at = model.indexOf(MODEL_SEP);
+    const id = at >= 0 ? model.slice(0, at) : this.defaultId;
+    return this.providers.get(id)?.privateMemoryAccess === true;
+  }
+
+  setPrivateMemoryAccess(id: string, value: boolean): void {
+    const provider = this.providers.get(id);
+    if (!provider) throw new Error("unknown provider: " + id);
+    const revoked = provider.privateMemoryAccess === true && value !== true;
+    provider.privateMemoryAccess = value === true;
+    if (revoked) this.notifyPrivacyRevoked(id);
+  }
+
+  /** Called synchronously on trust revocation and provider removal. */
+  subscribePrivacy(listener: (providerId: string) => void): () => void {
+    this.privacyListeners.add(listener);
+    return () => { this.privacyListeners.delete(listener); };
+  }
+
+  private notifyPrivacyRevoked(id: string): void {
+    for (const listener of this.privacyListeners) {
+      try { listener(id); } catch { /* Continue cancelling other active turns. */ }
+    }
   }
 
   clientFor(id: string): OpenAI {

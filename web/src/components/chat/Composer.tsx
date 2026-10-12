@@ -1,6 +1,10 @@
+import ControlIcon from "../ControlIcon";
+import { haptics } from "../../lib/haptics";
+import MotionButton from "../MotionButton";
 import { useEffect, useId, useRef, useState } from "react";
 import { useChatStore } from "../../chatStore";
 import { uploadFile } from "../../lib/chatApi";
+import { privateChatProviders } from "../../lib/chatPrivacy";
 import ModelPicker from "../ModelPicker";
 import AttachmentPicker from "./AttachmentPicker";
 import ToolsMenu from "./ToolsMenu";
@@ -38,7 +42,8 @@ export default function Composer() {
   const removeAttachment = useChatStore((s) => s.removeAttachment);
   const startStream = useChatStore((s) => s.startStream);
   const stopStream = useChatStore((s) => s.stopStream);
-  const providers = useProviders();
+  const allProviders = useProviders();
+  const providers = privateChatProviders(allProviders, active?.privateMemoryUsed === true);
   const setEffort = useChatStore((s) => s.setEffort);
   const renameModel = useChatStore((s) => s.renameModel);
 
@@ -85,6 +90,7 @@ export default function Composer() {
 
   const send = () => {
     if (settingsSaving || streaming || uploading || dictating || !canSend) return;
+    haptics.pulse("confirmation");
     startStream(text.trim());
     const el = textareaRef.current;
     if (el) el.style.height = "auto";
@@ -150,13 +156,13 @@ export default function Composer() {
         <div role="status" className="attachment-feedback image-capability-note" data-unsupported={visionOk === false}>
           <span>{visionOk === false ? "This model doesn’t accept images." : "Image support is unknown for this model."}</span>
           {visionModel && (
-            <button
+            <MotionButton
               disabled={settingsSaving}
               onClick={() => { void renameModel(visionModel).catch(() => setUploadError("Couldn’t switch model. Please try again.")); }}
               className="image-model-switch"
             >
               Switch to {visionModel.slice(visionModel.indexOf("::") + 2)}
-            </button>
+            </MotionButton>
           )}
         </div>
       )}
@@ -173,13 +179,13 @@ export default function Composer() {
                     alt={a.name}
                     className="h-14 w-14 rounded-lg border border-white/10 object-cover"
                   />
-                  <button
+                  <MotionButton
                     onClick={() => removeAttachment(a.id)}
                     aria-label={`Remove ${a.name}`}
                     className="attachment-remove attachment-remove-image"
                   >
-                    <span className="ui-text-icon" aria-hidden="true">×</span>
-                  </button>
+                    <ControlIcon name="close" />
+                  </MotionButton>
                 </span>
               ) : (
                 <span
@@ -190,13 +196,13 @@ export default function Composer() {
                     <FileIcon />
                   </span>
                   <span className="truncate">{a.name}</span>
-                  <button
+                  <MotionButton
                     onClick={() => removeAttachment(a.id)}
                     aria-label={`Remove ${a.name}`}
                     className="attachment-remove"
                   >
-                    <span className="ui-text-icon" aria-hidden="true">×</span>
-                  </button>
+                    <ControlIcon name="close" />
+                  </MotionButton>
                 </span>
               )
             )}
@@ -245,22 +251,22 @@ export default function Composer() {
             }} />
           </div>
           {streaming ? (
-            <button
+            <MotionButton
               onClick={stopStream}
               aria-label="Stop generating"
               className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-aurora-ember/50 bg-aurora-ember/15 text-aurora-ember transition-colors duration-300 hover:bg-aurora-ember/25"
             >
               <Stop />
-            </button>
+            </MotionButton>
           ) : (
-            <button
+            <MotionButton
               onClick={send}
               disabled={!canSend || uploading || dictating || settingsSaving}
               aria-label="Send message"
               className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-aurora-teal/50 bg-aurora-teal/15 text-aurora-teal transition-colors duration-300 hover:bg-aurora-teal/25 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-zinc-600"
             >
               <ArrowUp />
-            </button>
+            </MotionButton>
           )}
         </div>
       </div>

@@ -1,7 +1,9 @@
+import { haptics } from "./haptics";
 import type { DictationRecorder } from "./dictation";
 
 /** A private microphone/meter: dictation never touches voice playback or its level bus. */
 export class BrowserDictationRecorder implements DictationRecorder {
+  private releaseHaptics?: () => void;
   private generation = 0;
   private stream: MediaStream | undefined;
   private recorder: MediaRecorder | undefined;
@@ -12,6 +14,7 @@ export class BrowserDictationRecorder implements DictationRecorder {
 
   async start() {
     this.cancel();
+    this.releaseHaptics = haptics.suppress();
     const generation = this.generation;
     let stream: MediaStream | undefined;
     try {
@@ -69,6 +72,8 @@ export class BrowserDictationRecorder implements DictationRecorder {
     this.recorder = undefined;
     void this.context?.close().catch(() => {});
     this.context = undefined;
+    this.releaseHaptics?.();
+    this.releaseHaptics = undefined;
     this.level(0);
   }
 

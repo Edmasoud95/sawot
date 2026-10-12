@@ -1,3 +1,4 @@
+import { ChatStream } from "./chatStream.js";
 import { addFileInventory } from "./analysis/context.js";
 import { branchConversation } from "./chatBranch.js";
 import { buildAnalysisTools } from "./analysis/tools.js";
@@ -42,6 +43,10 @@ const UPLOAD_MEDIA: Record<string, string> = {
 
 export interface ChatCtx {
   memory?: MemoryStore;
+  isPrivateProvider?: (model: string) => boolean;
+  isPrivateSpeechProvider?: () => boolean;
+  prepareSpeech?: () => { isPrivate: () => boolean; synthesize: (text: string, signal: AbortSignal) => Promise<Buffer> };
+  subscribeProviderPrivacy?: (listener: () => void) => () => void;
   onResponseCompleted?: (notice: ChatCompletionNotice) => void | Promise<void>;
   analysis?: { files: AnalysisFileStore; runner: Runner };
   store: ChatStore;
@@ -77,7 +82,7 @@ function findUploadFile(dir: string, uid: string): string | null {
 }
 
 async function maybeTitle(ctx: ChatCtx, conv: any, signal: AbortSignal): Promise<void> {
-  if (conv.title !== "New chat") return;
+  if (conv.title !== "New chat" || conv.privateMemoryUsed && ctx.isPrivateProvider?.(conv.model) !== true) return;
   const firstMessage = conv.messages.find((m: any) => m.role === "user" && !m.command);
   if (!firstMessage) return;
   try {
@@ -100,10 +105,29 @@ async function maybeTitle(ctx: ChatCtx, conv: any, signal: AbortSignal): Promise
 
 export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
   registerLinkThumbnailRoute(app);
+  const privateDetail = "This conversation uses private memories. Choose a private provider or start a new chat.";
+  // Persist the restriction separately from reply completion; cancellation and
+  // concurrent draft saves must never make sensitive history public again.
+  const markPrivate = (conv: any) => {
+    conv.privateMemoryUsed = true;
+    const latest = ctx.store.get(conv.id);
+    if (!latest) throw new Error("Conversation is unavailable");
+    if (!latest.privateMemoryUsed) { latest.privateMemoryUsed = true; ctx.store.save(latest); }
+  };
+  const protectConversation = (conv: any): boolean => {
+    const ids = [conv.id, ...(conv.privacyAncestors ?? []),
+      ...(conv.messages ?? []).map((m: any) => m.memorySourceConversationId)].filter(id => typeof id === "string");
+    const required = conv.privateMemoryUsed === true || ctx.store.get(conv.id)?.privateMemoryUsed === true ||
+      ids.some(id => ctx.memory?.conversationIsPrivate(id));
+    if (required) markPrivate(conv);
+    return required;
+  };
+  const requiresPrivate = async (conv: any) => { await ctx.memory?.init(); return protectConversation(conv); };
   const activityReference = (event: MemoryEvent) => ({ ...event, memories: event.memories.map(m => ({ id: m.id, revision: m.revision })) });
   // Canonical activity lives with the memory store, never duplicated fact text
   // in conversation JSON. This also recovers operations after a process crash.
   const withMemory = async (conv: any) => {
+    await requiresPrivate(conv);
     if (!ctx.memory) return conv;
     const events = (await ctx.memory.eventsForConversation(conv.id)).map(activityReference);
     const inherited = new Map<string, MemoryEvent[]>();
@@ -136,7 +160,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       if (saved) ctx.analysis.files.prune(saved.id, visibleTurns(saved));
     }
   }
-  const activeTurns = new Map<string, { controller: AbortController; finished: Promise<void>; analysisPending: Set<Promise<unknown>>; snapshot?: () => any }>();
+  const activeTurns = new Map<string, { controller: AbortController; finished: Promise<void>; analysisPending: Set<Promise<unknown>>; stream: ChatStream; snapshot?: () => any }>();
   app.addHook("preClose", async () => {
     const turns = [...activeTurns.values()];
     for (const turn of turns) turn.controller.abort();
@@ -146,25 +170,63 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
   const setupRequired = { detail: "Set up Home Assistant in Settings → Connections before enabling it." };
   app.post("/api/chat/speech", async (req: any, reply: any) => {
     const text = req.body?.text;
+    const cid = req.body?.conversationId;
+    // Browser requests must identify the conversation; missing context must not
+    // turn a private read-aloud action into an unrestricted speech request.
+    if (ctx.memory && (typeof cid !== "string" || !SAFE_ID.test(cid))) return reply.code(400).send({ detail: "Choose a conversation to read aloud." });
+    const conv = typeof cid === "string" ? ctx.store.get(cid) : null;
+    if (cid !== undefined && !conv) return reply.code(404).send({ detail: "Conversation not found." });
+    if (conv) await requiresPrivate(conv);
+    const speech = ctx.prepareSpeech?.();
+    const synthesize = speech?.synthesize ?? ctx.synthesize;
+    const speechAllowed = () => !conv || !protectConversation(conv) || (speech ? speech.isPrivate() : ctx.isPrivateSpeechProvider?.()) === true;
+    if (!speechAllowed()) return reply.code(403).send({ detail: "Private conversations require local speech or a private speech provider." });
     if (typeof text !== "string" || text.length > 2000) return reply.code(400).send({ detail: "Invalid speech text." });
     const spoken = stripSpeechTags(parseExpressionMarkers(text).reply);
     if (!spoken) return reply.code(400).send({ detail: "This message has no text to read." });
-    if (!ctx.synthesize) return reply.code(503).send({ detail: "Speech is unavailable." });
+    if (!synthesize) return reply.code(503).send({ detail: "Speech is unavailable." });
     const controller = new AbortController();
     const close = () => { if (!reply.raw.writableEnded) controller.abort(); };
     reply.raw.on("close", close);
+    const checkSpeech = () => { if (!speechAllowed()) controller.abort(); };
+    const stopPrivacy = ctx.subscribeProviderPrivacy?.(checkSpeech);
+    const stopMemory = ctx.memory?.subscribe(checkSpeech);
     try {
-      const audio = await ctx.synthesize(spoken, controller.signal);
+      if (!speechAllowed()) throw new Error("Choose a private speech provider.");
+      const audio = await synthesize(spoken, controller.signal);
       return reply.type("audio/wav").header("Cache-Control", "no-store").send(audio);
     } catch (e) {
       return reply.code(502).send({ detail: e instanceof InferenceError && e.detail ? e.detail : conversationErrorMessage(e) });
-    } finally { reply.raw.off("close", close); }
+    } finally { stopPrivacy?.(); stopMemory?.(); reply.raw.off("close", close); }
   });
+  app.get<{ Params: { cid: string } }>("/api/chat/conversations/:cid/stream", async (req, reply) => {
+    const conv = ctx.store.get(req.params.cid);
+    if (!conv) return reply.code(404).send({ detail: "not found" });
+    const hydrated = await withMemory(conv);
+    // Re-read after asynchronous memory hydration; completion may have raced it.
+    const latest = ctx.store.get(conv.id);
+    if (!latest) return reply.code(404).send({ detail: "not found" });
+    const turn = activeTurns.get(conv.id);
+    const live = turn?.snapshot?.();
+    const memories = new Map(hydrated.messages.map((m: any) => [m.id, m.memory]));
+    const conversation = { ...latest, ...live, responding: Boolean(live),
+      messages: (live?.messages ?? latest.messages).map((m: any) => ({ ...m, memory: m.memory ?? memories.get(m.id) })),
+    };
+    reply.hijack();
+    const stream = live ? turn!.stream : new ChatStream();
+    stream.attach(reply.raw, { type: "snapshot", conversation });
+    if (!live) stream.end();
+  });
+
   app.get("/api/chat/tools", async () => ({ homeAssistant: homeConfigured(), ...(ctx.analysis ? { python: (await ctx.analysis.runner.ready()).ready } : {}) }));
   app.get("/api/chat/conversations", async (req: any, reply: any) => {
     const query = req.query?.q ?? "";
     if (typeof query !== "string" || query.length > 200) return reply.code(400).send({ detail: "Search must be at most 200 characters." });
-    return ctx.store.list(query);
+    await ctx.memory?.init();
+    return ctx.store.list(query).map((item: any) => {
+      const conv = ctx.store.get(item.id);
+      return conv && protectConversation(conv) ? { ...item, privateMemoryUsed: true } : item;
+    });
   });
 
   app.post("/api/chat/conversations", async (req: any, reply: any) => {
@@ -195,6 +257,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     if (!SAFE_ID.test(req.params.cid)) return reply.code(400).send({ detail: "Invalid conversation ID" });
     const source = ctx.store.get(req.params.cid);
     if (!source) return reply.code(404).send({ detail: "Conversation not found." });
+    await requiresPrivate(source);
     const { messageIndex, expectedMessageCount, expectedMessageId } = req.body ?? {};
     if (!Number.isInteger(messageIndex) || messageIndex < 0 || messageIndex >= source.messages.length) {
       return reply.code(400).send({ detail: "Choose a saved message to branch from." });
@@ -217,6 +280,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     const body = req.body ?? {};
     if (body.homeAssistant && !homeConfigured()) return reply.code(409).send(setupRequired);
     const model = "model" in body ? String(body.model) : conv.model;
+    if (await requiresPrivate(conv) && "model" in body && ctx.isPrivateProvider?.(model) !== true) return reply.code(403).send({ detail: privateDetail });
     const levels = ctx.getEffortLevels?.(model) ?? [];
     if ("reasoningEffort" in body && body.reasoningEffort !== null && !levels.includes(body.reasoningEffort)) {
       return reply.code(400).send({ detail: "That effort level is not supported by this model. Choose Default or an available level." });
@@ -230,7 +294,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     if ("python" in body) conv.python = body.python !== false;
     if ("draftText" in body) {
       const text = String(body.draftText ?? "");
-      conv.draftText = text.trim().split(/\s+/u).filter(Boolean).length >= 3 ? text : "";
+      conv.draftText = text;
       conv.updated = Date.now() / 1000;
     }
     ctx.store.save(conv);
@@ -307,6 +371,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
   app.post("/api/chat/conversations/:cid/messages", async (req: any, reply: any) => {
     const conv = ctx.store.get(req.params.cid);
     if (!conv) return reply.code(404).send({ detail: "not found" });
+    if (await requiresPrivate(conv) && ctx.isPrivateProvider?.(conv.model) !== true) return reply.code(403).send({ detail: privateDetail });
     const body = req.body ?? {};
     const notificationDevice = typeof body.notificationDevice === "string" && /^[A-Za-z0-9_-]{43}$/.test(body.notificationDevice) ? body.notificationDevice : undefined;
     const turnId = randomUUID();
@@ -340,24 +405,24 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     }
 
     const controller = new AbortController();
-    const assistant: any = { ...((ctx.analysis || ctx.memory) ? { id: newId() } : {}), ...(ctx.analysis ? { analysis: [] } : {}), role: "assistant", content: "", thinking: "", cards: [] };
+    const assistant: any = { ...((ctx.analysis || ctx.memory) ? { id: newId() } : {}), ...(ctx.analysis ? { analysis: [] } : {}), role: "assistant", presentationVersion: 1, content: "", thinking: "", parts: [], cards: [] };
     if (command) assistant.command = command;
     let finish!: () => void;
     const finished = new Promise<void>(resolve => { finish = resolve; });
     const analysisPending = new Set<Promise<unknown>>();
-    activeTurns.set(conv.id, { controller, finished, analysisPending,
-      ...(!command ? { snapshot: () => ({ messages: [...conv.messages, assistant], responseError: null }) } : {}),
+    const stream = new ChatStream();
+    const liveTools: any[] = [];
+    const liveMemory = new Map<string, any>();
+    activeTurns.set(conv.id, { controller, finished, analysisPending, stream,
+      ...(!command ? { snapshot: () => ({
+        messages: [...(persisted ? conv.messages.slice(0, -1) : conv.messages), { ...assistant, memory: [...liveMemory.values()] }],
+        streamTools: liveTools, responseError: null,
+      }) } : {}),
     });
     reply.hijack();
     const raw = reply.raw;
-    raw.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    });
-    // The HTTP connection is only a viewer. Stop/delete/shutdown cancel the
-    // model; losing a browser connection must not interrupt its work.
-    const sse = (obj: any) => { if (!raw.destroyed) raw.write("data: " + JSON.stringify(obj) + "\n\n"); };
+    stream.attach(raw);
+    const sse = (obj: any) => stream.emit(obj);
     if (regenerating) sse({ type: "regenerating", from: body.regenerateFrom });
 
     let persisted = false;
@@ -365,6 +430,16 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
     let failed = false;
     let completed = false;
     let stopMemoryWatch: (() => void) | undefined;
+    const turnModel = conv.model;
+    const turnPrivateAccess = () => ctx.isPrivateProvider?.(turnModel) === true;
+    const guardProvider = () => {
+      if (protectConversation(conv) && !turnPrivateAccess()) throw new Error(privateDetail);
+    };
+    const abortIfUntrusted = () => {
+      try { guardProvider(); } catch { controller.abort(); }
+    };
+    const stopProviderWatch = ctx.subscribeProviderPrivacy?.(abortIfUntrusted);
+    const stopConversationWatch = ctx.memory?.subscribe(abortIfUntrusted);
     const persist = () => {
       if (command || persisted || (regenerating && (!completed || controller.signal.aborted))) return;
       persisted = true;
@@ -392,7 +467,8 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       }
       const pending = command && body.attachments?.length
         ? [{ role: "user", content: "", attachments: body.attachments }] : [];
-      const llm = ctx.resolve(conv.model);
+      guardProvider();
+      const llm = ctx.resolve(turnModel);
       let analysisTools: Tool[] = [];
       let historyMessages = [...conv.messages, ...pending];
       let availableFiles: any[] = [];
@@ -421,8 +497,18 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       const memoryScope = memory && lastUser ? await memory.beginTurn({
         conversationId: conv.id, turnId: assistant.id, sourceMessageId: lastUser.id,
         text: String(lastUser.content ?? ""), regenerating, signal: controller.signal,
+        privateMemoryAccess: turnPrivateAccess,
+        onPrivateMemory: () => {
+          if (!turnPrivateAccess()) throw new Error(privateDetail);
+          markPrivate(conv);
+          sse({ type: "privacy", privateMemoryUsed: true });
+        },
       }) : undefined;
-      const emitMemory = (event: MemoryEvent) => { sse({ type: "memory", ...activityReference(event) }); };
+      const emitMemory = (event: MemoryEvent) => {
+        const reference = activityReference(event);
+        liveMemory.set(event.id, reference);
+        sse({ type: "memory", ...reference });
+      };
       const memoryTools = memory && memoryScope && memory.isEnabled() ? buildMemoryTools(memory, memoryScope, emitMemory) : [];
       if (memory && memoryScope && memoryTools.length) {
         stopMemoryWatch = memory.subscribe(() => {
@@ -461,7 +547,9 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       const effort = conv.reasoningEffort ?? ((ctx.getEffortLevels?.(conv.model) ?? []).includes("medium") ? "medium" : null);
       for await (const [event, data] of runChat(
         llm.client, llm.model, tools, system, history, getCards, effort, controller.signal,
-        memory && memoryScope ? { prepare: async (messages) => {
+        { prepare: async (messages) => {
+          guardProvider();
+          if (!memory || !memoryScope) return { suffix: "", submitted: async () => {} };
           // Tool transcripts stay in the current inference loop. Refresh them
           // too, so a Settings edit/delete cannot leave an old fact in context.
           const memoryCalls = new Set<string>();
@@ -480,7 +568,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
               const result = JSON.parse(message.content);
               if (Array.isArray(result.memories)) {
                 result.memories = (await Promise.all(result.memories.map(async (fact: any) => {
-                  try { const current = await memory.get(fact.id); return current.revision === fact.revision ? { id: current.id, revision: current.revision, text: current.text, topic: current.topic } : null; }
+                  try { const current = await memory.get(fact.id, memoryScope); return current.revision === fact.revision ? { id: current.id, revision: current.revision, text: current.text, topic: current.topic } : null; }
                   catch { return null; }
                 }))).filter(Boolean);
                 message.content = JSON.stringify(result);
@@ -488,9 +576,15 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
             } catch { message.content = JSON.stringify({ error: "Memory result unavailable" }); }
           }
           // Personal facts enter context only through an explicit memory tool call.
+          guardProvider();
           return { suffix: "", submitted: async () => {} };
-        } } : undefined,
+        } },
       )) {
+        if ((event === "thinking" || event === "content") && data) {
+          const last = assistant.parts[assistant.parts.length - 1];
+          if (last?.type === event) last.text += data;
+          else assistant.parts.push({ type: event, text: data });
+        }
         if (event === "thinking") {
           assistant.thinking += data;
           sse({ type: "thinking", delta: data });
@@ -498,6 +592,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
           assistant.content += data;
           sse({ type: "content", delta: data });
         } else if (event === "tool") {
+          liveTools.push(data);
           sse({ type: "tool", ...data });
         } else if (event === "search") {
           assistant.search = data;
@@ -513,12 +608,13 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
         }
       }
       controller.signal.throwIfAborted();
+      guardProvider();
       await maybeTitle(ctx, conv, controller.signal);
       controller.signal.throwIfAborted();
       completed = true;
       persist();
       const done = await withMemory({ ...conv, messages: [assistant] });
-      sse({ type: "done", message: done.messages.find((m: any) => m.id === assistant.id) ?? assistant, title: conv.title });
+      sse({ type: "done", message: done.messages.find((m: any) => m.id === assistant.id) ?? assistant, title: conv.title, privateMemoryUsed: conv.privateMemoryUsed === true });
     } catch (e: any) {
       failed = true;
       if (assistant.search?.phase === "start") assistant.search.phase = "error";
@@ -533,6 +629,8 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       sse({ type: "error", message });
     } finally {
       stopMemoryWatch?.();
+      stopProviderWatch?.();
+      stopConversationWatch?.();
       try {
         persist();
         if (ctx.analysis) {
@@ -546,7 +644,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
       finally {
         activeTurns.delete(conv.id);
         finish();
-        if (!raw.destroyed) raw.end();
+        stream.end();
         if (completed && savedResponse && !failed && !command && !controller.signal.aborted && notificationDevice && ctx.onResponseCompleted) {
           // Release the response and turn lock before invoking independent delivery.
           setImmediate(() => {

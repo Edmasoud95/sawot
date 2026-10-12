@@ -2,7 +2,7 @@ import { pythonPreference } from "./pythonPreference";
 import { API_BASE } from "./config";
 
 async function json(res) {
-  if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+  if (!res.ok) throw Object.assign(new Error((await res.json()).detail || res.statusText), { status: res.status });
   return res.json();
 }
 
@@ -46,44 +46,80 @@ export const uploadFile = (file, conversationId = null) => {
   return fetch(`${API_BASE}/api/chat/upload${conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : ""}`, { method: "POST", body: form }).then(json);
 };
 
-/** POST a message; invoke onEvent for each SSE event. Returns an abort fn. */
+/** POST starts a turn; GET only subscribes to the already-running turn. */
 export function streamMessage(conversationId, body, onEvent) {
+  return readChatStream(`${API_BASE}/api/chat/conversations/${conversationId}/messages`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  }, onEvent);
+}
+
+export function resumeMessage(conversationId, onEvent) {
+  return readChatStream(`${API_BASE}/api/chat/conversations/${conversationId}/stream`, {
+    cache: "no-store",
+  }, onEvent);
+}
+
+function readChatStream(url, init, onEvent) {
   const controller = new AbortController();
+  let cancelled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+  let content = "";
+  let thinking = "";
+  let firstText = true;
+  const flush = () => {
+    clearTimeout(timer); timer = undefined;
+    if (cancelled) { content = ""; thinking = ""; return; }
+    if (thinking) { const delta = thinking; thinking = ""; onEvent({ type: "thinking", delta }); }
+    if (content) { const delta = content; content = ""; onEvent({ type: "content", delta }); }
+  };
+  const receive = event => {
+    if (cancelled) return;
+    if (event.type === "content" || event.type === "thinking") {
+      // Flush before changing channels so batching cannot reorder thinking and replies.
+      if ((event.type === "content" && thinking) || (event.type === "thinking" && content)) flush();
+      if (event.type === "content") content += event.delta; else thinking += event.delta;
+      if (firstText) { firstText = false; flush(); return; }
+      // Bound markdown parsing/rendering to ~30 updates/s, independent of token rate.
+      timer ??= setTimeout(flush, 32);
+    } else { flush(); onEvent(event); }
+  };
+  const watch = (ms: number) => {
+    clearTimeout(watchdog);
+    watchdog = setTimeout(() => controller.abort(), ms);
+  };
   (async () => {
     try {
-      const res = await fetch(
-        `${API_BASE}/api/chat/conversations/${conversationId}/messages`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        }
-      );
+      watch(10000);
+      const res = await fetch(url, { ...init, signal: controller.signal });
       if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
-        onEvent({ type: "error", rejected: true, message: detail.detail || `HTTP ${res.status}` });
+        receive({ type: "error", rejected: true, message: detail.detail || `HTTP ${res.status}` });
         return;
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
       for (;;) {
+        // Server heartbeats also detect a silently dead mobile connection.
+        watch(45000);
         const { done, value } = await reader.read();
         if (done) break;
         buf += decoder.decode(value, { stream: true });
         const lines = buf.split("\n");
         buf = lines.pop();
         for (const line of lines) {
-          if (line.startsWith("data: ")) onEvent(JSON.parse(line.slice(6)));
+          if (line.startsWith("data: ")) receive(JSON.parse(line.slice(6)));
         }
       }
     } catch (e) {
-      if (!controller.signal.aborted) onEvent({ type: "error", interrupted: true,
+      if (!cancelled) receive({ type: "error", interrupted: true,
         message: "Connection interrupted before the response finished. Please try again.", detail: String(e) });
     } finally {
-      onEvent({ type: "stream_end" });
+      clearTimeout(watchdog);
+      flush();
+      if (!cancelled) onEvent({ type: "stream_end" });
     }
   })();
-  return () => controller.abort();
+  return () => { cancelled = true; clearTimeout(watchdog); clearTimeout(timer); controller.abort(); };
 }

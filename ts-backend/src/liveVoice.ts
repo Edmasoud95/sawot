@@ -1,3 +1,5 @@
+import type { MemoryStore } from "./memory/store.js";
+import { privateProviderGuard, type VoiceMemorySession } from "./memory/voice.js";
 import { buildLivePrompt } from "./livePrompts.js";
 import { LiveToolSession, type LiveTurn } from "./liveTools.js";
 import type { Agent } from "./agent.js";
@@ -12,6 +14,7 @@ const ID = /^[a-f0-9]{32}$/;
 
 interface Session {
   key: string;
+  memory: VoiceMemorySession & { providerId: string; speechPrivate: () => boolean };
   tools?: LiveToolSession;
   remoteId?: string;
   lastSeen: number;
@@ -21,10 +24,11 @@ interface Session {
 }
 interface LiveContext {
   registry: ProviderRegistry;
+  memory?: MemoryStore;
   allowedOrigins: readonly string[];
   enabled: () => boolean;
   instructions?: () => string;
-  createAgent?: () => Agent;
+  createAgent?: (session: VoiceMemorySession & { providerId: string; speechPrivate: () => boolean }) => Agent;
   fetch?: typeof fetch;
   now?: () => number;
 }
@@ -60,14 +64,19 @@ export function registerLiveVoiceRoutes(app: FastifyInstance, ctx: LiveContext) 
     return session.closingRequest;
   }
   async function sweep() {
-    await Promise.all([...sessions].filter(([, s]) => s.closing || !ctx.enabled() || now() - s.lastSeen > (s.pending ? 30_000 : 15_000))
+    for (const session of sessions.values()) if (ctx.memory?.conversationIsPrivate(session.memory.id)) session.memory.privateMemoryUsed = true;
+    await Promise.all([...sessions].filter(([, s]) => (s.memory.privateMemoryUsed && !s.memory.canUsePrivate?.()) || s.closing || !ctx.enabled() || now() - s.lastSeen > (s.pending ? 30_000 : 15_000))
       .map(([id]) => close(id)));
   }
+  const stopPrivacy = ctx.registry.subscribePrivacy(() => { void sweep(); });
+  const stopMemory = ctx.memory?.subscribe(() => { void sweep(); });
   const timer = setInterval(() => { void sweep(); }, 2000);
   timer.unref();
   app.addHook("onClose", async () => {
     shuttingDown = true;
     clearInterval(timer);
+    stopPrivacy();
+    stopMemory?.();
     await Promise.all([...sessions.keys()].map(close));
   });
 
@@ -99,7 +108,8 @@ export function registerLiveVoiceRoutes(app: FastifyInstance, ctx: LiveContext) 
     if (!provider?.apiKey || !isOpenAiSpeechProvider(provider)) return reply.code(400).send({ detail: "Choose a configured OpenAI account in Settings → Speech." });
     if (sessions.has(id)) return reply.code(409).send({ detail: "This Live session already exists." });
     if (sessions.size >= 8) return reply.code(429).send({ detail: "Too many Live sessions. End an existing session first." });
-    const session: Session = { tools: ctx.createAgent ? new LiveToolSession(ctx.createAgent) : undefined, key: provider.apiKey, lastSeen: now(), closing: false, pending: true };
+    const memory: VoiceMemorySession & { providerId: string; speechPrivate: () => boolean } = { id: `live:${id}`, providerId, speechPrivate: privateProviderGuard(ctx.registry, providerId) };
+    const session: Session = { memory, tools: ctx.createAgent ? new LiveToolSession(() => ctx.createAgent!(memory)) : undefined, key: provider.apiKey, lastSeen: now(), closing: false, pending: true };
     sessions.set(id, session);
     const disconnected = () => { if (!reply.raw.writableEnded) void close(id); };
     reply.raw.once("close", disconnected);
@@ -149,6 +159,7 @@ export function registerLiveVoiceRoutes(app: FastifyInstance, ctx: LiveContext) 
       return reply.code(400).send({ detail: "Invalid Live task context." });
     }
     const result = await session.tools.run(delegationId, turns as LiveTurn[]);
+    if (session.memory.privateMemoryUsed && !session.memory.canUsePrivate?.()) { await close(req.params.id); return reply.code(403).send({ detail: "Private memory access was revoked. Reconnect with trusted providers." }); }
     if (session.closing || !ctx.enabled()) return reply.code(409).send({ detail: "The Live session ended." });
     return result;
   });

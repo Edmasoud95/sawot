@@ -124,7 +124,7 @@ test("a general conversation gets the chat prompt and only the search tools", as
     assert.match(system.content, /Call me Ed\./);
     assert.match(system.content, /web_search/);
     assert.doesNotMatch(system.content, /Devices:/);
-    assert.deepEqual(requests[0].tools.map((t: any) => t.function.name), ["web_search"]);
+    assert.deepEqual(requests[0].tools.map((t: any) => t.function.name), ["web_search", "present_results"]);
     const done = sseEvents(res.body).find((e) => e.type === "done");
     assert.equal(done.message.content, "done");
   } finally { await app.close(); }
@@ -140,7 +140,7 @@ test("a Home Assistant conversation adds the device block and tools", async () =
     const conv = (await app.inject({ method: "POST", url: "/api/chat/conversations", payload: { homeAssistant: true } })).json();
     await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "lights?" } });
     assert.match(requests[0].messages[0].content, /Devices:\n\(devices\)/);
-    assert.deepEqual(requests[0].tools.map((t: any) => t.function.name), ["web_search", "get_entities"]);
+    assert.deepEqual(requests[0].tools.map((t: any) => t.function.name), ["web_search", "get_entities", "present_results"]);
   } finally { await app.close(); }
 });
 
@@ -229,6 +229,7 @@ test("history excludes empty chats and short drafts, restores qualifying drafts,
     assert.deepEqual(await history(), [], "opening a chat must not add history");
     for (const draftText of ["", "hello", "hello there", "   \n  "]) {
       await app.inject({ method: "PATCH", url, payload: { draftText } });
+      assert.equal((await app.inject({ url })).json().draftText, draftText, "short drafts remain recoverable by conversation ID");
       assert.deepEqual(await history(), []);
     }
     await app.inject({ method: "PATCH", url, payload: { draftText: "Plan my weekend" } });
@@ -510,7 +511,22 @@ for (const regenerate of [false, true]) test(`browser disconnect keeps ${regener
     assert.equal(running.responding, true);
     assert.equal(running.messages.at(-1).content, "First half. ");
     assert.equal((await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: "Duplicate" } })).statusCode, 409);
+    const resumed = await fetch(`${address}/api/chat/conversations/${conv.id}/stream`, { signal: AbortSignal.timeout(5000) });
+    assert.equal(resumed.status, 200);
+    const resumedReader = resumed.body!.getReader();
+    const first = new TextDecoder().decode((await resumedReader.read()).value);
+    assert.match(first, /"type":"snapshot"/);
+    assert.match(first, /First half/);
+    assert.match(first, /"responding":true/);
     release();
+    let remainder = "";
+    for (;;) {
+      const part = await resumedReader.read();
+      if (part.done) break;
+      remainder += new TextDecoder().decode(part.value);
+    }
+    assert.match(remainder, /Second half/);
+    assert.match(remainder, /"type":"done"/);
     let saved: any;
     for (let i = 0; i < 100; i++) {
       saved = (await app.inject({ url: `/api/chat/conversations/${conv.id}` })).json();
@@ -658,5 +674,38 @@ test("invalid edits and failed edited responses preserve the original history", 
     const failed = await app.inject({ method: "POST", url: `/api/chat/conversations/${conv.id}/messages`, payload: { regenerateFrom: 0, content: "Revised", expectedMessageCount: 2 } });
     assert.ok(sseEvents(failed.body).some(e => e.type === "error"));
     assert.deepEqual(ctx.store.get(conv.id).messages, conv.messages);
+  } finally { await app.close(); }
+});
+
+test('subscribing after completion returns one canonical snapshot and closes', async () => {
+  const { app, ctx } = harness();
+  const conv = ctx.store.create('m');
+  conv.messages = [{ role: 'user', content: 'Question' }, { role: 'assistant', content: 'Finished' }];
+  ctx.store.save(conv);
+  try {
+    const result = await app.inject({ url: `/api/chat/conversations/${conv.id}/stream` });
+    assert.equal(result.statusCode, 200);
+    const events = result.body.split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6)));
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, 'snapshot');
+    assert.equal(events[0].conversation.responding, false);
+    assert.deepEqual(events[0].conversation.messages, conv.messages);
+  } finally { await app.close(); }
+});
+
+test('chat persists alternating thinking and reply sections in their original order', async () => {
+  const parts = [
+    { type: 'thinking', text: 'First reasoning.' }, { type: 'content', text: 'An intermediate reply.' },
+    { type: 'thinking', text: 'Second reasoning.' }, { type: 'content', text: 'The final reply.' },
+  ];
+  const client = { chat: { completions: { create: async () => (async function* () {
+    for (const part of parts) yield { choices: [{ delta: { [part.type === 'thinking' ? 'reasoning_content' : 'content']: part.text } }] };
+  })() } } };
+  const { app, ctx } = harness({ resolve: () => ({ client, model: 'm' }) });
+  try {
+    const conv = ctx.store.create('m'); conv.title = 'Existing'; ctx.store.save(conv);
+    const result = await app.inject({ method: 'POST', url: `/api/chat/conversations/${conv.id}/messages`, payload: { content: 'Continue' } });
+    assert.deepEqual(sseEvents(result.body).find(e => e.type === 'done').message.parts, parts);
+    assert.deepEqual(ctx.store.get(conv.id).messages.at(-1).parts, parts);
   } finally { await app.close(); }
 });

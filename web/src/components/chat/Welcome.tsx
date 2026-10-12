@@ -1,3 +1,4 @@
+import MotionButton from "../MotionButton";
 export default function Welcome({ onStart, pending = false }: { onStart?: () => void; pending?: boolean }) {
   return (
     <section className="chat-welcome">
@@ -7,7 +8,7 @@ export default function Welcome({ onStart, pending = false }: { onStart?: () => 
         <path d="M16 19h16M16 25h10" />
       </svg>
       {onStart ? (
-        <button className="primary-button" disabled={pending} onClick={onStart}>{pending ? "Creating…" : "New conversation"} <span aria-hidden="true">↗</span></button>
+        <MotionButton className="primary-button" disabled={pending} onClick={onStart}>{pending ? "Creating…" : "New conversation"} <span aria-hidden="true">↗</span></MotionButton>
       ) : <p>What’s on your mind?</p>}
     </section>
   );

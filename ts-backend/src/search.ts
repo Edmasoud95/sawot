@@ -1,4 +1,4 @@
-import { fetchPublic, publicAddress } from "./publicFetch.js";
+import { fetchPublic, publicAddress, PublicHttpError } from "./publicFetch.js";
 import { Readable } from "node:stream";
 import type { IncomingMessage } from "node:http";
 import { lookup as dnsLookup } from "node:dns/promises";
@@ -28,7 +28,7 @@ export interface SearchClient {
 /** Product metadata only: never send page bodies or diagnostic errors to the
  * voice source list. Build it from tool results, not model-generated citations. */
 export function voiceSearchSources(tool: string, result: any) {
-  if (!result || result.error) return [];
+  if (!result || (result.error && !result.link_only)) return [];
   const pages = tool === "web_search" ? result.results : [result];
   if (!Array.isArray(pages)) return [];
   return pages.slice(0, MAX_RESULTS).flatMap((page) => {
@@ -36,10 +36,12 @@ export function voiceSearchSources(tool: string, result: any) {
       if (typeof page?.url !== "string") return [];
       const url = new URL(page.url);
       if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) return [];
+      url.hash = '';
       return [{
         url: url.href,
         title: typeof page.title === "string" ? page.title.slice(0, 240) : url.hostname,
-        read: tool === "fetch_page" || tool === "find_in_page",
+        read: !result.link_only && (tool === "fetch_page" || tool === "find_in_page"),
+        ...(result.link_only ? { blocked: true } : {}),
         ...faviconMetadata(page.favicon),
       }];
     } catch { return []; }
@@ -175,11 +177,20 @@ export function buildSearchTools(client: SearchClient, deps: SearchToolDeps = {}
   const now = deps.now ?? Date.now;
   type Page = { url: string; title: string; text: string; truncated: boolean };
   const pages = new Map<string, { page: Page; expires: number }>();
+  const forbidden = new Map<string, number>();
+  const pageKey = (raw: string) => { const url = new URL(raw); url.hash = ''; return url.href; };
+  const blockedResult = (error: unknown, raw: string) => {
+    if (!(error instanceof PublicHttpError) || error.status !== 403) throw error;
+    return { error: 'HTTP 403: this page refuses access. Do not retry or use another reader. If relevant, present its link using search details; do not claim to have read the page.',
+      url: pageKey(raw), blocked_url: error.url, status: 403, retryable: false, link_only: true, retryBlocked: error.retryBlocked };
+  };
 
   async function loadPage(raw: string, useCache: boolean): Promise<Page> {
     const requested = new URL(raw);
     requested.hash = "";
-    const key = requested.href;
+    const key = pageKey(requested.href);
+    for (const [url, expires] of forbidden) if (expires <= now()) forbidden.delete(url);
+    if (forbidden.has(key)) throw new PublicHttpError(403, key, true);
     for (const [cachedKey, value] of pages) {
       if (value.expires <= now()) pages.delete(cachedKey);
     }
@@ -198,7 +209,13 @@ export function buildSearchTools(client: SearchClient, deps: SearchToolDeps = {}
       return Object.assign(response.body ? Readable.fromWeb(response.body as any) : Readable.from([]), {
         statusCode: response.status, headers: Object.fromEntries(response.headers),
       }) as IncomingMessage;
-    } } : {}) });
+    } } : {}) }).catch(error => {
+      if (error instanceof PublicHttpError && error.status === 403) {
+        for (const url of [key, pageKey(error.url)]) { forbidden.set(url, now() + PAGE_CACHE_TTL_MS); pages.delete(url); }
+        while (forbidden.size > 256) forbidden.delete(forbidden.keys().next().value!);
+      }
+      throw error;
+    });
     const type = downloaded.mediaType.toLowerCase();
     if (!type.startsWith("text/html") && !type.startsWith("text/plain")) {
       downloaded.close();
@@ -226,15 +243,17 @@ export function buildSearchTools(client: SearchClient, deps: SearchToolDeps = {}
     name: "fetch_page",
     description:
       "Fetch a public web page and return up to 20,000 characters of readable text. " +
-      "Longer text from the download is cached for find_in_page. Call fetch_page again to refresh it.",
+      "Longer text is cached for find_in_page. HTTP 403 is terminal: do not retry; cite the relevant link without claiming to read it.",
     parameters: {
       type: "object",
       properties: { url: { type: "string", description: "Absolute http(s) URL" } },
       required: ["url"],
     },
     async handler(args) {
+      try {
       const page = await loadPage(String(args.url ?? ""), false);
       return { ...page, text: page.text.slice(0, PAGE_MAX_CHARS), truncated: page.truncated || page.text.length > PAGE_MAX_CHARS };
+      } catch (error) { return blockedResult(error, String(args.url ?? '')); }
     },
   };
 
@@ -244,7 +263,7 @@ export function buildSearchTools(client: SearchClient, deps: SearchToolDeps = {}
       "Find a literal phrase in a public page, ignoring case, and return matching passages with context. " +
       "Searches cached text beyond fetch_page's 20,000-character preview; fetches the page if not cached. " +
       "Cache lasts 5 minutes. Downloads are limited to 2 MiB; page_truncated means only part of the page was searched. " +
-      "No regex. Try a shorter phrase when there are no matches.",
+      "No regex. Try a shorter phrase when there are no matches. Do not use this tool to retry a page that returned HTTP 403.",
     parameters: {
       type: "object",
       properties: {
@@ -259,7 +278,9 @@ export function buildSearchTools(client: SearchClient, deps: SearchToolDeps = {}
       if (!query || query.length > 200) return { error: "query must contain 1 to 200 characters" };
       const value = Number(args.count);
       const count = Number.isFinite(value) ? Math.min(10, Math.max(1, Math.round(value))) : 5;
-      const page = await loadPage(String(args.url ?? ""), true);
+      let page: Page;
+      try { page = await loadPage(String(args.url ?? ""), true); }
+      catch (error) { return blockedResult(error, String(args.url ?? '')); }
       const pattern = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
       const matches: { text: string; start: number; end: number }[] = [];
       let total = 0;

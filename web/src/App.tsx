@@ -1,4 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState, useRef } from "react";
+import { useMotionPreferences } from "./hooks/useMotionPreferences";
+import { useArrivalMotion } from "./hooks/useArrivalMotion";
+import { settleFiniteAnimations } from "./lib/motion";
 import Orb from "./components/Orb";
 import Captions from "./components/Captions";
 import VoiceSources from "./components/VoiceSources";
@@ -15,6 +18,17 @@ import { useModeSwipe } from "./hooks/useModeSwipe";
 import { useVoiceStore } from "./store";
 
 export default function App() {
+  const { reduced, hidden } = useMotionPreferences();
+  const environment = `${reduced}:${hidden}`;
+  const previousEnvironment = useRef(environment);
+  useLayoutEffect(() => {
+    document.documentElement.dataset.pageHidden = String(hidden);
+    if (previousEnvironment.current !== environment) {
+      settleFiniteAnimations(document.getAnimations());
+      previousEnvironment.current = environment;
+    }
+  }, [environment, hidden]);
+  useEffect(() => () => { delete document.documentElement.dataset.pageHidden; }, []);
   const live = useVoiceStore(s => s.liveVoiceEnabled && s.liveMode);
   const standard = useVoice(!live);
   const liveSession = useLiveVoice(live);
@@ -25,6 +39,8 @@ export default function App() {
   const hasCaptions = useVoiceStore((s) => !!(s.userCaption || s.assistantCaption));
   const hasSearch = useVoiceStore((s) => !!s.search);
   const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 639px)").matches);
+  const workspace = useRef<HTMLDivElement>(null);
+  useArrivalMotion(workspace, mode, "navigate", mode === "chat" ? 1 : -1);
   const setMode = useVoiceStore((s) => s.setMode);
   const swipe = useModeSwipe(mobile, mode, setMode);
   useEffect(() => {
@@ -34,7 +50,7 @@ export default function App() {
     return () => query.removeEventListener("change", onChange);
   }, []);
   return (
-    <main className="app-shell" data-mode={mode} data-debug={debugEnabled} {...swipe}>
+    <main className="app-shell" data-mode={mode} data-page-hidden={hidden} data-debug={debugEnabled} {...swipe}>
       {mobile && mode !== "chat" && <MobileHeader menu={<HistoryDrawer mobileMenu />} />}
       {!mobile && <header className="app-header">
         <h1 className="brand" aria-label="SAWOT">sawot<span aria-hidden="true">•</span></h1>
@@ -45,6 +61,7 @@ export default function App() {
           <SettingsPanel />
         </div>
       </header>}
+      <div ref={workspace} className="mode-workspace">
       {mode === "chat" ? (
         <ChatView sendControl={sendControl} mobile={mobile} />
       ) : (
@@ -59,6 +76,7 @@ export default function App() {
           <PushToTalk live={live} onTap={tapMicrophone} onEnd={endSession} pictures={pictures} onSendPictures={sendPictures} />
         </div>
       )}
+      </div>
       <DebugBar />
     </main>
   );

@@ -1,3 +1,4 @@
+import { ActivityChevron, ActivityLabel } from "./ToolActivity";
 import {analysisFileUrl,normalizeAnalysisEvent,safeSource} from '../../lib/chatAnalysis';
 import ChatLink from './ChatLink';
 
@@ -35,12 +36,14 @@ export default function AnalysisActivity({conversationId,events}:Props){
   const counts=[downloads&&`${downloads} download${downloads===1?'':'s'}`,runs&&`${runs} code run${runs===1?'':'s'}`].filter(Boolean).join(' · ');
   const current=running[running.length-1];
   // Native disclosure state survives event updates; never force it open on a new call.
-  return <details className="my-3 text-xs text-zinc-400" aria-label="File analysis">
-    <summary className="min-h-11 cursor-pointer py-3 leading-relaxed">
-      <span role="status" className={current?'thinking-shimmer':''}>
-        {current?`${current.tool==='run_python'?'Running code…':'Downloading files…'} · ${items.length} step${items.length===1?'':'s'}`:counts}
+  return <details className="tool-activity my-3" data-error={failures > 0 || undefined} aria-label="File analysis">
+    <summary className="tool-activity-row">
+      <span className="tool-activity-content" role="status">
+        <ActivityLabel kind={current?.tool === 'download_file' || !runs ? 'download' : 'code'}
+          label={current ? (current.tool === 'run_python' ? 'Running code…' : 'Downloading files…') : runs ? 'Code execution' : 'File download'}
+          detail={`${counts}${failures ? ` · ${failures} failed attempt${failures === 1 ? '' : 's'}` : ''}`} busy={!!current}/>
       </span>
-      {failures>0&&<span className="ml-2 text-amber-300/80">{failures} failed attempt{failures===1?'':'s'}</span>}
+      <ActivityChevron/>
     </summary>
     <ol className="ml-1 space-y-3 border-l border-white/10 py-1 pl-4">
       {items.map((e,index)=>{

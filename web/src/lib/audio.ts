@@ -67,7 +67,7 @@ export function stopPlayback() {
   levelBus.value = 0;
 }
 
-export async function playWav(arrayBuffer, onEnded) {
+export async function playWav(arrayBuffer, onEnded, onStarted?: () => void) {
   stopPlayback();
   const epoch = playbackEpoch;
   const context = audioContext();
@@ -95,4 +95,5 @@ export async function playWav(arrayBuffer, onEnded) {
     onEnded();
   };
   source.start();
+  onStarted?.();
 }

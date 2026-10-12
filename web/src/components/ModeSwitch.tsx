@@ -1,3 +1,5 @@
+import { haptics } from "../lib/haptics";
+import MotionButton from "./MotionButton";
 import { useVoiceStore } from "../store";
 
 const OrbIcon = () => (
@@ -28,16 +30,16 @@ export default function ModeSwitch() {
       aria-label="View mode"
     >
       {MODES.map(({ key, label, Icon }) => (
-        <button
+        <MotionButton
           key={key}
-          onClick={() => setMode(key)}
+          onClick={() => { if (mode !== key) { haptics.pulse(); setMode(key); } }}
           aria-label={label}
           title={label}
           aria-pressed={mode === key}
           className={`mode-button ${mode === key ? "is-active" : ""}`}
         >
           <Icon />
-        </button>
+        </MotionButton>
       ))}
     </div>
   );

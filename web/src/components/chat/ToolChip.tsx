@@ -1,37 +1,31 @@
-// Compact pill for a tool invocation. Args render as a short inline summary;
-// the full payload lives in the title attr. Error results tint ember-red.
-const summarize = (args) => {
-  if (!args || typeof args !== "object") return "";
-  const parts = Object.entries(args).map(
-    ([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`
-  );
-  const s = parts.join(" ");
-  return s.length > 42 ? `${s.slice(0, 42)}…` : s;
+import { ActivityChevron, ActivityLabel, type ToolKind } from './ToolActivity';
+
+const tools: Record<string, { kind: ToolKind; label: string }> = {
+  get_entities: { kind: 'home', label: 'Devices checked' },
+  call_service: { kind: 'home', label: 'Home Assistant' },
+  web_search: { kind: 'search', label: 'Web search' },
+  fetch_page: { kind: 'search', label: 'Reading a page' },
+  find_in_page: { kind: 'search', label: 'Searching a page' },
+  run_python: { kind: 'code', label: 'Code execution' },
+  download_file: { kind: 'download', label: 'File download' },
+  search_memories: { kind: 'memory', label: 'Memory recall' },
+  save_memory: { kind: 'memory', label: 'Saving memory' },
 };
 
 export default function ToolChip({ tool }) {
-  const isError = (tool.result || "").includes('"error"');
-  const summary = summarize(tool.args);
-  return (
-    <span
-      title={`${tool.name}(${JSON.stringify(tool.args ?? {})})${
-        tool.result ? `\n→ ${tool.result}` : ""
-      }`}
-      className={`inline-flex max-w-full items-center gap-1.5 rounded-full border py-1 pl-2.5 pr-3 font-mono text-[0.62rem] tracking-[0.04em] ${
-        isError
-          ? "border-aurora-ember/40 bg-aurora-ember/10 text-aurora-ember"
-          : "border-white/10 bg-white/[0.04] text-zinc-400"
-      }`}
-    >
-      <span aria-hidden="true" className={isError ? "" : "text-aurora-teal/70"}>
-        ⚙
-      </span>
-      <span className="shrink-0">{tool.name}</span>
-      {summary && (
-        <span className={`truncate ${isError ? "text-aurora-ember/70" : "text-zinc-600"}`}>
-          {summary}
-        </span>
-      )}
-    </span>
-  );
+  const { kind, label } = tools[tool.name] ?? { kind: 'tool', label: tool.name.replace(/_/g, ' ') };
+  const isError = (typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result ?? '')).includes('"error"');
+  const args = tool.args ?? {};
+  const detail = [args.area, args.entity_id, (typeof args.service === 'string' ? args.service.replace(/_/g, ' ') : args.domain), args.query].filter(value => typeof value === 'string').join(' · ');
+  return <details className="tool-activity" data-error={isError || undefined}>
+    <summary className="tool-activity-row">
+      <ActivityLabel kind={kind} label={label} detail={isError ? 'Failed' : detail}/>
+      <ActivityChevron/>
+    </summary>
+    <div className="tool-activity-body">
+      <p>{tool.name}</p>
+      <pre>{JSON.stringify(args, null, 2)}</pre>
+      {tool.result && <pre>{typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result, null, 2)}</pre>}
+    </div>
+  </details>;
 }

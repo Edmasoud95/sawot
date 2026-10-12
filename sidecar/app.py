@@ -49,10 +49,10 @@ def create_sidecar_app(
             return IdleEngine(factory(model_id), lambda: factory(model_id), model_id=model_id)
         return load
 
-    if stt is not None and stt_factory is not None and openai_stt_model:
+    if stt is not None and not isinstance(stt, IdleEngine) and stt_factory is not None and openai_stt_model:
         factory = stt_factory
         stt = IdleEngine(stt, lambda: factory(openai_stt_model), model_id=openai_stt_model)
-    if tts is not None and tts_factory is not None and tts_model:
+    if tts is not None and not isinstance(tts, IdleEngine) and tts_factory is not None and tts_model:
         tts_loader = tts_factory
         tts = IdleEngine(tts, lambda: tts_loader(tts_model), model_id=tts_model)
     state = EngineState(stt, tts, openai_stt_model, tts_model)

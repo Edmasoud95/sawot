@@ -82,3 +82,28 @@ test('queued pre-resume frames cannot enter a new turn', async () => {
   for(let i=0;i<20;i++) f.frame(.1,10);
   f.recorder.send(); assert.equal(f.sent.length,0); f.recorder.end();
 });
+
+test('microphone permission, capture and cancellation own haptic suppression', async () => {
+  const { haptics } = await import('../src/lib/haptics.ts');
+  const f = fixture();
+  const pulses: number[] = [];
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { hidden: false } });
+  (navigator as any).vibrate = (ms: number) => { pulses.push(ms); return true; };
+  try {
+    const pending = f.recorder.start(); await tick();
+    assert.equal(haptics.pulse(), false, 'permission wait is silent');
+    f.recorder.end();
+    f.grant(); assert.equal(await pending, false);
+    const restart = f.recorder.start(); await tick();
+    f.grant(); await tick(); f.frame(); await restart;
+    assert.equal(haptics.pulse(), false, 'new session remains silent');
+    f.recorder.end();
+    assert.equal(haptics.pulse(), true, 'ending capture releases suppression');
+    assert.deepEqual(pulses.filter(n => n > 0), [8]);
+  } finally {
+    f.recorder.end();
+    if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
+    else delete (globalThis as any).document;
+  }
+});

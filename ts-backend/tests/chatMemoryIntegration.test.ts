@@ -145,7 +145,7 @@ test('ten saved core facts are not injected into a greeting; targeted search ret
   assert.equal(h.requests.length, 1);
   assert.ok(!JSON.stringify(h.requests[0].messages).includes('synthetic-device'));
   assert.ok(!response.some(e => e.type === 'memory'));
-  assert.match(h.requests[0].messages[0].content, /search_memories before answering/);
+  assert.match(h.requests[0].messages[0].content, /Use search_memories for recall/);
   const scope = await h.memory.beginTurn({ conversationId: 'search', turnId: 'search', sourceMessageId: 'search', text: 'What is device 7?' });
   assert.equal((await h.memory.search(scope, 'equipment')).memories.length, 3, 'broad searches remain bounded');
   assert.equal((await h.memory.search(scope, '')).memories.length, 3, 'overview does not dump the collection');

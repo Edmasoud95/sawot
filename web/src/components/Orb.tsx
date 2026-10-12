@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useMotionPreferences } from "../hooks/useMotionPreferences";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { useVoiceStore, levelBus } from "../store";
@@ -20,13 +21,7 @@ const STATES = {
 const INK_RESOLUTION = { min: 256, max: 512 };
 const POINT_SCALE = 20 / 256;
 
-const motionQuery = typeof window === "undefined" ? null : window.matchMedia("(prefers-reduced-motion: reduce)");
-const subscribeMotion = (callback: () => void) => {
-  motionQuery?.addEventListener("change", callback);
-  return () => motionQuery?.removeEventListener("change", callback);
-};
-
-function Ink({ reducedMotion }: { reducedMotion: boolean }) {
+function Ink({ reducedMotion, hidden }: { reducedMotion: boolean; hidden: boolean }) {
   const material = useRef<THREE.ShaderMaterial>(null);
   const invalidate = useThree((s) => s.invalidate);
   const status = useVoiceStore((s) => s.status);
@@ -91,7 +86,7 @@ function Ink({ reducedMotion }: { reducedMotion: boolean }) {
   }), [fluid]);
 
   // A static canvas still needs one frame when state or motion preference changes.
-  useEffect(() => { invalidate(); }, [target, reducedMotion, symbol, expression?.text, expression?.strokes, expression?.fills, invalidate]);
+  useEffect(() => { invalidate(); }, [target, reducedMotion, hidden, symbol, expression?.text, expression?.strokes, expression?.fills, invalidate]);
   useEffect(() => {
     if (!expression) return;
     const timer = window.setTimeout(() => {
@@ -101,6 +96,7 @@ function Ink({ reducedMotion }: { reducedMotion: boolean }) {
   }, [expression]);
 
   useFrame(({ gl }, delta) => {
+    if (hidden) return;
     // R3F copies uniform wrappers into the material; update the live values.
     const live = material.current?.uniforms;
     if (!live) return;
@@ -154,15 +150,15 @@ function Ink({ reducedMotion }: { reducedMotion: boolean }) {
 }
 
 export default function Orb() {
-  const reducedMotion = useSyncExternalStore(subscribeMotion, () => motionQuery?.matches ?? false, () => false);
+  const { reduced: reducedMotion, hidden } = useMotionPreferences();
   return (
     <Canvas
       gl={{ antialias: false, alpha: true, powerPreference: "low-power" }}
       dpr={[1, 1.5]}
-      frameloop={reducedMotion ? "demand" : "always"}
+      frameloop={reducedMotion || hidden ? "demand" : "always"}
       fallback={<div className="orb-fallback" />}
     >
-      <Ink reducedMotion={reducedMotion} />
+      <Ink reducedMotion={reducedMotion} hidden={hidden} />
     </Canvas>
   );
 }

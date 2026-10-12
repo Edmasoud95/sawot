@@ -58,3 +58,24 @@ test('pictures are bound to their voice turn and never carried into the next one
   client.close();
   assert.throws(() => client.sendImages(['abcdef123456']), /closed/);
 });
+
+test('control acknowledgements correlate requests; timeout, disconnect and late replies are safe', async () => {
+  const events: any[] = [];
+  const client = new VoiceSocket({ onOpen() {}, onClose() {}, onEvent: (m:any)=>events.push(m), onAudio() {} });
+  const wire = Socket.instances.at(-1)!;
+  const message = {type:'control', entity_id:'light.test', domain:'light', service:'turn_on'};
+  const first = client.requestControl(message);
+  const request = JSON.parse(wire.sent.at(-1));
+  wire.event({type:'control_result', requestId:'wrong', ok:true, card:{entity_id:'light.test'}});
+  wire.event({type:'control_result', requestId:request.requestId, ok:true, card:{entity_id:'light.test',state:'on',attrs:{}}});
+  assert.equal((await first).state,'on');
+  const expired = client.requestControl(message, 5);
+  const expiredId = JSON.parse(wire.sent.at(-1)).requestId;
+  await assert.rejects(expired,/confirm|timed out/i);
+  wire.event({type:'control_result',requestId:expiredId,ok:true,card:{entity_id:'light.test'}});
+  assert.equal(events.length,0);
+  const interrupted = client.requestControl(message);
+  client.close();
+  await assert.rejects(interrupted,/connection/i);
+  await assert.rejects(client.requestControl(message),/connection/i);
+});
