@@ -7,11 +7,13 @@ Type=simple
 User=root
 Group=sawot-runner
 WorkingDirectory=/opt/sawot-sandbox
+ExecStartPre=/usr/bin/python3 -m sandbox.runner.verify --if-needed
 ExecStart=/usr/bin/python3 -m sandbox.runner
 RuntimeDirectory=sawot-runner
 RuntimeDirectoryMode=0750
 UMask=0007
 Restart=on-failure
+TimeoutStartSec=120
 TimeoutStopSec=40
 [Install]
 WantedBy=multi-user.target

@@ -12,9 +12,23 @@ cd "$(dirname "$0")"
 SIDECAR_PID=$!
 
 cleanup() {
+  [ -z "${RUNNER_PID:-}" ] || kill "$RUNNER_PID" 2>/dev/null || true
+  [ -z "${BACKEND_PID:-}" ] || kill "$BACKEND_PID" 2>/dev/null || true
   kill "$SIDECAR_PID" 2>/dev/null || true
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-# Run the TypeScript backend in the foreground.
-SAWOT_SIDECAR_PID="$SIDECAR_PID" node ts-backend/dist/index.js
+# Launch the app first. The runner helper waits for its health endpoint.
+SAWOT_SIDECAR_PID="$SIDECAR_PID" node ts-backend/dist/index.js &
+BACKEND_PID=$!
+
+# Preserve terminal access for an optional sudo prompt without blocking the app.
+if [ -t 0 ]; then
+  node scripts/start-runner.mjs --wait-for-app "$BACKEND_PID" < /dev/tty &
+else
+  node scripts/start-runner.mjs --wait-for-app "$BACKEND_PID" &
+fi
+RUNNER_PID=$!
+wait "$BACKEND_PID"

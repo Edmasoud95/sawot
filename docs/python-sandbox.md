@@ -76,7 +76,9 @@ not performed by SAWOT.
    it does not execute their Python source on the host. Any missing prerequisite,
    failed test, or skipped live test rejects verification. It takes at least
    30 seconds because the independent watchdog is tested with an infinite loop.
-6. Only after verification passes, start `sawot-runner.service`. A root-owned
+6. Only after verification passes, start `sawot-runner.service`. The unit runs
+   `sandbox.runner.verify --if-needed` before starting the broker: it reuses a
+   valid receipt or runs all live checks if verification is stale. A root-owned
    verification receipt is tied to the code, image, runsc hash and host boot.
    Re-run verification after upgrades or reboot. No override enables a failed
    runtime, and no ordinary-container/host-Python fallback exists.
@@ -86,6 +88,34 @@ not performed by SAWOT.
    after building/recreating the SAWOT image with this feature. The overlay mounts
    only the broker socket directory. Match group permissions if running SAWOT as
    a custom non-root UID.
+
+For an installed native runner, `./run.sh` now starts the configured local service
+automatically in the background after the app becomes reachable. The interface
+is usable during verification; an open Chat tools dialog refreshes availability
+every three seconds and shows Available when the runner is ready, without a
+page reload. It requests sudo when the service needs to
+start; after reboot or sandbox updates, isolation checks take about 45 seconds.
+An already ready runner needs neither sudo nor another live test run. With no
+runner socket configured, startup is unchanged. Custom sockets are checked but
+their services must be started separately. If startup or verification fails,
+SAWOT continues with code execution unavailable. The runner remains a separate
+systemd service when SAWOT exits.
+
+Existing installations must update the root-owned `sandbox/runner/verify.py` and
+`sandbox/systemd/sawot-runner.service` under `/opt/sawot-sandbox`, install the new
+service unit in `/etc/systemd/system/`, and run `sudo systemctl daemon-reload`.
+Do this while the broker is stopped and no jobs are outstanding. The changed
+files invalidate the old receipt, so the next service start verifies isolation.
+
+From the repository root, with the broker stopped and jobs released:
+
+```sh
+sudo install -o root -g root -m 0644 sandbox/runner/verify.py /opt/sawot-sandbox/sandbox/runner/verify.py
+sudo install -o root -g root -m 0644 sandbox/systemd/sawot-runner.service /opt/sawot-sandbox/sandbox/systemd/sawot-runner.service
+sudo install -o root -g root -m 0644 sandbox/systemd/sawot-runner.service /etc/systemd/system/sawot-runner.service
+sudo systemctl daemon-reload
+./run.sh
+```
 
 The broker socket is a powerful local capability. Do not expose it over TCP or
 mount it into generated-code containers. The broker does not listen on a network

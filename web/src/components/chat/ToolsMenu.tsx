@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { openHomeAssistantSettings } from "../../lib/settingsNavigation";
 import { useChatStore } from "../../chatStore";
 import { API_BASE } from "../../lib/config";
+import { pollToolAvailability } from "../../lib/toolAvailability";
 
 const TOOLS = [
   { key: "homeAssistant", label: "Allow home control" },
@@ -38,19 +39,14 @@ export default function ToolsMenu() {
 
   useEffect(() => {
     if (!open) return;
-    const controller = new AbortController();
     setHaConfigured(null);
     setPythonReady(null);
     setAvailabilityError(false);
-    fetch(`${API_BASE}/api/chat/tools`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
-      .then(async response => {
-        if (!response.ok) throw new Error();
-        const body = await response.json();
-        if (typeof body.homeAssistant !== "boolean") throw new Error();
-        if (!controller.signal.aborted) { setHaConfigured(body.homeAssistant); setPythonReady(body.python === true); }
-      })
-      .catch(() => { if (!controller.signal.aborted) setAvailabilityError(true); });
-    return () => controller.abort();
+    return pollToolAvailability({
+      url: `${API_BASE}/api/chat/tools`,
+      update: body => { setHaConfigured(body.homeAssistant); setPythonReady(body.python); setAvailabilityError(false); },
+      error: () => setAvailabilityError(true),
+    });
   }, [open, retry]);
 
   const toggle = async (key: "homeAssistant" | "webSearch" | "python", enabled: boolean) => {
