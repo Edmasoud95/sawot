@@ -887,6 +887,10 @@ button.ecard-summary:hover { color: var(--color-zinc-100); background: #ffffff03
 .chat-link-preview strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; font-weight: 500; }
 .chat-link-preview-host { color: #a1a1aa; font-size: .75rem; }
 .chat-link-preview-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #71717a; font-size: .7rem; }
+.chat-link-preview-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.chat-link-preview-actions a, .chat-link-preview-actions button { display: inline-flex; align-items: center; min-height: 44px; padding: 0 10px; border-radius: 8px; }
+.chat-link-preview-actions a { color: #b5c9ee; }
+.chat-link-preview-actions button { color: #a1a1aa; }
 .chat-link-preview { max-height: calc(100vh - 24px); overflow-y: auto; }
 .chat-link-thumbnail-frame { position: relative; flex-shrink: 0; height: 150px; overflow: hidden; border-radius: 7px; margin-bottom: 3px; background: #ffffff08; }
 .chat-link-thumbnail-frame[data-state="loading"]::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, #ffffff09, transparent); transform: translateX(-100%); animation: chat-thumbnail-shimmer 1.5s ease-in-out infinite; }

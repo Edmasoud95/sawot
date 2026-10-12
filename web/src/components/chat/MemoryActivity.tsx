@@ -5,6 +5,7 @@ import { useDialogFocus } from '../../hooks/useDialogFocus';
 import { useChatStore } from '../../chatStore';
 import { API_BASE } from '../../lib/config';
 import { invalidateMemory, memoryRequest, type MemoryEvent, type MemoryFact } from '../../lib/memoryApi';
+import { combinedMemoryFacts, groupMemoryEvents } from '../../lib/memoryActivity';
 import { BUTTON_CLS, FIELD_CLS, Toggle } from '../settings/fields';
 export function MemoryEditor({
   fact,
@@ -95,10 +96,13 @@ export function MemoryDialog({
   </div>, document.body);
 }
 function ActivityButton({
-  event
+  events
 }: {
-  event: MemoryEvent;
+  events: MemoryEvent[];
 }) {
+  const event = events[0];
+  const memories = combinedMemoryFacts(events);
+  const eventIds = JSON.stringify([...new Set(events.map(event => event.id))]);
   const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [details, setDetails] = useState<MemoryEvent | null>(null);
@@ -115,12 +119,12 @@ function ActivityButton({
     setDetails(null);
     setError('');
     try {
-      const next = await memoryRequest<MemoryEvent>(`/activity/${encodeURIComponent(event.id)}`);
-      if (request === generation.current) setDetails(next);
+      const next = await Promise.all((JSON.parse(eventIds) as string[]).map(id => memoryRequest<MemoryEvent>(`/activity/${encodeURIComponent(id)}`)));
+      if (request === generation.current) setDetails({...next[0], memories: combinedMemoryFacts(next)});
     } catch {
       if (request === generation.current) setError('This memory activity is unavailable.');
     }
-  }, [event.id]);
+  }, [eventIds]);
   useEffect(() => {
     if (!open) return;
     let live = true;
@@ -139,7 +143,7 @@ function ActivityButton({
       window.removeEventListener('sawot-memory-change', load);
     };
   }, [open, refresh]);
-  const label = event.kind === 'recalled' ? `Memories recalled · ${event.memories.length}` : `Memory ${event.kind}`;
+  const label = event.kind === 'recalled' ? `Memories recalled · ${memories.length}` : `Memory ${event.kind}`;
   async function source(fact: MemoryFact) {
     try {
       const response = await fetch(`${API_BASE}/api/chat/conversations/${encodeURIComponent(fact.sourceConversationId)}`, {
@@ -153,7 +157,7 @@ function ActivityButton({
   }
   return <>
     <button ref={trigger} type="button" onClick={() => setOpen(true)} className="tool-activity-row">
-      <ActivityLabel kind="memory" label={event.kind === 'recalled' ? 'Memories recalled' : `Memory ${event.kind}`} detail={event.kind === 'recalled' ? String(event.memories.length) : undefined}/>
+      <ActivityLabel kind="memory" label={event.kind === 'recalled' ? 'Memories recalled' : `Memory ${event.kind}`} detail={event.kind === 'recalled' ? String(memories.length) : undefined}/>
       <ActivityChevron/>
     </button>
     {open && <MemoryDialog title={label} trigger={trigger} onClose={close}>
@@ -165,7 +169,7 @@ function ActivityButton({
       </p>}
       {!details && !error && <p role="status">Loading…</p>}
       <div className="space-y-4">
-        {details?.memories.map(m => <div key={m.id} className="space-y-2 border-t border-white/10 pt-3">
+        {details?.memories.map(m => <div key={JSON.stringify([m.id, m.revision])} className="space-y-2 border-t border-white/10 pt-3">
           {m.status !== 'active' || !m.current ? <p className="text-sm text-zinc-400">Memory deleted or unavailable.</p> : <>
             <p className="text-xs text-zinc-500">Saved {new Date(m.current.created).toLocaleDateString()}</p>
             <MemoryEditor fact={m.current} onChange={() => void refresh()} />
@@ -187,6 +191,6 @@ export default function MemoryActivity({
   events: MemoryEvent[];
 }) {
   return events?.length ? <div className="tool-activity my-3 flex flex-col items-start" aria-label="Memory activity">
-    {events.map(e => <ActivityButton key={e.id} event={e} />)}
+    {groupMemoryEvents(events).map(group => <ActivityButton key={group[0].id} events={group} />)}
   </div> : null;
 }

@@ -58,12 +58,13 @@ const SEARCH =
   "For product recommendations or news roundups, call present_results with kind products or news and only the " +
   "short IDs (for example r1, r3) of relevant results you chose to present. The app builds the cards from retrieved data. " +
   "For products, choose individual product or offer pages, never search/category pages (page_kind listing). " +
-  "A product mentioned in a listing snippet is not the linked product. Prefer relevant page_kind product IDs; " +
+  "For shopping, call web_search with kind products from the first search. For Allegro include site:allegro.pl/oferta; the tool can also search /produkt/. " +
+  "A product mentioned in a listing snippet is not the linked product. Choose only page_kind product IDs; unknown URLs are not confirmed product pages. " +
   "if none exist, search for direct product pages or say that none were found. " +
   "Do not write product_cards_v1, card JSON, HTML or layout markup. Write your explanation in ordinary prose; " +
   "do not repeat the selected cards as a separate list. Ordinary citations remain markdown links. " +
   "When a page returns HTTP 403 or link_only, stop trying to read it: no retries, alternate readers, or access workarounds. " +
-  "If relevant, select it or cite its URL using available search details; the app displays a plain link. " +
+  "If relevant, select it or cite its URL using available search details; the app may show a search-derived thumbnail even when the page is blocked. " +
   "Explain that the page could not be read and never claim to verify its contents, price or availability.";
 
 export function buildChatSystemPrompt(o: ChatPromptOptions): string {

@@ -53,6 +53,14 @@
 
 ## General-purpose chat
 
+- **Link previews:** on touch devices, the first tap on a chat citation or source
+  opens its preview. Use **Open link** inside the preview to open a new tab, or
+  dismiss it with **Close**, Escape, or a tap outside. Desktop links retain hover
+  previews and normal click navigation. Product/article cards already show their
+  preview and continue opening directly.
+- **Memory activity:** consecutive recall events in a reply share one count and
+  details dialog. Repeated memory versions are deduplicated; saves, updates and
+  deletions separate the recall groups.
 - **Selected result cards:** after searching, the assistant selects short result IDs
   with `present_results`. The app supplies the retrieved titles, links and thumbnails;
   new replies do not depend on model-written card JSON or special Markdown. Only
@@ -61,13 +69,32 @@
   in a horizontal row with touch scrolling, arrow controls and keyboard navigation.
   Unknown prices are omitted. Selections survive reloads and remain in model context
   for follow-up questions. Images load near the viewport through the bounded thumbnail
-  service. Older saved card markup remains readable.
+  service. Search-provided thumbnail URLs are saved with their exact source, and
+  images can load even when the product page blocks fetching. Downloaded raster
+  images are cached in `data/cache/thumbnails/` under the configured data directory:
+  at most 100 MiB, seven-day expiry from download, and least-recently-used eviction.
+  Cleanup runs at startup, hourly and on writes; each image is limited to 2 MiB.
+  The cache is disposable and shared between chats; deleting a chat does not purge
+  shared images immediately. Expired/evicted images are fetched again when visible,
+  with a placeholder if the upstream image is gone. Image bytes are never stored
+  in conversation JSON or sent to the model. Older saved card markup remains readable.
+- **Direct product search:** shopping searches use `web_search` with `kind: products`.
+  Only recognized direct product/offer URLs are returned; search/category and unknown
+  routes are excluded. Allegro queries default to product search unless explicitly
+  marked `kind: general`. They target `/oferta/`, with one `/produkt/`
+  follow-up if needed. Other shops get one targeted direct-product follow-up.
+  Product selections, shopping fallback links and rendered shopping citations must
+  match retrieved direct products. If no direct links are found, the assistant is
+  instructed to say so. This is search-index data, not a complete live catalogue;
+  prices and availability remain unverified unless the page can be read.
 - **Blocked pages:** HTTP 403 from page-reading tools produces a non-retryable,
   link-only result. Both page readers share a five-minute, per-URL cooldown, including
   known redirect targets. Chat also prevents retrying that page through the file
   downloader during the turn. A repeated attempt ends tool use and requests a final
   answer; if the model still asks for tools, the app supplies a plain-link explanation.
-  Selected blocked pages stay plain links and do not request thumbnail previews.
+  Selected blocked pages with a search thumbnail can still show a card using that
+  image. Product cards identify unverified search details. Blocked pages without
+  a search thumbnail stay plain links and do not request thumbnail previews.
 
 - **Personal memory:** chat, Voice, and Live voice can save personal facts and explicit “remember this”
   requests, then recall them across conversations and model changes. The assistant

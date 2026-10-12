@@ -5,10 +5,13 @@ export interface VoiceSource {
   title: string;
   read: boolean;
   favicon?: string;
+  thumbnail?: string;
+  pageKind?: 'product' | 'listing' | 'unknown';
 }
 
 export interface VoiceSearch {
   presentationVersion?: 1;
+  productSearch?: boolean;
   presentations?: { kind: 'products' | 'news'; ids: string[] }[];
   tool: "web_search" | "fetch_page" | "find_in_page";
   phase: "start" | "complete" | "error";
@@ -18,7 +21,7 @@ export interface VoiceSearch {
 
 function safeFavicon(value: unknown): string | undefined {
   try {
-    if (typeof value !== "string") return;
+    if (typeof value !== "string" || value.length > 4096) return;
     const url = new URL(value);
     if (url.origin === "https://imgs.search.brave.com" && !url.username && !url.password) return url.href;
   } catch { /* Invalid images fall back to a globe. */ }
@@ -48,6 +51,8 @@ export function updateVoiceSearch(current: VoiceSearch | null, event: VoiceSearc
         if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) continue;
         const previous = sources.get(url.href);
         const favicon = safeFavicon(source.favicon) ?? previous?.favicon;
+        const thumbnail = safeFavicon(source.thumbnail) ?? previous?.thumbnail;
+        const pageKind = ['product', 'listing', 'unknown'].includes(source.pageKind) ? source.pageKind : previous?.pageKind;
         if (!previous && sources.size >= 40) continue;
         sources.set(url.href, {
           url: url.href,
@@ -56,6 +61,8 @@ export function updateVoiceSearch(current: VoiceSearch | null, event: VoiceSearc
           ...((typeof source.id === 'string' && /^r(?:[1-9]|[1-3]\d|40)$/.test(source.id)) ? {id: source.id} : previous?.id ? {id: previous.id} : {}),
           ...((source.blocked === true || previous?.blocked) ? {blocked: true, read: false} : {}),
           ...(favicon ? { favicon } : {}),
+          ...(thumbnail ? { thumbnail } : {}),
+          ...(pageKind ? { pageKind } : {}),
         });
       } catch { /* malformed links cannot become clickable sources */ }
     }
@@ -73,5 +80,6 @@ export function updateVoiceSearch(current: VoiceSearch | null, event: VoiceSearc
     presentations.push({kind: group.kind, ids: [...new Set(group.ids)]});
   }
   return { tool: event.tool, phase: event.phase, sources: [...sources.values()], ...(query ? { query } : {}),
+    ...(event.productSearch || current?.productSearch ? {productSearch: true} : {}),
     ...(deterministic ? {presentationVersion: 1, presentations} : {}) };
 }

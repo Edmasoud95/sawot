@@ -3,6 +3,7 @@
 export function searchPageKind(raw: string): 'product' | 'listing' | 'unknown' {
   try {
     const url = new URL(raw);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return 'unknown';
     const host = url.hostname.toLowerCase().replace(/^www\./, '');
     const path = decodeURIComponent(url.pathname).toLowerCase();
     if (host === 'allegro.pl' || host.endsWith('.allegro.pl')) {
@@ -10,6 +11,8 @@ export function searchPageKind(raw: string): 'product' | 'listing' | 'unknown' {
       if (path === '/' || /^\/(listing|kategoria|uzytkownik)(\/|$)/.test(path)) return 'listing';
     }
     // Detail routes take precedence over optional search/tracking parameters.
+    if (/(^|\.)amazon\.(?:com|pl|de|fr|it|es|nl|se|be|ie|ca|in|co\.uk|co\.jp|com\.au|com\.br|com\.mx|com\.tr|sg|ae|sa|eg|co\.za)$/.test(host) && /\/(?:dp|gp\/product)\/[a-z0-9]{10}(?:\/|$)/.test(path)) return 'product';
+    if (/(^|\.)ebay\.(?:com|pl|de|fr|it|es|nl|be|ie|ca|at|ch|co\.uk|com\.au)$/.test(host) && /^\/itm\/(?:[^/]+\/)?\d+(?:\/|$)/.test(path)) return 'product';
     if (/^\/products?\/[^/]+/.test(path) || /^\/collections\/[^/]+\/products\/[^/]+/.test(path)) return 'product';
     if (/^\/(search|search-results|listing|category|categories)(\/|$)/.test(path) ||
         /^\/collections\/[^/]+\/?$/.test(path) ||

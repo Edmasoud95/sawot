@@ -15,6 +15,10 @@ test('URL classification distinguishes listings from individual products without
     'https://store.example/products/dp-hdmi?q=tracking': 'product',
     'https://store.example/adapter-123': 'unknown',
     'https://allegro.pl.other.example/oferta/adapter-123': 'unknown',
+    'https://www.amazon.pl/dp/B0DBHK4XT5': 'product',
+    'https://www.ebay.com/itm/123456789012': 'product',
+    'https://amazon.evil.example/dp/B0DBHK4XT5': 'unknown',
+    'https://ebay.evil.example/itm/123456789012': 'unknown',
     'not a URL': 'unknown',
   };
   for (const [url,kind] of Object.entries(cases)) assert.equal(searchPageKind(url),kind,url);

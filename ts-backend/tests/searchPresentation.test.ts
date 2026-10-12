@@ -4,7 +4,7 @@ import { runChat, toOpenAiMessages } from '../src/chat.js';
 import { buildSearchTools } from '../src/search.js';
 import { executeTool } from '../src/tools.js';
 import Fastify from 'fastify';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChatStore } from '../src/chat.js';
@@ -33,7 +33,41 @@ function model(turns: any[], observed: any[] = []) {
 }
 let callId=0;
 const call = (name:string,args:any) => ({tool_calls:[{index:0,id:String(++callId),function:{name,arguments:JSON.stringify(args)}}]});
-const search = {name:'web_search',description:'Search',parameters:{},handler:async()=>({results:[{title:'First product',url:'https://shop.example/one'},{title:'Second product',url:'https://shop.example/two'}]})};
+const search = {name:'web_search',description:'Search',parameters:{},handler:async()=>({results:[{title:'First product',url:'https://shop.example/products/one'},{title:'Second product',url:'https://shop.example/products/two',thumbnail:'https://imgs.search.brave.com/two'}]})};
+test('older saved direct-product selections are classified on reload without rewriting history', () => {
+  const dir=mkdtempSync(join(tmpdir(),'sawot-old-products-'));
+  try {
+    const store=new ChatStore(dir);
+    const conv=store.create('small');
+    conv.messages=[{role:'assistant',content:'Saved answer',search:{presentationVersion:1,presentations:[{kind:'products',ids:['r1']}],sources:[{id:'r1',url:'https://allegro.pl/oferta/console-123',title:'Console',read:false}]}}];
+    store.save(conv);
+    const original=readFileSync(join(dir,conv.id+'.json'),'utf8');
+    const source=new ChatStore(dir).get(conv.id).messages[0].search.sources[0];
+    assert.equal(source.pageKind,'product');
+    assert.equal(readFileSync(join(dir,conv.id+'.json'),'utf8'),original);
+  } finally {rmSync(dir,{recursive:true,force:true});}
+});
+test('unknown URLs cannot be selected as products', async () => {
+  const observed:any[]=[];
+  const events:any[]=[];
+  for await(const event of runChat(model([call('web_search',{}),call('present_results',{kind:'products',ids:['r1']}),{content:'No direct offer found.'}],observed),'small',[{...search,handler:async()=>({results:[{title:'Unknown',url:'https://shop.example/unknown'}]})}],'',[]))events.push(event);
+  assert.deepEqual(JSON.parse(observed[2].messages.at(-1).content).rejected_ids,['r1']);
+  assert.ok(events.filter(e=>e[0]==='search').every(e=>!e[1].presentations.length));
+});
+
+test('product-search fallback excludes listings even without present_results', async () => {
+  const catalog={...search,handler:async()=>({productSearch:true,results:[
+    {title:'Search page',url:'https://allegro.pl/listing?string=console'},
+    {title:'Console',url:'https://allegro.pl/oferta/console-123',thumbnail:'https://imgs.search.brave.com/console'},
+  ]})};
+  const invalid={content:'<tool_call><function=web_search>invalid</function></tool_call>'};
+  const events:any[]=[];
+  for await(const event of runChat(model([call('web_search',{kind:'products'}),invalid,invalid]),'small',[catalog],'',[]))events.push(event);
+  assert.doesNotMatch(events.find(e=>e[0]==='final')[1].content,/listing\?/);
+  const state=events.filter(e=>e[0]==='search').at(-1)[1];
+  assert.equal(state.productSearch,true);
+  assert.equal(state.sources[1].thumbnail,'https://imgs.search.brave.com/console');
+});
 test('only selected IDs become cards and IDs remain stable across searches',async()=>{
   const observed:any[]=[];
   const client=model([call('web_search',{query:'headphones'}),call('web_search',{query:'headphones reviews'}),call('present_results',{kind:'products',ids:['r2']}),{content:'The second option fits your needs.'}],observed);
@@ -103,9 +137,9 @@ test('a cached 403 on the first read of a new turn still allows selecting releva
 
 test('selected cards and blocked links survive chat completion and disk reload', async () => {
   const dir=mkdtempSync(join(tmpdir(),'sawot-selected-'));const app=Fastify();
-  const client=model([call('web_search',{query:'products'}),call('present_results',{kind:'products',ids:['r2']}),call('fetch_page',{url:'https://shop.example/two'}),{content:'This one fits, but the page could not be read.'}]);
+  const client=model([call('web_search',{query:'products'}),call('present_results',{kind:'products',ids:['r2']}),call('fetch_page',{url:'https://shop.example/products/two'}),{content:'This one fits, but the page could not be read.'}]);
   const store=new ChatStore(dir);
-  registerChatRoutes(app,{store,resolve:()=>({client,model:'small'}),ha:null,haTools:[],uploadDir:dir,name:'Assistant',getEntitySummary:()=>'',getChatInstructions:()=>'',getDefaultModel:()=> 'small',searchTools:[search,{name:'fetch_page',description:'',parameters:{},handler:async()=>({error:'HTTP 403',url:'https://shop.example/two',link_only:true,status:403,retryable:false})}]});
+  registerChatRoutes(app,{store,resolve:()=>({client,model:'small'}),ha:null,haTools:[],uploadDir:dir,name:'Assistant',getEntitySummary:()=>'',getChatInstructions:()=>'',getDefaultModel:()=> 'small',searchTools:[search,{name:'fetch_page',description:'',parameters:{},handler:async()=>({error:'HTTP 403',url:'https://shop.example/products/two',link_only:true,status:403,retryable:false})}]});
   try {
     const id=(await app.inject({method:'POST',url:'/api/chat/conversations',payload:{}})).json().id;
     const response=await app.inject({method:'POST',url:`/api/chat/conversations/${id}/messages`,payload:{content:'Find products'}});
@@ -114,10 +148,13 @@ test('selected cards and blocked links survive chat completion and disk reload',
     assert.deepEqual(done.search.presentations,[{kind:'products',ids:['r2']}]);
     assert.deepEqual(new ChatStore(dir).get(id).messages.at(-1).search,done.search);
     assert.equal(done.search.sources[1].blocked,true);
+    assert.equal(done.search.sources[1].thumbnail,'https://imgs.search.brave.com/two');
+    assert.equal(done.search.sources[1].pageKind,'product');
     assert.equal(done.presentationVersion,1);
     const history=toOpenAiMessages([done],dir)[0].content;
-    assert.match(history,/Second product/);assert.match(history,/https:\/\/shop.example\/two/);
+    assert.match(history,/Second product/);assert.match(history,/https:\/\/shop.example\/products\/two/);
     assert.doesNotMatch(history,/First product/);
+    assert.doesNotMatch(history,/imgs\.search\.brave/);
   } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -126,15 +163,15 @@ for (const ending of ['markup', 'structured', 'empty'] as const) {
     let downloads = 0;
     const observed: any[] = [];
     const tools = buildSearchTools({search: async () => [
-      {title:'First product',url:'https://shop.example/one',description:''},
-      {title:'Second product',url:'https://shop.example/two',description:''},
+      {title:'First product',url:'https://shop.example/products/one',description:''},
+      {title:'Second product',url:'https://shop.example/products/two',description:''},
     ]}, {lookup, fetchFn: async () => { downloads++; return new Response('', {status:403}); }});
     const invalid = {content:'<tool_call><function=web_search>more products</function></tool_call>'};
     const client = model([
       call('web_search',{query:'adapter'}),
-      call('fetch_page',{url:'https://shop.example/one'}),
+      call('fetch_page',{url:'https://shop.example/products/one'}),
       call('web_search',{query:'direct adapter links'}),
-      call('fetch_page',{url:'https://shop.example/two'}),
+      call('fetch_page',{url:'https://shop.example/products/two'}),
       call('web_search',{query:'more adapters'}),
       ...(ending === 'markup' ? [invalid, invalid] : ending === 'structured' ? [call('web_search',{query:'must not execute'})] : [{content:''}]),
     ], observed);
@@ -144,8 +181,8 @@ for (const ending of ['markup', 'structured', 'empty'] as const) {
     assert.equal(observed.length,ending === 'markup' ? 7 : 6);
     assert.equal(observed.at(-1).tools,undefined);
     const final=events.find(e=>e[0]==='final')[1].content;
-    assert.match(final,/https:\/\/shop.example\/one/);
-    assert.match(final,/https:\/\/shop.example\/two/);
+    assert.match(final,/https:\/\/shop.example\/products\/one/);
+    assert.match(final,/https:\/\/shop.example\/products\/two/);
     assert.match(final,/could not read/i);
     assert.doesNotMatch(final,/<tool_call>|<function=/);
     assert.equal(events.filter(e=>e[0]==='content').map(e=>e[1]).join('').trim(),final);
@@ -159,8 +196,8 @@ test('failed markup recovery before the limit preserves selected results and doe
   const events:any[]=[];
   for await(const event of runChat(model([call('web_search',{}),call('present_results',{kind:'products',ids:['r2']}),invalid,invalid]),'small',[search],'',[]))events.push(event);
   const final=events.find(e=>e[0]==='final')[1].content;
-  assert.match(final,/https:\/\/shop.example\/two/);
-  assert.doesNotMatch(final,/https:\/\/shop.example\/one/);
+  assert.match(final,/https:\/\/shop.example\/products\/two/);
+  assert.doesNotMatch(final,/https:\/\/shop.example\/products\/one/);
   assert.deepEqual(events.filter(e=>e[0]==='search').at(-1)[1].presentations,[{kind:'products',ids:['r2']}]);
 });
 
@@ -176,7 +213,7 @@ test('link fallback is streamed and saved as a completed reply without an error'
     const events=response.body.split('\n').filter(line=>line.startsWith('data: ')).map(line=>JSON.parse(line.slice(6)));
     assert.equal(events.some(event=>event.type==='error'),false);
     const done=events.find(event=>event.type==='done').message;
-    assert.match(done.content,/https:\/\/shop.example\/one/);
+    assert.match(done.content,/https:\/\/shop.example\/products\/one/);
     assert.doesNotMatch(done.content,/<tool_call>|<function=/);
     const saved=new ChatStore(dir).get(conversation.id);
     assert.equal(saved.messages.at(-1).content,done.content);

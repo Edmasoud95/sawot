@@ -10,6 +10,59 @@ function fakeFetch(status: number, body: unknown, capture: any[] = []): typeof f
   }) as typeof fetch;
 }
 
+test('Brave retains only trusted non-logo thumbnails on their own result', async () => {
+  const {voiceSearchSources} = await import('../src/search.js');
+  const client = new BraveSearchClient('key', fakeFetch(200, {web:{results:[
+    {url:'https://allegro.pl/oferta/one-123',thumbnail:{src:'https://imgs.search.brave.com/one',logo:false}},
+    {url:'https://allegro.pl/oferta/two-123',thumbnail:{src:'https://evil.test/two'}},
+    {url:'https://allegro.pl/oferta/three-123',thumbnail:{src:'https://imgs.search.brave.com/logo',logo:true}},
+  ]}}));
+  const results = await client.search('console',3);
+  const sources = voiceSearchSources('web_search',{results});
+  assert.equal(sources[0].thumbnail,'https://imgs.search.brave.com/one');
+  assert.equal(sources[1].thumbnail,undefined);
+  assert.equal(sources[2].thumbnail,undefined);
+});
+
+test('product searches exclude listings and make one targeted Allegro follow-up', async () => {
+  const queries: string[] = [];
+  const tools = buildSearchTools({search:async query => {
+    queries.push(query);
+    return queries.length === 1 ? [{title:'Sony headphones',url:'https://allegro.pl/listing?string=sony',description:'Sony XM5'}] : [
+      {title:'Sony',url:'https://allegro.pl/oferta/sony-123',description:''},
+      {title:'Unknown',url:'https://shop.example/unknown',description:''},
+    ];
+  }});
+  const result = await executeTool(tools,'web_search',{query:'Sony headphones site:allegro.pl',kind:'products'});
+  assert.equal(queries.length,2);
+  assert.match(queries[0],/site:allegro\.pl\/oferta/);
+  assert.match(queries[1],/site:allegro\.pl\/produkt/);
+  assert.deepEqual(result.results.map(r=>r.url),['https://allegro.pl/oferta/sony-123']);
+  assert.equal(result.productSearch,true);
+});
+
+test('an empty product search stops after one follow-up without returning listing links', async () => {
+  let searches=0;
+  const tools=buildSearchTools({search:async()=>{ searches++; return [{title:'Search',url:'https://allegro.pl/listing?string=console',description:''}]; }});
+  const result=await executeTool(tools,'web_search',{query:'console site:allegro.pl/oferta',kind:'products'});
+  assert.equal(searches,2);
+  assert.deepEqual(result.results,[]);
+  assert.match(result.instruction,/no.*individual|no.*direct/i);
+});
+
+test('Allegro searches default to direct products when the model omits kind', async () => {
+  const tools=buildSearchTools({search:async()=>[
+    {title:'Search',url:'https://allegro.pl/listing?string=console',description:''},
+    {title:'Console',url:'https://allegro.pl/oferta/console-123',description:''},
+  ]});
+  const result=await executeTool(tools,'web_search',{query:'Nintendo Switch site:allegro.pl'});
+  assert.equal(result.productSearch,true);
+  assert.equal(result.results.length,1);
+  const general=await executeTool(tools,'web_search',{query:'Allegro company news',kind:'general'});
+  assert.equal(general.productSearch,undefined);
+  assert.equal(general.results.length,2);
+});
+
 test("BraveSearchClient maps web results and sends the key as a header", async () => {
   const calls: any[] = [];
   const client = new BraveSearchClient("brv-1", fakeFetch(200, {

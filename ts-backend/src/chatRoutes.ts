@@ -63,6 +63,7 @@ export interface ChatCtx {
   searchTools: Tool[];
   ha: HomeAssistant | null;
   uploadDir: string;
+  thumbnailCacheDir?: string;
   /** Assistant name from config. */
   name: string;
   getEntitySummary: () => string;
@@ -104,7 +105,7 @@ async function maybeTitle(ctx: ChatCtx, conv: any, signal: AbortSignal): Promise
 }
 
 export function registerChatRoutes(app: FastifyInstance, ctx: ChatCtx): void {
-  registerLinkThumbnailRoute(app);
+  registerLinkThumbnailRoute(app, undefined, {cacheDir: ctx.thumbnailCacheDir});
   const privateDetail = "This conversation uses private memories. Choose a private provider or start a new chat.";
   // Persist the restriction separately from reply completion; cancellation and
   // concurrent draft saves must never make sensitive history public again.

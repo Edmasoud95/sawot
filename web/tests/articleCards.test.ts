@@ -69,8 +69,8 @@ test('malformed or unsafe product data never becomes shopping links', () => {
 });
 
 const selectedSearch = {tool:'web_search',phase:'complete',presentationVersion:1,sources:[
-  {id:'r1',url:'https://shop.example/one',title:'Selected product',read:false},
-  {id:'r2',url:'https://shop.example/two',title:'Unselected product',read:false},
+  {id:'r1',url:'https://shop.example/one',title:'Selected product',read:false,pageKind:'product'},
+  {id:'r2',url:'https://shop.example/two',title:'Unselected product',read:false,pageKind:'product'},
 ]};
 test('plain prose renders only selected server results, without model card markup', () => {
   const html=renderBody('This option fits your budget.', {...selectedSearch,presentations:[{kind:'products',ids:['r1']}]});
@@ -91,4 +91,26 @@ test('old card markup from a model falls back to known plain links in selection 
   const html=renderBody('```json\n'+JSON.stringify(old)+'\n```',{...selectedSearch,presentations:[]});
   assert.match(html,/href="https:\/\/shop.example\/one"/);assert.match(html,/Selected product/);
   assert.doesNotMatch(html,/chat-product-card|Invented title|Unselected product/);
+});
+
+test('shopping prose and selected cards cannot turn listing or invented URLs into product links', () => {
+  const listing='https://allegro.pl/listing?string=console';
+  const offer='https://allegro.pl/oferta/console-123';
+  const search={...selectedSearch,productSearch:true,sources:[
+    {id:'r1',url:listing,title:'Console search',read:false,pageKind:'listing'},
+    {id:'r2',url:offer,title:'Console offer',read:false,pageKind:'product'},
+  ],presentations:[{kind:'products',ids:['r1','r2']}]};
+  for (const text of [`[Console](${listing})`, `[Console][offer]\n\n[offer]: ${listing}`, listing, '[Invented](https://allegro.pl/oferta/made-up-999)']) {
+    const html=renderBody(text,search);
+    assert.doesNotMatch(html,/href="https:\/\/allegro.pl\/listing|href="https:\/\/allegro.pl\/oferta\/made-up/);
+    assert.match(html,/href="https:\/\/allegro.pl\/oferta\/console-123/);
+    assert.equal((html.match(/chat-product-card/g)??[]).length,1);
+  }
+});
+
+test('a blocked product with a search thumbnail retains its card and unverified label', () => {
+  const search={...selectedSearch,productSearch:true,sources:[{...selectedSearch.sources[0],blocked:true,thumbnail:'https://imgs.search.brave.com/console'}],presentations:[{kind:'products',ids:['r1']}]};
+  const html=renderBody('Search details only.',search);
+  assert.match(html,/chat-product-card/);
+  assert.match(html,/prices and availability are unverified/);
 });

@@ -1,5 +1,5 @@
 import { useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { API_BASE } from '../../lib/config';
+import { linkThumbnailUrl } from '../../lib/linkThumbnail';
 import { ChatLinkSources } from './ChatLink';
 import type { Product } from '../../lib/productCards';
 
@@ -11,7 +11,7 @@ async function thumbnail(url: string, signal: AbortSignal) {
   else active++;
   try {
     signal.throwIfAborted();
-    const response = await fetch(`${API_BASE}/api/chat/link-thumbnail?url=${encodeURIComponent(url)}`, { signal });
+    const response = await fetch(url, { signal });
     if (!response.ok) throw new Error('No article image');
     return await response.blob();
   } finally {
@@ -24,6 +24,7 @@ async function thumbnail(url: string, signal: AbortSignal) {
 export default function ArticleCard({ href, children, product }: { href: string; children: ReactNode; product?: Product }) {
   const sources = useContext(ChatLinkSources);
   const source = sources.find(item => item.url.split('#')[0] === href.split('#')[0]);
+  const thumbnailUrl = linkThumbnailUrl(href, source);
   const frame = useRef<HTMLSpanElement>(null);
   const [image, setImage] = useState<string>();
   const [failed, setFailed] = useState(false);
@@ -36,7 +37,7 @@ export default function ArticleCard({ href, children, product }: { href: string;
     const load = () => {
       if (started) return;
       started = true;
-      void thumbnail(href, controller.signal).then(blob => {
+      void thumbnail(thumbnailUrl, controller.signal).then(blob => {
         if (controller.signal.aborted) return;
         objectUrl = URL.createObjectURL(blob);
         setImage(objectUrl);
@@ -48,7 +49,7 @@ export default function ArticleCard({ href, children, product }: { href: string;
     if (observer) observer.observe(frame.current!);
     else load();
     return () => { observer?.disconnect(); controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [href]);
+  }, [thumbnailUrl]);
   return <a className={product ? 'chat-article-card chat-product-card' : 'chat-article-card'} href={href} target="_blank" rel="noopener noreferrer">
     <span ref={frame} className="chat-article-picture" data-state={failed ? 'failed' : image ? 'loaded' : 'loading'} aria-hidden="true">
       {image && !failed ? <img src={image} alt="" decoding="async" onError={() => setFailed(true)} /> :

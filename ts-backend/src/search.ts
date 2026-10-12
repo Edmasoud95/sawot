@@ -4,12 +4,15 @@ import type { IncomingMessage } from "node:http";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Tool } from "./tools.js";
+import { searchThumbnail } from './searchThumbnail.js';
+import { searchPageKind } from './resultPresentation.js';
 
 export interface SearchResult {
   title: string;
   url: string;
   description: string;
   favicon?: string;
+  thumbnail?: string;
 }
 
 function faviconMetadata(value: unknown): { favicon?: string } {
@@ -43,6 +46,8 @@ export function voiceSearchSources(tool: string, result: any) {
         read: !result.link_only && (tool === "fetch_page" || tool === "find_in_page"),
         ...(result.link_only ? { blocked: true } : {}),
         ...faviconMetadata(page.favicon),
+        ...(searchThumbnail(page.thumbnail) ? {thumbnail: searchThumbnail(page.thumbnail)} : {}),
+        ...(searchPageKind(url.href) !== 'unknown' ? {pageKind: searchPageKind(url.href)} : {}),
       }];
     } catch { return []; }
   });
@@ -107,6 +112,7 @@ export class BraveSearchClient implements SearchClient {
       url: String(r.url ?? ""),
       description: String(r.description ?? ""),
       ...faviconMetadata(r.profile?.img),
+      ...(r.thumbnail?.logo !== true && searchThumbnail(r.thumbnail?.src) ? {thumbnail: searchThumbnail(r.thumbnail.src)} : {}),
     }));
   }
 }
@@ -157,20 +163,32 @@ export function buildSearchTools(client: SearchClient, deps: SearchToolDeps = {}
     name: "web_search",
     description:
       "Search the web. Returns up to 8 results with title, url and a short " +
-      "description. Use it for current events and anything you are unsure about.",
+      "description. For shopping always set kind=products: returns only direct product/offer pages, with one targeted follow-up if needed. Use general search for news and other questions.",
     parameters: {
       type: "object",
       properties: {
         query: { type: "string", description: "Search query" },
         count: { type: "integer", description: "Number of results, 1 to 8 (default 5)" },
+        kind: {type: 'string', enum: ['general', 'products'], description: 'Use products when finding products to buy.'},
       },
       required: ["query"],
     },
     async handler(args) {
       const query = String(args.query ?? "").trim();
       if (!query) return { error: "query is required" };
-      const results = await client.search(query, clampCount(args.count));
-      return { results };
+      const allegro = /\ballegro(?:\.pl)?\b/i.test(query);
+      const products = args.kind === 'products' || args.kind !== 'general' && allegro;
+      if (!products) return {results: await client.search(query, clampCount(args.count))};
+      const base = allegro ? query.replace(/site:(?:www\.)?allegro\.pl(?:\/\S*)?/gi, '').replace(/\ballegro(?:\.pl)?\b/gi, '').trim() : query;
+      const first = allegro ? `${base} site:allegro.pl/oferta` : query;
+      let results = (await client.search(first, clampCount(args.count))).filter(result => searchPageKind(result.url) === 'product');
+      if (!results.length) {
+        const followUp = allegro ? `${base} site:allegro.pl/produkt` : `${base} (inurl:product OR inurl:oferta OR inurl:dp)`;
+        results = (await client.search(followUp, clampCount(args.count))).filter(result => searchPageKind(result.url) === 'product');
+      }
+      return {results, productSearch: true, instruction: results.length
+        ? 'These are individual product links from the search index. Prices and availability are unverified until the page is read. Select relevant IDs with present_results.'
+        : 'No individual product links were found after a targeted follow-up. Tell the user; do not substitute search/category pages or invent offer URLs.'};
     },
   };
   const lookup = deps.lookup ?? defaultLookup;

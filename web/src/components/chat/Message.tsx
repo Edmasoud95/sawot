@@ -15,7 +15,7 @@ import ThinkingBlock from "./ThinkingBlock";
 import ToolChip from "./ToolChip";
 import MessageActions from "./MessageActions";
 import ChatSources from "./ChatSources";
-import ChatLink, { ChatLinkSources } from "./ChatLink";
+import ChatLink, { ChatLinkSources, ProductSearchLinks } from "./ChatLink";
 import ArticleCard from "./ArticleCard";
 import SelectedResults from "./SelectedResults";
 import ProductCards from "./ProductCards";
@@ -159,6 +159,7 @@ export const Markdown = memo(function Markdown({ children, streaming = false, se
     <div className="chat-md text-[1rem] font-light leading-relaxed text-zinc-200">
       <SelectedCardsMode.Provider value={search?.presentationVersion !== 1 ? 'legacy' : search.presentations?.length ? 'selected' : 'unselected'}>
       <ChatLinkSources.Provider value={search ? updateVoiceSearch(null, { ...search, phase: "complete" })?.sources ?? [] : []}>
+      <ProductSearchLinks.Provider value={!!search?.productSearch || !!search?.presentations?.some(group => group.kind === 'products')}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, [remarkChatMermaid, { streaming }]]}
         rehypePlugins={[[rehypeArticleCards, { streaming, enabled: search?.presentationVersion !== 1 }], rehypeChatCodeLanguages, [rehypeHighlight, { plainText: ["mermaid", "charts_widget_v2", "product_cards_v1"] }]]}
@@ -166,6 +167,7 @@ export const Markdown = memo(function Markdown({ children, streaming = false, se
       >
         {children}
       </ReactMarkdown>
+      </ProductSearchLinks.Provider>
       </ChatLinkSources.Provider>
       </SelectedCardsMode.Provider>
     </div>

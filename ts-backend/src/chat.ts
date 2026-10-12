@@ -108,6 +108,16 @@ export class ChatStore {
     try {
       const conv = JSON.parse(readFileSync(p, "utf8"));
       conv.messages = (conv.messages ?? []).filter((m: any) => !m.command);
+      // Older conversations predate URL classification. Derive it on read so
+      // saved direct-product cards survive the stricter presentation rules.
+      for (const message of conv.messages) {
+        if (!Array.isArray(message.search?.sources)) continue;
+        for (const source of message.search.sources) {
+          if (!source || typeof source.url !== 'string') continue;
+          const kind = searchPageKind(source.url);
+          if (kind !== 'unknown' || source.pageKind !== undefined) source.pageKind = kind;
+        }
+      }
       conv.homeAssistant = Boolean(conv.homeAssistant);
       conv.webSearch = conv.webSearch !== false;
       conv.python = conv.python !== false;
@@ -265,10 +275,10 @@ export async function* runChat(
   const selectable = tools.some(tool => tool.name === 'web_search');
   let presentations: { kind: 'products' | 'news'; ids: string[] }[] = [];
   let productSelectionRequested = false;
-  const presentationState = () => selectable ? { presentationVersion: 1, presentations } : {};
+  const presentationState = () => selectable ? { presentationVersion: 1, presentations, ...(productSelectionRequested ? {productSearch: true} : {}) } : {};
   if (selectable) tools = [...tools, {
     name: 'present_results',
-    description: 'Show only the chosen search results as product or news cards. Choose their short result IDs, such as r1 and r3. The app supplies all card details. Blocked pages become plain links. No card JSON in your answer.',
+    description: 'Show only the chosen search results as product or news cards. Choose their short result IDs, such as r1 and r3. The app supplies all card details. Blocked pages use search details only; prices and availability are unverified. No card JSON in your answer.',
     parameters: { type: 'object', properties: { kind: {type: 'string', enum: ['products', 'news']}, ids: {type: 'array', items: {type: 'string'}, minItems: 1, maxItems: 12} }, required: ['kind', 'ids'], additionalProperties: false },
     handler: async args => {
       if (!args || !['products', 'news'].includes(args.kind) || !Array.isArray(args.ids) || !args.ids.length || args.ids.length > 12 ||
@@ -277,9 +287,9 @@ export async function* runChat(
       const ids = [...new Set<string>(args.ids)];
       if (args.kind === 'products') {
         productSelectionRequested = true;
-        const rejected = [...sources.values()].filter(source => ids.includes(source.id) && searchPageKind(source.url) === 'listing');
+        const rejected = [...sources.values()].filter(source => ids.includes(source.id) && searchPageKind(source.url) !== 'product');
         if (rejected.length) return {
-          error: 'These IDs link to search or category pages, not individual products. Products mentioned in their snippets are not the linked page. Choose relevant direct_product_ids, or search for individual product pages. Do not present listing pages as products.',
+          error: 'These IDs are search/category pages or unknown page types, not confirmed individual product routes. Products mentioned in their snippets are not the linked page. Choose relevant direct_product_ids, or call web_search with kind products. Do not present listing pages as products.',
           rejected_ids: rejected.map(source => source.id),
           direct_product_ids: [...sources.values()].filter(source => searchPageKind(source.url) === 'product').map(source => source.id),
         };
@@ -296,7 +306,7 @@ export async function* runChat(
   // A failed final inference must not discard sources already retrieved. Only
   // use this turn's source registry, never URLs from malformed model output.
   function* finishWithSources(reason: string): Generator<[string, any]> {
-    const all = [...sources.values()].filter(source => !productSelectionRequested || searchPageKind(source.url) !== 'listing');
+    const all = [...sources.values()].filter(source => !productSelectionRequested || searchPageKind(source.url) === 'product');
     const selectedIds = new Set(presentations.flatMap(group => group.ids));
     const selected = all.filter(source => selectedIds.has(source.id));
     const blocked = all.filter(source => source.blocked);
@@ -487,6 +497,7 @@ export async function* runChat(
         }
       }
       if (webTool) {
+        if (c.name === 'web_search' && (args?.kind === 'products' || result?.productSearch === true)) productSelectionRequested = true;
         for (const source of voiceSearchSources(c.name, result)) {
           const previous = sources.get(source.url);
           if (!previous && sources.size >= 40) continue;
@@ -497,11 +508,12 @@ export async function* runChat(
         if (c.name === 'web_search' && Array.isArray(result?.results)) result = { ...result, results: result.results.map((page: any) => {
           let id: string | undefined;
           try { const url = new URL(page.url); url.hash = ''; id = sources.get(url.href)?.id; } catch { /* Invalid results cannot be selected. */ }
-          return {...page, id, page_kind: searchPageKind(page.url)};
+          const {thumbnail: _thumbnail, ...details} = page;
+          return {...details, id, page_kind: searchPageKind(page.url)};
         }) };
         yield ["search", { tool: c.name, phase: result?.error ? "error" : "complete", sources: [...sources.values()], ...presentationState() }];
       }
-      if (c.name === 'present_results' && !result?.error) yield ['search', {tool: 'web_search', phase: 'complete', sources: [...sources.values()], ...presentationState()}];
+      if (c.name === 'present_results') yield ['search', {tool: 'web_search', phase: 'complete', sources: [...sources.values()], ...presentationState()}];
       const resultJson = JSON.stringify(result);
       yield ["debug", { event: "tool_result", data: { name: c.name, ok: !(result && typeof result === "object" && "error" in result),
         latency_ms: Math.round(performance.now() - toolStart), size_chars: resultJson.length, result: memoryTool ? "[memory result redacted]" : resultJson.slice(0, 600) } }];

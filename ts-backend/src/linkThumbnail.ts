@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { fetchPublic } from './publicFetch.js';
+import { ThumbnailCache, rasterTypes, type ThumbnailCacheOptions } from './thumbnailCache.js';
+import { searchThumbnail } from './searchThumbnail.js';
 
 function decode(value: string) {
   return value.replace(/&(?:amp|quot|apos|lt|gt|#\d+|#x[\da-f]+);/gi, entity => {
@@ -52,12 +54,20 @@ export function thumbnailUrl(html: string, base: string): string | null {
   return null;
 }
 
-export function registerLinkThumbnailRoute(app: FastifyInstance, fetcher = fetchPublic) {
+export function registerLinkThumbnailRoute(app: FastifyInstance, fetcher = fetchPublic, options: ThumbnailCacheOptions = {}) {
   type Image = { data: Buffer; type: string };
   const cache = new Map<string, { until: number; image: Image | null }>();
   const pending = new Map<string, Promise<Image | null>>();
-  const raster = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
-  async function load(url: string): Promise<Image | null> {
+  const disk = options.cacheDir ? new ThumbnailCache(options.cacheDir, options.maxBytes) : undefined;
+  const raster = new Set(rasterTypes);
+  const sweep = () => disk?.sweep().catch(() => { app.log.warn('Thumbnail cache cleanup failed'); });
+  let cleanup: ReturnType<typeof setInterval> | undefined;
+  app.addHook('onReady', async () => {
+    await sweep();
+    if (disk) { cleanup = setInterval(() => { void sweep(); }, 3600_000); cleanup.unref(); }
+  });
+  app.addHook('onClose', async () => { clearInterval(cleanup); await sweep(); });
+  async function load(url: string, direct?: string, pageBlocked = false): Promise<Image | null> {
     const deadlineMs = performance.now() + 6000;
     const signal = AbortSignal.timeout(6000);
     async function read(destination: string, image: boolean) {
@@ -71,13 +81,20 @@ export function registerLinkThumbnailRoute(app: FastifyInstance, fetcher = fetch
       } finally { result.close(); }
     }
     try {
+      if (direct) {
+        try { return await read(direct, true); } catch { /* Fall back to page metadata. */ }
+      }
+      if (pageBlocked) return null;
       const page = await read(url, false);
       const image = thumbnailUrl(page.data.toString('utf8'), page.url);
       return image ? await read(image, true) : null;
     } catch { return null; }
   }
   app.get('/api/chat/link-thumbnail', async (request, reply) => {
-    const raw = (request.query as { url?: unknown }).url;
+    const query = request.query as { url?: unknown; image?: unknown; pageBlocked?: unknown };
+    const raw = query.url;
+    const direct = searchThumbnail(query.image);
+    if (query.image !== undefined && !direct) return reply.code(400).send();
     if (typeof raw !== 'string' || raw.length > 8192) return reply.code(400).send();
     let url: string;
     try {
@@ -86,21 +103,33 @@ export function registerLinkThumbnailRoute(app: FastifyInstance, fetcher = fetch
       parsed.hash = '';
       url = parsed.href;
     } catch { return reply.code(400).send(); }
-    const saved = cache.get(url);
+    const pageBlocked = query.pageBlocked === 'true';
+    const key = JSON.stringify([url, direct ?? '', pageBlocked]);
+    const saved = cache.get(key);
     let image = saved && saved.until > Date.now() ? saved.image : undefined;
     if (image === undefined) {
-      let task = pending.get(url);
+      let task = pending.get(key);
       if (!task) {
         if (pending.size >= 4) return reply.code(429).send();
-        task = load(url);
-        pending.set(url, task);
+        task = (async () => {
+          try { const stored = await disk?.get(key); if (stored) return stored; }
+          catch { app.log.warn('Thumbnail cache read failed'); }
+          const loaded = await load(url, direct, pageBlocked);
+          if (loaded) {
+            try { await disk?.put(key, loaded); } catch { app.log.warn('Thumbnail cache write failed'); }
+          }
+          return loaded;
+        })();
+        pending.set(key, task);
       }
       image = await task;
-      pending.delete(url);
-      cache.delete(url);
+      pending.delete(key);
+      cache.delete(key);
       // At most 16 images of 2 MiB each, including negative results.
       while (cache.size >= 16) cache.delete(cache.keys().next().value!);
-      cache.set(url, { image, until: Date.now() + 5 * 60_000 });
+      // Disk hits must update LRU and obey expiry; memory is only a fallback
+      // when disk caching is disabled. Negative results never persist to disk.
+      if (!disk || !image) cache.set(key, { image, until: Date.now() + 5 * 60_000 });
     }
     reply.header('Cache-Control', 'private, max-age=300').header('X-Content-Type-Options', 'nosniff');
     return image ? reply.type(image.type).send(image.data) : reply.code(404).send();

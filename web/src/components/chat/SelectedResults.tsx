@@ -10,10 +10,11 @@ export default function SelectedResults({ search }: { search?: VoiceSearch | nul
   if (!safe?.presentations?.length) return null;
   return <div className="chat-md"><ChatLinkSources.Provider value={safe.sources}>
     {safe.presentations.map(group => {
-      const selected = group.ids.map(id => safe.sources.find(source => source.id === id)!);
-      const readable = selected.filter(source => !source.blocked);
-      const blocked = selected.filter(source => source.blocked);
+      const selected = group.ids.map(id => safe.sources.find(source => source.id === id)!).filter(source => group.kind !== 'products' || source.pageKind === 'product');
+      const readable = selected.filter(source => !source.blocked || source.thumbnail);
+      const blocked = selected.filter(source => source.blocked && !source.thumbnail);
       return <section key={group.kind} aria-label={group.kind === 'products' ? 'Selected products' : 'Selected articles'}>
+        {group.kind === 'products' && selected.some(source => !source.read) && <p className="text-xs text-zinc-500">Search results; prices and availability are unverified.</p>}
         {group.kind === 'products' ? readable.length > 0 && <ProductCards products={{title: 'Products', items: readable.map(source => ({title: source.title, url: source.url}))}} /> :
           readable.map(source => <ArticleCard key={source.id} href={source.url}>{source.title}</ArticleCard>)}
         {blocked.map(source => <p key={source.id}><ChatLink href={source.url}>{source.title}</ChatLink></p>)}

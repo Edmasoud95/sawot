@@ -4,6 +4,19 @@ Object.defineProperty(globalThis, "localStorage", { value: { getItem: () => null
 const { useVoiceStore } = await import("../src/store.ts");
 const source = { url: "https://example.com/article", title: "Article", read: false };
 
+test('thumbnail provenance and product-search mode survive updates and saved-chat reload', async () => {
+  const {updateVoiceSearch}=await import('../src/lib/voiceSearch.ts');
+  const thumbnail='https://imgs.search.brave.com/product';
+  let state=updateVoiceSearch(null,{tool:'web_search',phase:'complete',productSearch:true,sources:[{...source,thumbnail,pageKind:'product'}]} as any);
+  state=updateVoiceSearch(state,{tool:'fetch_page',phase:'complete',sources:[{...source,blocked:true}]} as any);
+  state=updateVoiceSearch(null,JSON.parse(JSON.stringify(state)));
+  assert.equal(state?.sources[0].thumbnail,thumbnail);
+  assert.equal(state?.sources[0].pageKind,'product');
+  assert.equal(state?.productSearch,true);
+  const unsafe=updateVoiceSearch(null,{tool:'web_search',phase:'complete',sources:[{...source,thumbnail:'https://untrusted.example/image'}]} as any);
+  assert.equal(unsafe?.sources[0].thumbnail,undefined);
+});
+
 test("sources accumulate across searches, deduplicate pages and preserve Read status", () => {
   const s = useVoiceStore.getState();
   assert.equal(typeof s.showSearch, "function", "store must consume product search events");

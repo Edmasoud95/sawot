@@ -234,6 +234,7 @@ async function main() {
     searchTools,
     ha,
     uploadDir: join(dataDir, "data", "uploads"),
+    thumbnailCacheDir: join(dataDir, 'data', 'cache', 'thumbnails'),
     name: config.assistantName,
     getEntitySummary: () => summary,
     getChatInstructions: () => state.chatInstructions,
